@@ -442,6 +442,9 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .dr-kommentar { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text) !important; opacity: .8; }
 .pille.rot { color: var(--rot); background: rgba(255,107,107,.14); }
 .pille.leise { color: var(--leise); background: var(--flaeche-hover); }
+.dr-steckdose { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dr-aus .knopf { margin-top: 12px; }
+.dreher.klein { width: 14px; height: 14px; border-width: 2px; display: inline-block; vertical-align: -2px; }
 .dr-foto-gross { width: 100%; border-radius: 14px; margin-top: 8px; border: 1px solid var(--rand); }
 .rot-hinweis { color: #ffc2c2; background: rgba(255,107,107,.12); border-color: rgba(255,107,107,.4); }
 .mobil .dr-werte { grid-template-columns: repeat(3, minmax(0, 1fr)); }

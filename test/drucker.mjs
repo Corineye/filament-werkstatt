@@ -51,6 +51,24 @@ await a.waitForTimeout(800);
 pruefe((await el(a).locator(".haupt").textContent()).includes("Drucker ist aus"), "Steckdose aus wird erkannt");
 await a.screenshot({ path: `${out}/d3-aus.png` });
 
+// Einschalten mit Nachfrage
+await el(a).locator('[data-aktion="dr-schalten"][data-ziel="an"]').first().click();
+await a.waitForTimeout(300);
+await a.screenshot({ path: `${out}/d7-einschalten-frage.png` });
+await el(a).locator('[data-aktion="dr-schalten-ok"]').click();
+await a.waitForTimeout(1800);
+pruefe((await a.evaluate(() => window.dienste)).join() === "switch.turn_on:switch.3d_drucker", "Einschalten ruft switch.turn_on auf");
+pruefe((await el(a).locator(".haupt").textContent()).includes("Drucker startet"), "Nach dem Einschalten: Drucker startet");
+
+// Ausschalten während eines Drucks warnt
+await el(p).locator('[data-aktion="dr-schalten"][data-ziel="aus"]').click();
+await p.waitForTimeout(300);
+const warnung = await el(p).locator(".dialog").textContent();
+pruefe(warnung.includes("es läuft ein Druck") && warnung.includes("219 °C heiß"), "Ausschalten warnt bei laufendem Druck und heißer Düse");
+await p.screenshot({ path: `${out}/d8-ausschalten-warnung.png` });
+await el(p).locator('.dialog [data-aktion="dialog-zu"]').click();
+pruefe((await p.evaluate(() => window.dienste)).length === 0, "Abbrechen schaltet nichts");
+
 // Handy
 const m = await seite(390, 844, "druckt");
 await el(m).locator('.nav-unten [data-id="drucker"]').click();

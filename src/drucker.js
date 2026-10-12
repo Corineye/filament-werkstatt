@@ -188,7 +188,8 @@ const DruckerAnsicht = {
         : zustand === "startet" ? ["Drucker startet …", "Die Steckdose ist an. Der Drucker meldet sich meist nach 15–30 Sekunden. Bis dahin sind die Werte vom letzten Druck."]
         : ["Drucker nicht erreichbar", "Home Assistant bekommt gerade keine Werte vom Drucker (Bambu-Cloud oder WLAN)."];
       html += `<div class="dr-karte dr-aus"><div class="dr-aus-icon">${zustand === "startet" ? '<span class="dreher"></span>' : "⏻"}</div>
-        <div><h2>${text[0]}</h2><p class="leise">${text[1]}</p></div></div>`;
+        <div><h2>${text[0]}</h2><p class="leise">${text[1]}</p>
+          ${zustand === "aus" && this._drId("schalter", true) ? this._drSchaltKnopf("an") : ""}</div></div>`;
     } else {
       const [statusText, statusFarbe] = DR_STATUS[zustand] || [zustand, "leise"];
       const schritt = this._drW("schritt");
@@ -248,7 +249,8 @@ const DruckerAnsicht = {
       <div><span>Jetzt</span><strong>${w == null ? "–" : `${zahl(w, w < 10 ? 1 : 0)} W`}</strong></div>
       <div><span>Heute</span><strong>${this._drZ("heute", true) == null ? "–" : `${zahl(this._drZ("heute", true), 2)} kWh`}</strong></div>
       <div><span>Diesen Monat</span><strong>${this._drZ("monat", true) == null ? "–" : `${zahl(this._drZ("monat", true), 2)} kWh`}</strong></div>
-    </div><p class="leise klein">Steckdose: ${this._drW("schalter", true) === "on" ? "an" : this._drW("schalter", true) === "off" ? "aus" : "nicht gefunden"}</p></div>`;
+    </div><div class="dr-steckdose"><span class="leise klein">Steckdose: ${this._drW("schalter", true) === "on" ? "an" : this._drW("schalter", true) === "off" ? "aus" : "nicht gefunden"}</span>
+      ${this._drId("schalter", true) ? this._drSchaltKnopf(this._drW("schalter", true) === "on" ? "aus" : "an") : ""}</div></div>`;
 
     // Drucker-Infos
     const wlan = this._drZ("wlan");
@@ -377,8 +379,70 @@ const DruckerAnsicht = {
         <button class="knopf" data-aktion="dr-kommentar-speichern">Speichern</button></div>`;
   },
 
+  // ---- Steckdose schalten (immer mit Nachfrage) --------------------------
+  _drSchaltKnopf(ziel) {
+    if (this._drSchaltet) return `<button class="knopf leise klein-knopf" disabled><span class="dreher klein"></span> Schaltet …</button>`;
+    return ziel === "an"
+      ? `<button class="knopf klein-knopf" data-aktion="dr-schalten" data-ziel="an">⏻ Einschalten</button>`
+      : `<button class="knopf rot-knopf klein-knopf" data-aktion="dr-schalten" data-ziel="aus">⏻ Ausschalten</button>`;
+  },
+
+  _drSchaltDialogHtml() {
+    const an = this._drSchaltZiel === "an";
+    if (an) {
+      return `<h2>Drucker einschalten?</h2>
+        <p class="leise">Die Steckdose „${esc(DR_STECKDOSE)}“ wird eingeschaltet. Der Drucker meldet sich nach etwa 15–30 Sekunden.</p>
+        <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
+          <button class="knopf" data-aktion="dr-schalten-ok">Einschalten</button></div>`;
+    }
+    const status = this._drZustand();
+    const druckt = ["running", "pause", "prepare", "slicing"].includes(status);
+    const duese = this._drZ("duese");
+    const heiss = duese != null && duese > 50;
+    return `<h2>Drucker ausschalten?</h2>
+      ${druckt ? `<div class="hinweis rot-hinweis"><strong>Achtung, es läuft ein Druck.</strong> Ausschalten bricht ihn sofort ab und er ist verloren.</div>` : ""}
+      ${heiss ? `<div class="hinweis amber">Die Düse ist noch ${zahl(duese)} °C heiß. Der Hotend-Lüfter braucht Strom, um sie abzukühlen. Besser warten, bis sie unter 50 °C ist, sonst kann das Filament im Hotend verstopfen.</div>` : ""}
+      ${!druckt && !heiss ? `<p class="leise">Die Steckdose „${esc(DR_STECKDOSE)}“ wird ausgeschaltet. Es läuft kein Druck und die Düse ist kalt.</p>` : ""}
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
+        <button class="knopf rot-knopf" data-aktion="dr-schalten-ok">${druckt ? "Trotzdem ausschalten" : "Ausschalten"}</button></div>`;
+  },
+
+  async _drSchalten() {
+    const id = this._drId("schalter", true);
+    const ziel = this._drSchaltZiel;
+    this._dialog = null;
+    this._drSchaltet = true;
+    this._zeichnen();
+    try {
+      await this._hass.callService("switch", ziel === "an" ? "turn_on" : "turn_off", { entity_id: id });
+    } catch (e) {
+      this._drSchaltet = false;
+      this._toast(`Schalten hat nicht geklappt: ${e.message || e}`);
+      return;
+    }
+    // Warten, bis Home Assistant den neuen Zustand meldet (meist ca. 3 s)
+    const soll = ziel === "an" ? "on" : "off";
+    const start = Date.now();
+    const pruefen = () => {
+      if (this._drW("schalter", true) === soll) {
+        this._drSchaltet = false;
+        this._toast(ziel === "an" ? "Steckdose ist an. Der Drucker startet." : "Steckdose ist aus.");
+        return;
+      }
+      if (Date.now() - start > 15000) {
+        this._drSchaltet = false;
+        this._toast("Die Steckdose hat nicht geantwortet. Bitte in Home Assistant prüfen.");
+        return;
+      }
+      setTimeout(pruefen, 500);
+    };
+    setTimeout(pruefen, 500);
+  },
+
   _drKlick(a, el) {
     switch (a) {
+      case "dr-schalten": this._drSchaltZiel = el.dataset.ziel; this._dialog = "dr-schalten"; break;
+      case "dr-schalten-ok": this._drSchalten(); return;
       case "dr-live": this._drLive = !this._drLive; break;
       case "dr-alle": this._drAlle = !this._drAlle; break;
       case "dr-neu-laden": this._drVerlauf = null; this._drVerlaufLaden(); break;

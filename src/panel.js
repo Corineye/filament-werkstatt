@@ -1248,6 +1248,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   // ---- Dialoge ------------------------------------------------------------
   _dialogHtml() {
     if (!this._dialog) return "";
+    if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
     if (this._dialog === "dr-druck") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr"></div><div class="dialog" role="dialog" data-einmal="dialog-dr">${this._drDialogHtml()}</div>`;
     const r = this._rolle();
     let inhalt = "";

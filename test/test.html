@@ -51,7 +51,16 @@ const drucke = [
 ];
 const speicher = {};
 window.wsLog = [];
-window.hass = { states, callWS: async (m) => {
+window.dienste = [];
+window.hass = { states, callService: async (domain, dienst, data) => {
+  dienste.push(`${domain}.${dienst}:${data.entity_id}`);
+  setTimeout(() => {
+    const neu = { ...window.hass.states };
+    neu[data.entity_id] = { ...neu[data.entity_id], state: dienst === "turn_on" ? "on" : "off" };
+    window.hass = { ...window.hass, states: neu };
+    window.el.hass = window.hass;
+  }, 600);
+}, callWS: async (m) => {
   wsLog.push(m.type + (m.key ? ":" + m.key : ""));
   if (m.type === "frontend/get_user_data") return { value: speicher[m.key] ? JSON.parse(speicher[m.key]) : null };
   if (m.type === "frontend/set_user_data") { speicher[m.key] = JSON.stringify(m.value); return null; }
