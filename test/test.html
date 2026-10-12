@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;height:100%;background:#000}</style></head><body>
+<script>
+// Nachgebautes Home Assistant: nur das, was die Seite benutzt
+const P = "sensor.p1s_01p00c572701906_";
+const states = {};
+["druckstatus","name_der_aufgabe","gewicht_des_drucks","drucklange","zieltemperatur_der_duse","zieltemperatur_vom_druckbett","startzeit","druckfortschritt","dusengrosse","temperatur_der_duse","druckbetttemperatur"].forEach(s => states[P+s] = {state: s === "druckstatus" ? "idle" : "0"});
+states["camera.p1s_01p00c572701906_kamera"] = {state: "idle"};
+const speicher = {};
+window.wsLog = [];
+window.hass = { states, callWS: async (m) => {
+  wsLog.push(m.type + (m.key ? ":" + m.key : ""));
+  if (m.type === "frontend/get_user_data") return { value: speicher[m.key] ? JSON.parse(speicher[m.key]) : null };
+  if (m.type === "frontend/set_user_data") { speicher[m.key] = JSON.stringify(m.value); return null; }
+  if (m.type === "todo/item/list") return { items: [{summary: "Druck · 12.10.2026 21:15"}] };
+  if (m.type === "media_source/browse_media") return { children: [{title: "Grundriss.png"}] };
+  throw new Error("unbekannt " + m.type);
+}};
+window.speicher = speicher;
+</script>
+<script type="module">
+await import("../filament-werkstatt.js");
+const el = document.createElement("filament-werkstatt-panel");
+el.style.height = "100vh";
+document.body.appendChild(el);
+el.narrow = window.innerWidth < 870;
+el.hass = window.hass;
+window.el = el;
+</script></body></html>
