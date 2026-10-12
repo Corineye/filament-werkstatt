@@ -313,4 +313,31 @@ select.text option { background: #111816; }
 .neu-spule .text { margin: 0; }
 .oben-abstand { margin-top: 16px; }
 .dialog .chips { margin-top: 10px; }
+
+/* Inventar */
+.inv-stats { grid-template-columns: repeat(4, 1fr); }
+.mobil .inv-stats { grid-template-columns: repeat(2, 1fr); }
+.mobil .inv-stats .stat:nth-child(n+3) { display: flex; }
+.kats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 18px; }
+.mobil .kats { display: flex; overflow-x: auto; gap: 8px; padding-bottom: 4px; scrollbar-width: none; }
+.kat { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 16px; background: var(--flaeche); border: 1px solid var(--rand); }
+.mobil .kat { flex: none; min-width: 132px; }
+.kat:hover { background: var(--flaeche-hover); }
+.kat.an { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.kat-icon { font-size: 20px; }
+.kat strong { font-size: 14px; }
+.kat small { font-size: 11px; color: var(--leise); }
+.teil-bild { height: 64px; margin-bottom: 8px; display: flex; align-items: center; }
+.teil-svg { height: 100%; width: auto; max-width: 100%; display: block; }
+.teil-svg.gross { width: 100%; height: auto; max-height: 200px; }
+.zeichnung { padding: 12px; border-radius: 16px; background: rgba(0,0,0,.25); border: 1px solid var(--rand); margin-bottom: 12px;
+  background-image: linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px); background-size: 12px 12px; }
+.teil-kopf-bild { width: 84px; height: 48px; flex: none; display: flex; align-items: center; }
+.kachel.wenig { border-color: rgba(255,107,107,.5); }
+.rot-badge { color: var(--rot) !important; background: rgba(255,107,107,.14) !important; }
+.passend-titel { margin-top: 24px; }
+.ohne-rand { border-top: none; }
+.formular-zeile { display: grid; gap: 6px; font-size: 13px; color: var(--leise); margin-top: 12px; }
+.mengen-knoepfe { justify-content: space-between; }
+.mengen-knoepfe .rund { flex: 1; height: 40px; }
 `;

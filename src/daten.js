@@ -5,7 +5,7 @@
 // Oberfläche anders eingefärbt, bis Corin sie übernimmt oder ändert.
 // ---------------------------------------------------------------------------
 
-const DATEN_VERSION = 2;
+const DATEN_VERSION = 3;
 
 // Leergewicht der Spulen in Gramm (Blatt „Tabelle2“)
 // Ändert sich das Gewicht einer Spule, gilt es für alle Rollen, die diese Spule nutzen.
@@ -210,6 +210,7 @@ function standardDaten() {
     spulen: JSON.parse(JSON.stringify(SPULEN)),
     materialien_eigen: [],
     arten_eigen: {},
+    inventar: standardInventar(),
   };
 }
 
@@ -219,6 +220,7 @@ function migrieren(d) {
     d.rollen.forEach((r) => { r.vorschlag = { ...richtwerteFuer(r.material, r.art), ...r.vorschlag }; });
     d.spulen.forEach((s) => { const std = SPULEN.find((x) => x.id === s.id); if (!s.hersteller) s.hersteller = std ? std.hersteller : s.name; });
   }
+  if (!d.inventar) d.inventar = standardInventar();
   if (!d.materialien_eigen) d.materialien_eigen = [];
   if (!d.arten_eigen) d.arten_eigen = {};
   d.version = DATEN_VERSION;

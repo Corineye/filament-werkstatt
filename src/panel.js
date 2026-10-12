@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -15,7 +15,7 @@ const DRUCKER_SENSOREN = [
 
 const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
-  { id: "inventar", name: "Inventar", icon: "🔩", bald: true },
+  { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️", bald: true },
   { id: "hilfe", name: "Hilfe", icon: "💡", bald: true },
   { id: "system", name: "System", icon: "⚙️" },
@@ -107,6 +107,11 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._mobil = false;
     this._narrow = false;
     this._check = null;
+    this._invF = { kat: "", gewinde: "", status: "" };
+    this._invSort = "kategorie";
+    this._invSuche = "";
+    this._invOffen = null;
+    this._invNeu = null;
   }
 
   // ---- Home Assistant -----------------------------------------------------
@@ -188,8 +193,15 @@ class FilamentWerkstattPanel extends HTMLElement {
   _toast(text) {
     this._toastText = text;
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { this._toastText = null; this._zeichnen(); }, 2600);
+    this._toastTimer = setTimeout(() => this._toastWeg(), 2600);
     this._zeichnen();
+  }
+
+  // Nur die Meldung entfernen, nicht neu zeichnen (sonst gehen Eingaben verloren)
+  _toastWeg() {
+    this._toastText = null;
+    const t = this.shadowRoot.querySelector(".toast");
+    if (t) t.remove();
   }
 
   // ---- Hilfsfunktionen ----------------------------------------------------
@@ -292,6 +304,13 @@ class FilamentWerkstattPanel extends HTMLElement {
     const el = e.target.closest("[data-aktion]");
     if (!el) return;
     const a = el.dataset.aktion;
+    if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
+    if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
+      const k = el.dataset.k;
+      this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k);
+      this._zeichnen();
+      return;
+    }
     const rolle = this._rolle();
     switch (a) {
       case "menue":
@@ -300,6 +319,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       case "ansicht":
         if (el.dataset.bald) { this._toast("Kommt in einem der nächsten Schritte."); return; }
         this._ansicht = el.dataset.id;
+        this._filterAuf = false;
         if (this._ansicht === "system") this._systemcheck();
         break;
       case "alle":
@@ -316,7 +336,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._rechner = null;
         this._sheetScroll = 0;
         break;
-      case "neu": this._neuStarten(); break;
+      case "neu": this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
       case "tab":
         if (this._tab === "rest" && this._rechnerGeaendert()) this._toast(this._restSpeichern(false));
@@ -446,6 +466,11 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _schliessen() {
     if (this._dialog) { this._dialog = null; return true; }
+    if (this._modus === "inv-neu" && !confirm("Neues Teil verwerfen?")) return false;
+    if (this._modus === "inv-detail" || this._modus === "inv-neu") {
+      this._modus = null; this._invOffen = null; this._invNeu = null; this._offeneZeilen.clear();
+      return true;
+    }
     if (this._modus === "neu") {
       if (!confirm("Neues Filament verwerfen?")) return false;
     } else if (this._bearbeiten) {
@@ -453,7 +478,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     } else if (this._tab === "rest" && this._rechnerGeaendert()) {
       this._toastText = this._restSpeichern(false);
       clearTimeout(this._toastTimer);
-      this._toastTimer = setTimeout(() => { this._toastText = null; this._zeichnen(); }, 2600);
+      this._toastTimer = setTimeout(() => this._toastWeg(), 2600);
     }
     this._modus = null; this._offen = null; this._neu = null;
     this._bearbeiten = false; this._entwurf = null; this._rechner = null; this._offeneZeilen.clear();
@@ -524,6 +549,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _eingabe(e) {
     const t = e.target;
+    if (this._invEingabe(t)) return;
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -549,6 +575,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _aenderung(e) {
     const t = e.target;
+    if (this._invAenderung(t)) return;
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -606,6 +633,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (slider) { const s = this.shadowRoot.querySelector(`[data-rechner="${k}"]`); if (s) s.value = v; }
     const erg = this.shadowRoot.getElementById("r-ergebnis");
     if (erg) erg.innerHTML = this._rechnerErgebnisHtml();
+    const verwerfen = this.shadowRoot.querySelector('[data-aktion="rest-verwerfen"]');
+    if (verwerfen) verwerfen.disabled = !this._rechnerGeaendert();
     if (k === "nenn_g") this.shadowRoot.querySelectorAll("[data-aktion=groesse-wahl]").forEach((c) => c.classList.toggle("an", Number(c.dataset.g) === v));
   }
 
@@ -645,16 +674,17 @@ class FilamentWerkstattPanel extends HTMLElement {
     const sheet = root.querySelector(".sheet-inhalt");
     const scrollHaupt = haupt ? haupt.scrollTop : 0;
     if (sheet) this._sheetScroll = sheet.scrollTop;
-    const fokusSuche = root.activeElement && root.activeElement.id === "suche";
+    const fokusId = root.activeElement && ["suche", "inv-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
 
     root.innerHTML = `<style>${STIL}</style>
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
         <main class="haupt">${this._inhaltHtml()}</main>
-        ${this._ansicht === "filament" && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Filament hinzufügen" title="Filament hinzufügen">+</button>` : ""}
+        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
         ${this._mobil ? this._navHtml("unten") : ""}
         ${this._modus === "detail" ? this._sheetHtml() : ""}
         ${this._modus === "neu" ? this._neuSheetHtml() : ""}
+        ${this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : ""}
         ${this._dialogHtml()}
         ${this._toastText ? `<div class="toast">${esc(this._toastText)}</div>` : ""}
       </div>`;
@@ -663,8 +693,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (h) h.scrollTop = scrollHaupt;
     const s = root.querySelector(".sheet-inhalt");
     if (s && this._sheetScroll) s.scrollTop = this._sheetScroll;
-    if (fokusSuche) {
-      const i = root.getElementById("suche");
+    const i = fokusId && root.getElementById(fokusId);
+    if (i) {
       i.focus();
       i.setSelectionRange(i.value.length, i.value.length);
     }
@@ -693,6 +723,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     }
     if (this._ansicht === "system") return this._systemHtml();
     if (!this._daten) return `<div class="laden">Lade Daten aus Home Assistant …</div>`;
+    if (this._ansicht === "inventar") return this._invHtml();
     return this._filamentHtml();
   }
 
@@ -1106,6 +1137,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     </div>`;
   }
 }
+
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);
