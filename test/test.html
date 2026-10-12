@@ -3,16 +3,60 @@
 <script>
 // Nachgebautes Home Assistant: nur das, was die Seite benutzt
 const P = "sensor.p1s_01p00c572701906_";
+const szenario = new URLSearchParams(location.search).get("drucker") || "druckt";
 const states = {};
-["druckstatus","name_der_aufgabe","gewicht_des_drucks","drucklange","zieltemperatur_der_duse","zieltemperatur_vom_druckbett","startzeit","druckfortschritt","dusengrosse","temperatur_der_duse","druckbetttemperatur"].forEach(s => states[P+s] = {state: s === "druckstatus" ? "idle" : "0"});
-states["camera.p1s_01p00c572701906_kamera"] = {state: "idle"};
+const setze = (id, name, state, attr = {}) => { states[id] = { entity_id: id, state: String(state), attributes: { friendly_name: name, ...attr } }; };
+const G = "3D-Drucker P1S ";
+const druckt = szenario === "druckt", aus = szenario === "aus";
+const jetzt = Date.now();
+setze(P + "druckstatus", G + "Druckstatus", aus ? "offline" : druckt ? "running" : "idle");
+setze(P + "aktueller_arbeitsschritt", G + "Aktueller Arbeitsschritt", druckt ? "printing" : "idle");
+setze(P + "name_der_aufgabe", G + "Name der Aufgabe", druckt ? "Kabelhalter Schreibtisch" : "unknown");
+setze(P + "druckfortschritt", G + "Druckfortschritt", druckt ? 62 : 0);
+setze(P + "aktuelle_schicht", G + "Aktuelle Schicht", druckt ? 87 : 0);
+setze(P + "gesamtzahl_der_schichten", G + "Gesamtzahl der Schichten", druckt ? 140 : 0);
+setze(P + "verbleibende_zeit", G + "Verbleibende Zeit", druckt ? 0.72 : 0);
+setze(P + "startzeit", G + "Startzeit", druckt ? new Date(jetzt - 75 * 60000).toISOString() : "unknown");
+setze(P + "endzeit", G + "Endzeit", druckt ? new Date(jetzt + 43 * 60000).toISOString() : "unknown");
+setze(P + "gewicht_des_drucks", G + "Gewicht des Drucks", druckt ? 23.4 : 6.8);
+setze(P + "drucklange", G + "Drucklänge", druckt ? 7.65 : 2.21);
+setze(P + "temperatur_der_duse", G + "Temperatur der Düse", druckt ? 219 : 25);
+setze(P + "zieltemperatur_der_duse", G + "Zieltemperatur der Düse", druckt ? 220 : 0);
+setze(P + "druckbetttemperatur", G + "Druckbetttemperatur", druckt ? 55 : 23);
+setze(P + "zieltemperatur_vom_druckbett", G + "Zieltemperatur vom Druckbett", druckt ? 55 : 0);
+setze(P + "bauteillufterdrehzahl", G + "Bauteillüfterdrehzahl", druckt ? 100 : 0);
+setze(P + "druckkopflufterdrehzahl", G + "Druckkopflüfterdrehzahl", druckt ? 60 : 0);
+setze(P + "hotendlufterdrehzahl", G + "Hotendlüfterdrehzahl", druckt ? 100 : 0);
+setze(P + "druckraumlufterdrehzahl", G + "Druckraumlüfterdrehzahl", 0);
+setze(P + "dusengrosse", G + "Düsengröße", 0.4);
+setze(P + "dusentyp", G + "Düsentyp", "hardened_steel");
+setze(P + "druckbett_typ", G + "Druckbett Typ", "textured_plate");
+setze(P + "gesamtnutzung", G + "Gesamtnutzung", 472);
+setze(P + "wi_fi_signalqualitat", G + "Wi-Fi-Signalqualität", -66);
+setze("binary_sensor.p1s_01p00c572701906_online", G + "Online", aus ? "off" : "on");
+setze("binary_sensor.p1s_01p00c572701906_hms_fehler", G + "HMS-Fehler", "off");
+setze("binary_sensor.p1s_01p00c572701906_druckfehler", G + "Druckfehler", "off");
+setze("binary_sensor.p1s_01p00c572701906_firmware_status", G + "Firmware Status", "off");
+setze("binary_sensor.p1s_01p00c572701906_extruder_filament_status", G + "Extruder Filament Status", "on");
+setze("camera.p1s_01p00c572701906_kamera", G + "Kamera", "streaming", { entity_picture: "/test/kamera.svg?v=1" });
+setze("image.p1s_01p00c572701906_titelbild", G + "Titelbild", "2026-10-13", { entity_picture: "/test/titelbild.svg" });
+setze("switch.3d_drucker", "3d-Drucker", aus ? "off" : "on");
+setze("sensor.3d_drucker_derzeitiger_verbrauch", "3d-Drucker Derzeitiger Verbrauch", aus ? 0 : druckt ? 142 : 5.5);
+setze("sensor.3d_drucker_heutiger_verbrauch", "3d-Drucker Heutiger Verbrauch", 0.21);
+setze("sensor.3d_drucker_der_verbrauch_dieses_monats", "3d-Drucker Der Verbrauch dieses Monats", 3.84);
+const drucke = [
+  { uid: "a1", summary: "Kalibrierwürfel · 12.10.2026 21:15", status: "needs_action", description: "gewicht_g=6.76; laenge_m=2.21; duese_c=220; bett_c=55; duese_mm=0.4; start=2026-10-12T19:15:00+00:00; ende=2026-10-12T21:52:00+02:00; status=finish; fortschritt=100" },
+  { uid: "a2", summary: "Halter Akkuschrauber · 11.10.2026 18:02", status: "needs_action", description: "gewicht_g=48.2; laenge_m=15.9; duese_c=250; bett_c=70; duese_mm=0.4; start=2026-10-11T16:02:00+00:00; ende=2026-10-11T19:10:00+02:00; status=failed; fortschritt=34" },
+  { uid: "a3", summary: "Zahnrad Satz · 10.10.2026 09:30", status: "completed", description: "gewicht_g=12.4; laenge_m=4.1; duese_c=220; bett_c=55; duese_mm=0.4; start=2026-10-10T07:30:00+00:00; ende=2026-10-10T10:41:00+02:00; status=finish; fortschritt=100" },
+];
 const speicher = {};
 window.wsLog = [];
 window.hass = { states, callWS: async (m) => {
   wsLog.push(m.type + (m.key ? ":" + m.key : ""));
   if (m.type === "frontend/get_user_data") return { value: speicher[m.key] ? JSON.parse(speicher[m.key]) : null };
   if (m.type === "frontend/set_user_data") { speicher[m.key] = JSON.stringify(m.value); return null; }
-  if (m.type === "todo/item/list") return { items: [{summary: "Druck · 12.10.2026 21:15"}] };
+  if (m.type === "todo/item/list") return { items: drucke };
+  if (m.type === "media_source/resolve_media") { if (m.media_content_id.includes("2026-10-12_21-15")) return { url: "/test/foto.svg" }; throw new Error("nicht gefunden"); }
   if (m.type === "media_source/browse_media") return { children: [{title: "Grundriss.png"}] };
   throw new Error("unbekannt " + m.type);
 }};

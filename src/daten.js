@@ -223,6 +223,7 @@ function migrieren(d) {
   if (!d.inventar) d.inventar = standardInventar();
   if (!d.materialien_eigen) d.materialien_eigen = [];
   if (!d.arten_eigen) d.arten_eigen = {};
+  if (!d.drucke) d.drucke = {};   // Kommentare usw. zu Drucken aus dem Verlauf, Schlüssel = Eintrag in „3D-Drucke“
   d.version = DATEN_VERSION;
   return d;
 }
