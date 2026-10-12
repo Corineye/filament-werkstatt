@@ -233,4 +233,77 @@ textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid va
 .check strong { display: block; }
 .check small { color: var(--leise); word-break: break-word; }
 .fehlerkarte h2 { color: var(--rot); }
+
+/* Filter-Auswahlmenüs */
+.werkzeug .alle { padding: 10px 18px; }
+.auswahl { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 6px 30px 6px 12px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); min-width: 130px; cursor: pointer; }
+.auswahl::after { content: "▾"; position: absolute; right: 11px; top: 50%; transform: translateY(-50%); color: var(--leise); pointer-events: none; }
+.auswahl span { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); }
+.auswahl select { appearance: none; -webkit-appearance: none; background: transparent; border: none; color: var(--text); font: inherit; font-size: 14px; padding: 0; outline: none; cursor: pointer; width: 100%; }
+.auswahl select option, .auswahl select optgroup { background: #111816; color: var(--text); }
+.auswahl.an { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.auswahl.an select { color: var(--mint); }
+.auswahl.sort { margin-left: auto; }
+.werkzeug .suche { flex-basis: 100%; }
+.mobil .werkzeug { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mobil .werkzeug .alle { border-radius: 12px; }
+.mobil .auswahl { min-width: 0; }
+.mobil .auswahl.sort { margin-left: 0; }
+.mobil .werkzeug .suche { grid-column: 1 / -1; }
+
+/* Runder Plus-Knopf */
+.fab { position: absolute; right: 28px; bottom: 28px; z-index: 5; width: 60px; height: 60px; border-radius: 50%; background: var(--mint); color: #062018; font-size: 34px; font-weight: 400; line-height: 1; display: grid; place-items: center; box-shadow: 0 0 0 6px rgba(62,230,168,.15), 0 10px 30px rgba(62,230,168,.35); transition: transform .15s; }
+.fab:hover { transform: scale(1.06) rotate(90deg); }
+.mobil .fab { right: 18px; bottom: 92px; width: 56px; height: 56px; }
+
+/* Zeilen zum Antippen */
+.zeile-kopf { width: 100%; text-align: left; padding: 2px 0; border-radius: 8px; }
+button.zeile-kopf:hover .z-name { color: var(--mint); }
+.zeile.auf { background: rgba(62,230,168,.04); margin: 0 -14px; padding: 10px 14px; }
+.zeile-kopf.statisch { cursor: default; }
+.mini.mint-rand { color: var(--mint); border-color: rgba(62,230,168,.4); margin: 6px 0 4px; }
+select.text { appearance: auto; }
+select.text option { background: #111816; }
+
+/* Letzter Druck */
+.letzter-druck { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 14px; border: 1px dashed var(--rand); background: var(--flaeche); margin-bottom: 12px; }
+.ld-bild { width: 56px; height: 56px; border-radius: 10px; background: rgba(0,0,0,.35); display: grid; place-items: center; font-size: 22px; flex: none; overflow: hidden; }
+.ld-bild img { width: 100%; height: 100%; object-fit: cover; }
+.ld-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.klein-knopf { padding: 8px 12px; font-size: 13px; white-space: nowrap; }
+
+/* Restgewicht */
+.rest-zeile { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.groesse-knopf { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--rand); background: var(--flaeche-hover); font-size: 13px; color: var(--leise); }
+.groesse-knopf strong { color: var(--text); }
+.groesse-knopf:hover { border-color: rgba(62,230,168,.5); }
+.knopf-reihe { display: flex; gap: 10px; }
+.knopf-reihe .knopf { flex: 1; }
+.rot-knopf { background: rgba(255,107,107,.14); color: var(--rot); border: 1px solid rgba(255,107,107,.5); }
+.rot-knopf:hover:not(:disabled) { background: rgba(255,107,107,.24); }
+.mobil .knopf-reihe .knopf { padding: 12px 10px; font-size: 14px; }
+.mitte { text-align: center; margin-top: 10px; }
+.chip.weitere { border-style: dashed; }
+.sync { margin-top: 4px; }
+
+/* Neues Filament */
+.neu-vorschau { display: flex; gap: 14px; align-items: flex-start; flex: 1; min-width: 0; }
+.abschnitt { color: var(--mint); font-size: 13px; text-transform: uppercase; letter-spacing: .8px; margin: 20px 0 10px; }
+.abschnitt:first-child { margin-top: 4px; }
+.formular { display: grid; gap: 12px; }
+.formular label { display: grid; gap: 6px; font-size: 13px; color: var(--leise); }
+.formular .text { margin-top: 0; }
+.feld-titel { font-size: 13px; color: var(--leise); margin: 6px 0 -4px; }
+.farb-zeile { display: flex; align-items: flex-end; gap: 12px; }
+.farbwahl input { width: 64px; height: 38px; border: 1px solid var(--rand); border-radius: 10px; background: none; padding: 2px; cursor: pointer; }
+
+/* Dialog-Listen */
+.dialog { max-height: calc(100% - 40px); overflow-y: auto; }
+.liste { display: grid; gap: 8px; margin: 12px 0; }
+.wahl.kompakt { padding: 10px 14px; margin: 0; }
+.wahl.an { border-color: rgba(62,230,168,.6); background: var(--mint-weich); }
+.neu-spule { margin: 8px 0 14px; padding-top: 12px; border-top: 1px solid var(--rand); }
+.neu-spule .text { margin: 0; }
+.oben-abstand { margin-top: 16px; }
+.dialog .chips { margin-top: 10px; }
 `;
