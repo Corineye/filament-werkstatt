@@ -102,9 +102,33 @@ const neu = (await daten(p)).rollen.find((r) => r.name === "PLA Silk Gold");
 pruefe(neu && !neu.probiert && neu.eigen.bett === 56 && Object.keys(neu.eigen).length === 1 && neu.nenn_g === 500 && neu.rest_g === 500,
   "Neues Filament: nicht probiert, nur Bett als eigener Wert, 500 g voll");
 
+// ---- Eigenes Material und eigene Art
+await el(p).locator('[data-aktion="neu"]').click();
+await el(p).locator('[data-aktion="eigen-dialog"][data-id="material"]').click();
+await el(p).locator("#eigen-name").fill("ASB");
+await el(p).locator('[data-aktion="eigen-anlegen"]').click();
+await el(p).locator('[data-aktion="eigen-dialog"][data-id="art"]').click();
+await el(p).locator("#eigen-name").fill("Glow");
+await el(p).locator('[data-aktion="eigen-anlegen"]').click();
+await p.waitForTimeout(300);
+await p.screenshot({ path: `${out}/8b-neu-eigenes-material.png` });
+await el(p).locator('.sheet-fuss [data-aktion="schliessen"]').click();
+await p.waitForTimeout(700);
+await el(p).locator('[data-aktion="neu"]').click();
+pruefe((await el(p).locator('[data-aktion="neu-material"][data-id="ASB"]').count()) === 1, "Eigenes Material ASB bleibt als Schnellauswahl");
+await el(p).locator('[data-aktion="neu-material"][data-id="ASB"]').click();
+pruefe((await el(p).locator('[data-aktion="neu-art"][data-id="Glow"]').count()) === 1, "Eigene Art Glow bleibt als Schnellauswahl");
+await el(p).locator('.sheet-fuss [data-aktion="schliessen"]').click();
+
 // ---- Handy
 const m = await seite(390, 844);
 await m.screenshot({ path: `${out}/9-handy.png` });
+await el(m).locator('[data-aktion="filter-auf"]').click();
+await el(m).locator('select[data-filter="hersteller"]').selectOption("LVVJ3D");
+await m.waitForTimeout(200);
+await m.screenshot({ path: `${out}/9b-handy-filter.png` });
+pruefe((await el(m).locator(".kachel").count()) === 4, "Handy-Filter: 4 LVVJ3D-Rollen");
+await el(m).locator('[data-aktion="alle"]').click();
 await el(m).locator('[data-id="lvvj3d-wood-teak"]').click();
 await m.waitForTimeout(400);
 await m.screenshot({ path: `${out}/10-handy-detail.png` });

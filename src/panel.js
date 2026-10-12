@@ -220,7 +220,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       return true;
     });
     const name = (a, b) => a.name.localeCompare(b.name, "de");
-    const mat = (a, b) => MATERIAL_REIHE.indexOf(a.material) - MATERIAL_REIHE.indexOf(b.material);
+    const reihe = this._materialien();
+    const mat = (a, b) => reihe.indexOf(a.material) - reihe.indexOf(b.material);
     const rest = (r) => (r.rest_g == null ? null : r.rest_g);
     const sortierer = {
       material: (a, b) => mat(a, b) || name(a, b),
@@ -235,6 +236,17 @@ class FilamentWerkstattPanel extends HTMLElement {
       },
     };
     return liste.sort(sortierer[this._sort] || sortierer.material);
+  }
+
+  // Standardmaterialien, eigene Materialien und alles, was bei Rollen vorkommt
+  _materialien() {
+    const liste = [...MATERIAL_REIHE, ...(this._daten.materialien_eigen || [])];
+    this._daten.rollen.forEach((r) => { if (!liste.includes(r.material)) liste.push(r.material); });
+    return liste;
+  }
+  _arten(m) {
+    const liste = [...(ARTEN[m] || ["Basic"]), ...((this._daten.arten_eigen || {})[m] || [])];
+    return [...new Set(liste)];
   }
 
   _filterAktiv() { return Object.values(this._f).some(Boolean) || this._suche; }
@@ -395,13 +407,36 @@ class FilamentWerkstattPanel extends HTMLElement {
       // Neues Filament
       case "neu-material":
         this._neu.material = el.dataset.id;
-        this._neu.art = ARTEN[el.dataset.id][0];
+        this._neu.art = this._arten(el.dataset.id)[0];
         this._neuVorschlag();
         break;
       case "neu-art": this._neu.art = el.dataset.id; this._neuVorschlag(); break;
       case "neu-voll": this._neu.voll = el.dataset.id === "ja"; break;
       case "neu-transparent": this._neu.hex = this._neu.hex === "transparent" ? "#3ee6a8" : "transparent"; break;
       case "neu-anlegen": this._neuAnlegen(); return;
+      case "eigen-dialog": this._dialog = `eigen-${el.dataset.id}`; break;
+      case "eigen-anlegen": {
+        const was = el.dataset.id;
+        const name = (this.shadowRoot.getElementById("eigen-name").value || "").trim();
+        if (!name) { this._toast("Bitte einen Namen eingeben."); return; }
+        if (was === "material") {
+          const vorhanden = this._materialien().find((m) => m.toLowerCase() === name.toLowerCase());
+          const m = vorhanden || name;
+          if (!vorhanden) this._daten.materialien_eigen.push(m);
+          this._neu.material = m;
+          this._neu.art = this._arten(m)[0];
+        } else {
+          const m = this._neu.material;
+          const vorhanden = this._arten(m).find((a) => a.toLowerCase() === name.toLowerCase());
+          if (!vorhanden) (this._daten.arten_eigen[m] = this._daten.arten_eigen[m] || []).push(name);
+          this._neu.art = vorhanden || name;
+        }
+        this._neuVorschlag();
+        this._dialog = null;
+        this._speichern();
+        break;
+      }
+      case "filter-auf": this._filterAuf = !this._filterAuf; break;
       case "nochmal-laden": this._laden(); return;
       case "pruefen": this._systemcheck(); return;
       default: return;
@@ -680,13 +715,14 @@ class FilamentWerkstattPanel extends HTMLElement {
       `<button class="stat ${klasse}" ${status ? `data-aktion="status" data-id="${status}"` : ""}><strong>${wert}</strong><span>${text}</span></button>`;
     const opt = (wert, text) => `<option value="${esc(wert)}">${esc(text)}</option>`;
 
-    const sorten = MATERIAL_REIHE.filter((m) => rollen.some((r) => r.material === m)).map((m) => {
+    const sorten = this._materialien().filter((m) => rollen.some((r) => r.material === m)).map((m) => {
       const arten = [...new Set(rollen.filter((r) => r.material === m).map((r) => r.art).filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
       return `<optgroup label="${m}">${opt(`m|${m}`, `Alle ${m}`)}${arten.map((a) => opt(`a|${m}|${a}`, a.startsWith(m) ? a : `${a}-${m}`)).join("")}</optgroup>`;
     }).join("");
     const hersteller = [...new Set(rollen.map((r) => r.hersteller))].sort((a, b) => a.localeCompare(b, "de")).map((h) => opt(h, h)).join("");
     const farben = FARBFAMILIEN.filter((f) => rollen.some((r) => farbfamilie(r) === f)).map((f) => opt(f, f)).join("");
     const status = STATUS.map((s) => opt(s.id, s.name)).join("");
+    const anzahl = Object.values(this._f).filter(Boolean).length;
     const mitWert = (html, w) => html.replace(`value="${esc(w)}"`, `value="${esc(w)}" selected`);
 
     return `
@@ -699,10 +735,13 @@ class FilamentWerkstattPanel extends HTMLElement {
       </section>
       <section class="werkzeug">
         <button class="chip alle ${this._filterAktiv() ? "" : "an"}" data-aktion="alle">Alle</button>
-        ${this._auswahl("Material", "sorte", "Alle Materialien", mitWert(sorten, this._f.sorte))}
-        ${this._auswahl("Hersteller", "hersteller", "Alle Hersteller", mitWert(hersteller, this._f.hersteller))}
-        ${this._auswahl("Farbe", "farbe", "Alle Farben", mitWert(farben, this._f.farbe))}
-        ${this._auswahl("Status", "status", "Jeder Status", mitWert(status, this._f.status))}
+        ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="filter-auf"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
+        ${!this._mobil || this._filterAuf ? `<div class="unterfilter">
+          ${this._auswahl("Material", "sorte", "Alle Materialien", mitWert(sorten, this._f.sorte))}
+          ${this._auswahl("Hersteller", "hersteller", "Alle Hersteller", mitWert(hersteller, this._f.hersteller))}
+          ${this._auswahl("Farbe", "farbe", "Alle Farben", mitWert(farben, this._f.farbe))}
+          ${this._auswahl("Status", "status", "Jeder Status", mitWert(status, this._f.status))}
+        </div>` : ""}
         <label class="auswahl sort"><span>Sortieren</span>
           <select id="sortierung">${SORTIERUNG.map((s) => `<option value="${s.id}" ${this._sort === s.id ? "selected" : ""}>${s.name}</option>`).join("")}</select>
         </label>
@@ -723,7 +762,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         <div class="kachel-name">${esc(r.name)}</div>
         <div class="kachel-sub">${esc(r.hersteller)}</div>
         <div class="kachel-fuss">
-          <span class="mat" style="--m:${(MATERIAL[r.material] || MATERIAL.PLA).farbe}">${esc(r.art === "Wood" ? "Wood-PLA" : r.material)}</span>
+          <span class="mat" style="--m:${materialInfo(r.material).farbe}">${esc(r.art === "Wood" ? "Wood-PLA" : r.material)}</span>
           <span class="rest ${r.rest_g == null ? "leise" : p <= 10 ? "rot" : p <= 20 ? "amber" : ""}">${rest}</span>
         </div>
       </button>`;
@@ -791,6 +830,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const hatVorschlaege = [...FELDER.map((f) => f.k), "platte"].some((k) => anzeige(k).quelle === "vorschlag");
     let html = "";
     if (bearb && this._nachTest) html += `<div class="hinweis mint">Stell die Werte so ein, wie du sie beim Testdruck benutzt hast, und tippe dann auf Speichern.</div>`;
+    if (!kenntMaterial(r.material)) html += `<div class="hinweis amber">Für ${esc(r.material)} habe ich keine eigenen Richtwerte. Die Vorschläge stammen von PLA, bitte vor dem ersten Druck anpassen.</div>`;
     if (neu) html += `<div class="hinweis amber">Vorschläge für ${esc(sorteName(r))}. Was du nicht änderst, bleibt orange als Vorschlag markiert. Die Rolle ist bis zum Testdruck „noch nicht probiert“.</div>`;
     else if (!r.probiert && !bearb) html += `<div class="hinweis amber">Diese Rolle hast du noch nicht probiert. Die Werte sind Vorschläge${r.herkunft ? `: ${esc(r.herkunft)}` : " für diese Materialart."}</div>`;
     if (!neu && r.probiert && !bearb && !Object.keys(r.eigen || {}).length) html += `<div class="hinweis">Du druckst diese Rolle mit dem Preset „${esc(r.preset || "–")}“. Die Werte hier sind Richtwerte dafür, bis du deine eigenen einträgst.</div>`;
@@ -879,7 +919,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         </div>
       </div>
       ${this._spuleBlockHtml(r)}
-      <div id="r-ergebnis" class="ergebnis">${this._rechnerErgebnisHtml()}</div>
+      <div id="r-ergebnis" class="ergebnis ${r.rest_g != null && Math.max(0, c.brutto - c.spule_g) === r.rest_g ? "" : "ungespeichert"}">${this._rechnerErgebnisHtml()}</div>
       <div class="knopf-reihe">
         <button class="knopf rot-knopf" data-aktion="rest-verwerfen" ${this._rechnerGeaendert() ? "" : "disabled"}>Änderung verwerfen</button>
         <button class="knopf" data-aktion="rest-speichern">Als Restgewicht speichern</button>
@@ -916,7 +956,12 @@ class FilamentWerkstattPanel extends HTMLElement {
     const c = this._rechner;
     const rest = Math.max(0, c.brutto - c.spule_g);
     const p = Math.round((rest / (c.nenn_g || 1000)) * 100);
-    return `<span class="leise">Filament auf der Rolle</span><strong>${zahl(rest)} g</strong>
+    const gleich = r.rest_g != null && rest === r.rest_g;
+    const titel = gleich ? "Entspricht dem gespeicherten Restgewicht"
+      : `Neu berechnet, noch nicht gespeichert${r.rest_g != null ? ` (bisher ${zahl(r.rest_g)} g)` : ""}`;
+    const box = this.shadowRoot.getElementById("r-ergebnis");
+    if (box) box.classList.toggle("ungespeichert", !gleich);
+    return `<span class="leise">${titel}</span><strong>${zahl(rest)} g</strong>
       <span class="leise">${p} % von ${gramm(c.nenn_g)} · ca. ${zahl(rest / grammProMeter(r.material))} m</span>`;
   }
 
@@ -965,9 +1010,11 @@ class FilamentWerkstattPanel extends HTMLElement {
               </select></label>
             ${n.herstellerNeu ? `<label>Name des Herstellers<input class="text" data-neu="hersteller" value="${esc(n.hersteller)}" placeholder="z. B. Polymaker"></label>` : ""}
             <div class="feld-titel">Material</div>
-            <div class="chips">${MATERIAL_REIHE.map((m) => `<button class="chip ${n.material === m ? "an" : ""}" data-aktion="neu-material" data-id="${m}">${m}</button>`).join("")}</div>
+            <div class="chips">${this._materialien().map((m) => `<button class="chip ${n.material === m ? "an" : ""}" data-aktion="neu-material" data-id="${esc(m)}">${esc(m)}</button>`).join("")}
+              <button class="chip weitere" data-aktion="eigen-dialog" data-id="material">+ Neu hinzufügen</button></div>
             <div class="feld-titel">Art</div>
-            <div class="chips">${ARTEN[n.material].map((a) => `<button class="chip ${n.art === a ? "an" : ""}" data-aktion="neu-art" data-id="${a}">${a}</button>`).join("")}</div>
+            <div class="chips">${this._arten(n.material).map((a) => `<button class="chip ${n.art === a ? "an" : ""}" data-aktion="neu-art" data-id="${esc(a)}">${esc(a)}</button>`).join("")}
+              <button class="chip weitere" data-aktion="eigen-dialog" data-id="art">+ Neu hinzufügen</button></div>
             <label>Farbe<input class="text" data-neu="farbe" value="${esc(n.farbe)}" placeholder="z. B. Dunkelblau"></label>
             <div class="farb-zeile">
               <label class="farbwahl">Farbton<input type="color" data-neu="hex" value="${n.hex === "transparent" ? "#ffffff" : esc(n.hex)}" ${n.hex === "transparent" ? "disabled" : ""}></label>
@@ -1026,6 +1073,13 @@ class FilamentWerkstattPanel extends HTMLElement {
             <button class="knopf klein-knopf" data-aktion="spule-neu">Anlegen</button></div>
         </div>
         <button class="knopf leise breit" data-aktion="dialog-zu">Schließen</button>`;
+    } else if (this._dialog === "eigen-material" || this._dialog === "eigen-art") {
+      const art = this._dialog === "eigen-art";
+      inhalt = `<h2>${art ? `Neue Art für ${esc(this._neu.material)}` : "Neues Material"}</h2>
+        <p class="leise klein">Taucht danach bei jedem neuen Filament als Schnellauswahl auf.</p>
+        <div class="regler-zeile"><input id="eigen-name" class="text" placeholder="${art ? "z. B. Glow, Marble" : "z. B. ABS, PA, PLA-CF"}" autocomplete="off">
+          <button class="knopf klein-knopf" data-aktion="eigen-anlegen" data-id="${art ? "art" : "material"}">Hinzufügen</button></div>
+        <button class="knopf leise breit oben-abstand" data-aktion="dialog-zu">Abbrechen</button>`;
     } else if (this._dialog === "groesse") {
       const c = this._rechner;
       const groessen = [...new Set([...this._daten.rollen.map((x) => x.nenn_g || 1000), ...STANDARD_GROESSEN])].sort((a, b) => a - b);

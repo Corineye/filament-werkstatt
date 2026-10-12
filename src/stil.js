@@ -79,8 +79,8 @@ p { margin: 4px 0 12px; }
 /* Karten und Kennzahlen */
 .karte { background: var(--flaeche); border: 1px solid var(--rand); border-radius: var(--radius); padding: 24px; backdrop-filter: blur(10px); max-width: 680px; margin: 0 auto; }
 .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 18px; }
-.mobil .stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.mobil .stats .stat:nth-child(n+4) { display: none; }
+.mobil .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.mobil .stats .stat:nth-child(n+3) { display: none; }
 .stat { text-align: left; background: var(--flaeche); border: 1px solid var(--rand); border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 2px; }
 .stat[data-aktion]:hover { background: var(--flaeche-hover); }
 .stat strong { font-size: 22px; font-weight: 700; }
@@ -199,6 +199,8 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: none; b
 .spulen .chip { font-size: 12px; padding: 6px 10px; }
 .ergebnis { margin: 14px 0; padding: 16px; border-radius: 16px; border: 1px solid rgba(62,230,168,.35); background: var(--mint-weich); display: grid; gap: 2px; }
 .ergebnis strong { font-size: 30px; color: var(--mint); }
+.ergebnis.ungespeichert { border-color: rgba(255,181,71,.45); background: var(--amber-weich); }
+.ergebnis.ungespeichert strong { color: var(--amber); }
 
 /* Infos */
 .info-liste { border: 1px solid var(--rand); border-radius: 14px; overflow: hidden; }
@@ -245,10 +247,15 @@ textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid va
 .auswahl.an select { color: var(--mint); }
 .auswahl.sort { margin-left: auto; }
 .werkzeug .suche { flex-basis: 100%; }
-.mobil .werkzeug { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.unterfilter { display: contents; }
+.filter-knopf { text-align: left; }
+.filter-knopf strong { font-weight: 400; font-size: 14px; }
+.filter-knopf.an strong { color: var(--mint); }
+.mobil .werkzeug { display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; }
 .mobil .werkzeug .alle { border-radius: 12px; }
 .mobil .auswahl { min-width: 0; }
 .mobil .auswahl.sort { margin-left: 0; }
+.mobil .unterfilter { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-radius: 14px; border: 1px solid rgba(62,230,168,.3); background: rgba(62,230,168,.05); animation: hoch .18s ease; }
 .mobil .werkzeug .suche { grid-column: 1 / -1; }
 
 /* Runder Plus-Knopf */

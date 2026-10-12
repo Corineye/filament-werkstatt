@@ -31,6 +31,8 @@ const ARTEN = {
   PETG: ["Basic", "HF", "Rapid", "Transparent", "Carbon"],
   ASA: ["Basic", "Carbon"],
   TPU: ["95A", "85A"],
+  ABS: ["Basic"],
+  PC: ["Basic"],
 };
 
 // Dichte in g/cm³, daraus Gramm pro Meter bei 1,75 mm
@@ -39,10 +41,14 @@ const MATERIAL = {
   PETG: { dichte: 1.27, farbe: "#5cc8ff" },
   ASA: { dichte: 1.07, farbe: "#ffb057" },
   TPU: { dichte: 1.21, farbe: "#c58bff" },
+  ABS: { dichte: 1.04, farbe: "#ff8a7a" },
+  PC: { dichte: 1.2, farbe: "#9aa7ff" },
 };
+const MATERIAL_UNBEKANNT = { dichte: 1.2, farbe: "#b8c4bf" };
+const materialInfo = (m) => MATERIAL[m] || MATERIAL_UNBEKANNT;
 const QUERSCHNITT_CM2 = Math.PI * 0.0875 * 0.0875;
 const grammProMeter = (material) =>
-  QUERSCHNITT_CM2 * 100 * ((MATERIAL[material] || MATERIAL.PLA).dichte);
+  QUERSCHNITT_CM2 * 100 * (materialInfo(material).dichte);
 
 // Einstellungsfelder: Gruppe, Bezeichnung, Einheit, Reglerbereich
 const GRUPPEN = [
@@ -79,6 +85,8 @@ const TROCKNEN = {
   PETG: { tr_temp: 65, tr_dauer: 6, tr_feuchte: 15 },
   ASA: { tr_temp: 70, tr_dauer: 6, tr_feuchte: 10 },
   TPU: { tr_temp: 55, tr_dauer: 8, tr_feuchte: 10 },
+  ABS: { tr_temp: 70, tr_dauer: 4, tr_feuchte: 10 },
+  PC: { tr_temp: 70, tr_dauer: 8, tr_feuchte: 10 },
 };
 const PLATTE_STANDARD = "Textured PEI Plate";
 const RICHTWERTE = {
@@ -90,6 +98,8 @@ const RICHTWERTE = {
   petg_hf: { duese_erste: 245, duese: 250, bett: 70, luefter_min: 30, luefter_max: 70, ...TEMPO_STANDARD, flow: 0.95, max_vol: 20, k: 0.04 },
   pla_wood: { duese_erste: 215, duese: 225, bett: 55, luefter_min: 80, luefter_max: 100, v_erste: 30, v_aussen: 60, v_innen: 80, v_fuellung: 100, v_massiv: 80, v_oben: 50, flow: 0.98, max_vol: 10, k: 0.02 },
   asa: { duese_erste: 265, duese: 265, bett: 100, luefter_min: 10, luefter_max: 30, ...TEMPO_STANDARD, flow: 0.95, max_vol: 12, k: 0.03 },
+  abs: { duese_erste: 255, duese: 260, bett: 100, luefter_min: 10, luefter_max: 30, ...TEMPO_STANDARD, flow: 0.95, max_vol: 16, k: 0.03 },
+  pc: { duese_erste: 270, duese: 270, bett: 110, luefter_min: 0, luefter_max: 30, ...TEMPO_STANDARD, flow: 0.95, max_vol: 12, k: 0.03 },
   tpu: { duese_erste: 225, duese: 225, bett: 35, luefter_min: 70, luefter_max: 100, v_erste: 20, v_aussen: 30, v_innen: 35, v_fuellung: 40, v_massiv: 35, v_oben: 30, flow: 1.0, max_vol: 3.5, k: 0 },
 };
 
@@ -104,10 +114,15 @@ function richtwerteFuer(material, art) {
     basis = a === "hf" || a === "rapid" ? RICHTWERTE.petg_hf : RICHTWERTE.petg;
   } else if (material === "ASA") basis = RICHTWERTE.asa;
   else if (material === "TPU") basis = RICHTWERTE.tpu;
+  else if (material === "ABS") basis = RICHTWERTE.abs;
+  else if (material === "PC") basis = RICHTWERTE.pc;
   const tr = { ...(TROCKNEN[material] || TROCKNEN.PLA) };
   if (a === "wood") tr.tr_temp = 45;
   return { ...basis, ...tr, platte: PLATTE_STANDARD };
 }
+
+// Gibt es eigene Richtwerte für dieses Material? Sonst stammen die Vorschläge von PLA.
+const kenntMaterial = (m) => ["PLA", "PETG", "ASA", "TPU", "ABS", "PC"].includes(m);
 
 // Getestete Werte, die für Schwesterrollen gleicher Serie als Vorschlag dienen
 const DEEPLEE_PLUS = { ...RICHTWERTE.pla, v_erste: 30, v_aussen: 65, v_innen: 150, v_fuellung: 180, v_massiv: 180 };
@@ -193,6 +208,8 @@ function standardDaten() {
       vorschlag: { ...richtwerteFuer(r.material, r.art), ...r.vorschlag },
     })),
     spulen: JSON.parse(JSON.stringify(SPULEN)),
+    materialien_eigen: [],
+    arten_eigen: {},
   };
 }
 
@@ -202,6 +219,8 @@ function migrieren(d) {
     d.rollen.forEach((r) => { r.vorschlag = { ...richtwerteFuer(r.material, r.art), ...r.vorschlag }; });
     d.spulen.forEach((s) => { const std = SPULEN.find((x) => x.id === s.id); if (!s.hersteller) s.hersteller = std ? std.hersteller : s.name; });
   }
+  if (!d.materialien_eigen) d.materialien_eigen = [];
+  if (!d.arten_eigen) d.arten_eigen = {};
   d.version = DATEN_VERSION;
   return d;
 }

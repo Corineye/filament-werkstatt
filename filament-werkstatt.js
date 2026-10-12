@@ -32,6 +32,8 @@ const ARTEN = {
   PETG: ["Basic", "HF", "Rapid", "Transparent", "Carbon"],
   ASA: ["Basic", "Carbon"],
   TPU: ["95A", "85A"],
+  ABS: ["Basic"],
+  PC: ["Basic"],
 };
 
 // Dichte in g/cm³, daraus Gramm pro Meter bei 1,75 mm
@@ -40,10 +42,14 @@ const MATERIAL = {
   PETG: { dichte: 1.27, farbe: "#5cc8ff" },
   ASA: { dichte: 1.07, farbe: "#ffb057" },
   TPU: { dichte: 1.21, farbe: "#c58bff" },
+  ABS: { dichte: 1.04, farbe: "#ff8a7a" },
+  PC: { dichte: 1.2, farbe: "#9aa7ff" },
 };
+const MATERIAL_UNBEKANNT = { dichte: 1.2, farbe: "#b8c4bf" };
+const materialInfo = (m) => MATERIAL[m] || MATERIAL_UNBEKANNT;
 const QUERSCHNITT_CM2 = Math.PI * 0.0875 * 0.0875;
 const grammProMeter = (material) =>
-  QUERSCHNITT_CM2 * 100 * ((MATERIAL[material] || MATERIAL.PLA).dichte);
+  QUERSCHNITT_CM2 * 100 * (materialInfo(material).dichte);
 
 // Einstellungsfelder: Gruppe, Bezeichnung, Einheit, Reglerbereich
 const GRUPPEN = [
@@ -80,6 +86,8 @@ const TROCKNEN = {
   PETG: { tr_temp: 65, tr_dauer: 6, tr_feuchte: 15 },
   ASA: { tr_temp: 70, tr_dauer: 6, tr_feuchte: 10 },
   TPU: { tr_temp: 55, tr_dauer: 8, tr_feuchte: 10 },
+  ABS: { tr_temp: 70, tr_dauer: 4, tr_feuchte: 10 },
+  PC: { tr_temp: 70, tr_dauer: 8, tr_feuchte: 10 },
 };
 const PLATTE_STANDARD = "Textured PEI Plate";
 const RICHTWERTE = {
@@ -91,6 +99,8 @@ const RICHTWERTE = {
   petg_hf: { duese_erste: 245, duese: 250, bett: 70, luefter_min: 30, luefter_max: 70, ...TEMPO_STANDARD, flow: 0.95, max_vol: 20, k: 0.04 },
   pla_wood: { duese_erste: 215, duese: 225, bett: 55, luefter_min: 80, luefter_max: 100, v_erste: 30, v_aussen: 60, v_innen: 80, v_fuellung: 100, v_massiv: 80, v_oben: 50, flow: 0.98, max_vol: 10, k: 0.02 },
   asa: { duese_erste: 265, duese: 265, bett: 100, luefter_min: 10, luefter_max: 30, ...TEMPO_STANDARD, flow: 0.95, max_vol: 12, k: 0.03 },
+  abs: { duese_erste: 255, duese: 260, bett: 100, luefter_min: 10, luefter_max: 30, ...TEMPO_STANDARD, flow: 0.95, max_vol: 16, k: 0.03 },
+  pc: { duese_erste: 270, duese: 270, bett: 110, luefter_min: 0, luefter_max: 30, ...TEMPO_STANDARD, flow: 0.95, max_vol: 12, k: 0.03 },
   tpu: { duese_erste: 225, duese: 225, bett: 35, luefter_min: 70, luefter_max: 100, v_erste: 20, v_aussen: 30, v_innen: 35, v_fuellung: 40, v_massiv: 35, v_oben: 30, flow: 1.0, max_vol: 3.5, k: 0 },
 };
 
@@ -105,10 +115,15 @@ function richtwerteFuer(material, art) {
     basis = a === "hf" || a === "rapid" ? RICHTWERTE.petg_hf : RICHTWERTE.petg;
   } else if (material === "ASA") basis = RICHTWERTE.asa;
   else if (material === "TPU") basis = RICHTWERTE.tpu;
+  else if (material === "ABS") basis = RICHTWERTE.abs;
+  else if (material === "PC") basis = RICHTWERTE.pc;
   const tr = { ...(TROCKNEN[material] || TROCKNEN.PLA) };
   if (a === "wood") tr.tr_temp = 45;
   return { ...basis, ...tr, platte: PLATTE_STANDARD };
 }
+
+// Gibt es eigene Richtwerte für dieses Material? Sonst stammen die Vorschläge von PLA.
+const kenntMaterial = (m) => ["PLA", "PETG", "ASA", "TPU", "ABS", "PC"].includes(m);
 
 // Getestete Werte, die für Schwesterrollen gleicher Serie als Vorschlag dienen
 const DEEPLEE_PLUS = { ...RICHTWERTE.pla, v_erste: 30, v_aussen: 65, v_innen: 150, v_fuellung: 180, v_massiv: 180 };
@@ -194,6 +209,8 @@ function standardDaten() {
       vorschlag: { ...richtwerteFuer(r.material, r.art), ...r.vorschlag },
     })),
     spulen: JSON.parse(JSON.stringify(SPULEN)),
+    materialien_eigen: [],
+    arten_eigen: {},
   };
 }
 
@@ -203,6 +220,8 @@ function migrieren(d) {
     d.rollen.forEach((r) => { r.vorschlag = { ...richtwerteFuer(r.material, r.art), ...r.vorschlag }; });
     d.spulen.forEach((s) => { const std = SPULEN.find((x) => x.id === s.id); if (!s.hersteller) s.hersteller = std ? std.hersteller : s.name; });
   }
+  if (!d.materialien_eigen) d.materialien_eigen = [];
+  if (!d.arten_eigen) d.arten_eigen = {};
   d.version = DATEN_VERSION;
   return d;
 }
@@ -314,8 +333,8 @@ p { margin: 4px 0 12px; }
 /* Karten und Kennzahlen */
 .karte { background: var(--flaeche); border: 1px solid var(--rand); border-radius: var(--radius); padding: 24px; backdrop-filter: blur(10px); max-width: 680px; margin: 0 auto; }
 .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 18px; }
-.mobil .stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.mobil .stats .stat:nth-child(n+4) { display: none; }
+.mobil .stats { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.mobil .stats .stat:nth-child(n+3) { display: none; }
 .stat { text-align: left; background: var(--flaeche); border: 1px solid var(--rand); border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 2px; }
 .stat[data-aktion]:hover { background: var(--flaeche-hover); }
 .stat strong { font-size: 22px; font-weight: 700; }
@@ -434,6 +453,8 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: none; b
 .spulen .chip { font-size: 12px; padding: 6px 10px; }
 .ergebnis { margin: 14px 0; padding: 16px; border-radius: 16px; border: 1px solid rgba(62,230,168,.35); background: var(--mint-weich); display: grid; gap: 2px; }
 .ergebnis strong { font-size: 30px; color: var(--mint); }
+.ergebnis.ungespeichert { border-color: rgba(255,181,71,.45); background: var(--amber-weich); }
+.ergebnis.ungespeichert strong { color: var(--amber); }
 
 /* Infos */
 .info-liste { border: 1px solid var(--rand); border-radius: 14px; overflow: hidden; }
@@ -480,10 +501,15 @@ textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid va
 .auswahl.an select { color: var(--mint); }
 .auswahl.sort { margin-left: auto; }
 .werkzeug .suche { flex-basis: 100%; }
-.mobil .werkzeug { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.unterfilter { display: contents; }
+.filter-knopf { text-align: left; }
+.filter-knopf strong { font-weight: 400; font-size: 14px; }
+.filter-knopf.an strong { color: var(--mint); }
+.mobil .werkzeug { display: grid; grid-template-columns: auto 1fr 1fr; gap: 8px; }
 .mobil .werkzeug .alle { border-radius: 12px; }
 .mobil .auswahl { min-width: 0; }
 .mobil .auswahl.sort { margin-left: 0; }
+.mobil .unterfilter { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-radius: 14px; border: 1px solid rgba(62,230,168,.3); background: rgba(62,230,168,.05); animation: hoch .18s ease; }
 .mobil .werkzeug .suche { grid-column: 1 / -1; }
 
 /* Runder Plus-Knopf */
@@ -764,7 +790,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       return true;
     });
     const name = (a, b) => a.name.localeCompare(b.name, "de");
-    const mat = (a, b) => MATERIAL_REIHE.indexOf(a.material) - MATERIAL_REIHE.indexOf(b.material);
+    const reihe = this._materialien();
+    const mat = (a, b) => reihe.indexOf(a.material) - reihe.indexOf(b.material);
     const rest = (r) => (r.rest_g == null ? null : r.rest_g);
     const sortierer = {
       material: (a, b) => mat(a, b) || name(a, b),
@@ -779,6 +806,17 @@ class FilamentWerkstattPanel extends HTMLElement {
       },
     };
     return liste.sort(sortierer[this._sort] || sortierer.material);
+  }
+
+  // Standardmaterialien, eigene Materialien und alles, was bei Rollen vorkommt
+  _materialien() {
+    const liste = [...MATERIAL_REIHE, ...(this._daten.materialien_eigen || [])];
+    this._daten.rollen.forEach((r) => { if (!liste.includes(r.material)) liste.push(r.material); });
+    return liste;
+  }
+  _arten(m) {
+    const liste = [...(ARTEN[m] || ["Basic"]), ...((this._daten.arten_eigen || {})[m] || [])];
+    return [...new Set(liste)];
   }
 
   _filterAktiv() { return Object.values(this._f).some(Boolean) || this._suche; }
@@ -939,13 +977,36 @@ class FilamentWerkstattPanel extends HTMLElement {
       // Neues Filament
       case "neu-material":
         this._neu.material = el.dataset.id;
-        this._neu.art = ARTEN[el.dataset.id][0];
+        this._neu.art = this._arten(el.dataset.id)[0];
         this._neuVorschlag();
         break;
       case "neu-art": this._neu.art = el.dataset.id; this._neuVorschlag(); break;
       case "neu-voll": this._neu.voll = el.dataset.id === "ja"; break;
       case "neu-transparent": this._neu.hex = this._neu.hex === "transparent" ? "#3ee6a8" : "transparent"; break;
       case "neu-anlegen": this._neuAnlegen(); return;
+      case "eigen-dialog": this._dialog = `eigen-${el.dataset.id}`; break;
+      case "eigen-anlegen": {
+        const was = el.dataset.id;
+        const name = (this.shadowRoot.getElementById("eigen-name").value || "").trim();
+        if (!name) { this._toast("Bitte einen Namen eingeben."); return; }
+        if (was === "material") {
+          const vorhanden = this._materialien().find((m) => m.toLowerCase() === name.toLowerCase());
+          const m = vorhanden || name;
+          if (!vorhanden) this._daten.materialien_eigen.push(m);
+          this._neu.material = m;
+          this._neu.art = this._arten(m)[0];
+        } else {
+          const m = this._neu.material;
+          const vorhanden = this._arten(m).find((a) => a.toLowerCase() === name.toLowerCase());
+          if (!vorhanden) (this._daten.arten_eigen[m] = this._daten.arten_eigen[m] || []).push(name);
+          this._neu.art = vorhanden || name;
+        }
+        this._neuVorschlag();
+        this._dialog = null;
+        this._speichern();
+        break;
+      }
+      case "filter-auf": this._filterAuf = !this._filterAuf; break;
       case "nochmal-laden": this._laden(); return;
       case "pruefen": this._systemcheck(); return;
       default: return;
@@ -1224,13 +1285,14 @@ class FilamentWerkstattPanel extends HTMLElement {
       `<button class="stat ${klasse}" ${status ? `data-aktion="status" data-id="${status}"` : ""}><strong>${wert}</strong><span>${text}</span></button>`;
     const opt = (wert, text) => `<option value="${esc(wert)}">${esc(text)}</option>`;
 
-    const sorten = MATERIAL_REIHE.filter((m) => rollen.some((r) => r.material === m)).map((m) => {
+    const sorten = this._materialien().filter((m) => rollen.some((r) => r.material === m)).map((m) => {
       const arten = [...new Set(rollen.filter((r) => r.material === m).map((r) => r.art).filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
       return `<optgroup label="${m}">${opt(`m|${m}`, `Alle ${m}`)}${arten.map((a) => opt(`a|${m}|${a}`, a.startsWith(m) ? a : `${a}-${m}`)).join("")}</optgroup>`;
     }).join("");
     const hersteller = [...new Set(rollen.map((r) => r.hersteller))].sort((a, b) => a.localeCompare(b, "de")).map((h) => opt(h, h)).join("");
     const farben = FARBFAMILIEN.filter((f) => rollen.some((r) => farbfamilie(r) === f)).map((f) => opt(f, f)).join("");
     const status = STATUS.map((s) => opt(s.id, s.name)).join("");
+    const anzahl = Object.values(this._f).filter(Boolean).length;
     const mitWert = (html, w) => html.replace(`value="${esc(w)}"`, `value="${esc(w)}" selected`);
 
     return `
@@ -1243,10 +1305,13 @@ class FilamentWerkstattPanel extends HTMLElement {
       </section>
       <section class="werkzeug">
         <button class="chip alle ${this._filterAktiv() ? "" : "an"}" data-aktion="alle">Alle</button>
-        ${this._auswahl("Material", "sorte", "Alle Materialien", mitWert(sorten, this._f.sorte))}
-        ${this._auswahl("Hersteller", "hersteller", "Alle Hersteller", mitWert(hersteller, this._f.hersteller))}
-        ${this._auswahl("Farbe", "farbe", "Alle Farben", mitWert(farben, this._f.farbe))}
-        ${this._auswahl("Status", "status", "Jeder Status", mitWert(status, this._f.status))}
+        ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="filter-auf"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
+        ${!this._mobil || this._filterAuf ? `<div class="unterfilter">
+          ${this._auswahl("Material", "sorte", "Alle Materialien", mitWert(sorten, this._f.sorte))}
+          ${this._auswahl("Hersteller", "hersteller", "Alle Hersteller", mitWert(hersteller, this._f.hersteller))}
+          ${this._auswahl("Farbe", "farbe", "Alle Farben", mitWert(farben, this._f.farbe))}
+          ${this._auswahl("Status", "status", "Jeder Status", mitWert(status, this._f.status))}
+        </div>` : ""}
         <label class="auswahl sort"><span>Sortieren</span>
           <select id="sortierung">${SORTIERUNG.map((s) => `<option value="${s.id}" ${this._sort === s.id ? "selected" : ""}>${s.name}</option>`).join("")}</select>
         </label>
@@ -1267,7 +1332,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         <div class="kachel-name">${esc(r.name)}</div>
         <div class="kachel-sub">${esc(r.hersteller)}</div>
         <div class="kachel-fuss">
-          <span class="mat" style="--m:${(MATERIAL[r.material] || MATERIAL.PLA).farbe}">${esc(r.art === "Wood" ? "Wood-PLA" : r.material)}</span>
+          <span class="mat" style="--m:${materialInfo(r.material).farbe}">${esc(r.art === "Wood" ? "Wood-PLA" : r.material)}</span>
           <span class="rest ${r.rest_g == null ? "leise" : p <= 10 ? "rot" : p <= 20 ? "amber" : ""}">${rest}</span>
         </div>
       </button>`;
@@ -1335,6 +1400,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const hatVorschlaege = [...FELDER.map((f) => f.k), "platte"].some((k) => anzeige(k).quelle === "vorschlag");
     let html = "";
     if (bearb && this._nachTest) html += `<div class="hinweis mint">Stell die Werte so ein, wie du sie beim Testdruck benutzt hast, und tippe dann auf Speichern.</div>`;
+    if (!kenntMaterial(r.material)) html += `<div class="hinweis amber">Für ${esc(r.material)} habe ich keine eigenen Richtwerte. Die Vorschläge stammen von PLA, bitte vor dem ersten Druck anpassen.</div>`;
     if (neu) html += `<div class="hinweis amber">Vorschläge für ${esc(sorteName(r))}. Was du nicht änderst, bleibt orange als Vorschlag markiert. Die Rolle ist bis zum Testdruck „noch nicht probiert“.</div>`;
     else if (!r.probiert && !bearb) html += `<div class="hinweis amber">Diese Rolle hast du noch nicht probiert. Die Werte sind Vorschläge${r.herkunft ? `: ${esc(r.herkunft)}` : " für diese Materialart."}</div>`;
     if (!neu && r.probiert && !bearb && !Object.keys(r.eigen || {}).length) html += `<div class="hinweis">Du druckst diese Rolle mit dem Preset „${esc(r.preset || "–")}“. Die Werte hier sind Richtwerte dafür, bis du deine eigenen einträgst.</div>`;
@@ -1423,7 +1489,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         </div>
       </div>
       ${this._spuleBlockHtml(r)}
-      <div id="r-ergebnis" class="ergebnis">${this._rechnerErgebnisHtml()}</div>
+      <div id="r-ergebnis" class="ergebnis ${r.rest_g != null && Math.max(0, c.brutto - c.spule_g) === r.rest_g ? "" : "ungespeichert"}">${this._rechnerErgebnisHtml()}</div>
       <div class="knopf-reihe">
         <button class="knopf rot-knopf" data-aktion="rest-verwerfen" ${this._rechnerGeaendert() ? "" : "disabled"}>Änderung verwerfen</button>
         <button class="knopf" data-aktion="rest-speichern">Als Restgewicht speichern</button>
@@ -1460,7 +1526,12 @@ class FilamentWerkstattPanel extends HTMLElement {
     const c = this._rechner;
     const rest = Math.max(0, c.brutto - c.spule_g);
     const p = Math.round((rest / (c.nenn_g || 1000)) * 100);
-    return `<span class="leise">Filament auf der Rolle</span><strong>${zahl(rest)} g</strong>
+    const gleich = r.rest_g != null && rest === r.rest_g;
+    const titel = gleich ? "Entspricht dem gespeicherten Restgewicht"
+      : `Neu berechnet, noch nicht gespeichert${r.rest_g != null ? ` (bisher ${zahl(r.rest_g)} g)` : ""}`;
+    const box = this.shadowRoot.getElementById("r-ergebnis");
+    if (box) box.classList.toggle("ungespeichert", !gleich);
+    return `<span class="leise">${titel}</span><strong>${zahl(rest)} g</strong>
       <span class="leise">${p} % von ${gramm(c.nenn_g)} · ca. ${zahl(rest / grammProMeter(r.material))} m</span>`;
   }
 
@@ -1509,9 +1580,11 @@ class FilamentWerkstattPanel extends HTMLElement {
               </select></label>
             ${n.herstellerNeu ? `<label>Name des Herstellers<input class="text" data-neu="hersteller" value="${esc(n.hersteller)}" placeholder="z. B. Polymaker"></label>` : ""}
             <div class="feld-titel">Material</div>
-            <div class="chips">${MATERIAL_REIHE.map((m) => `<button class="chip ${n.material === m ? "an" : ""}" data-aktion="neu-material" data-id="${m}">${m}</button>`).join("")}</div>
+            <div class="chips">${this._materialien().map((m) => `<button class="chip ${n.material === m ? "an" : ""}" data-aktion="neu-material" data-id="${esc(m)}">${esc(m)}</button>`).join("")}
+              <button class="chip weitere" data-aktion="eigen-dialog" data-id="material">+ Neu hinzufügen</button></div>
             <div class="feld-titel">Art</div>
-            <div class="chips">${ARTEN[n.material].map((a) => `<button class="chip ${n.art === a ? "an" : ""}" data-aktion="neu-art" data-id="${a}">${a}</button>`).join("")}</div>
+            <div class="chips">${this._arten(n.material).map((a) => `<button class="chip ${n.art === a ? "an" : ""}" data-aktion="neu-art" data-id="${esc(a)}">${esc(a)}</button>`).join("")}
+              <button class="chip weitere" data-aktion="eigen-dialog" data-id="art">+ Neu hinzufügen</button></div>
             <label>Farbe<input class="text" data-neu="farbe" value="${esc(n.farbe)}" placeholder="z. B. Dunkelblau"></label>
             <div class="farb-zeile">
               <label class="farbwahl">Farbton<input type="color" data-neu="hex" value="${n.hex === "transparent" ? "#ffffff" : esc(n.hex)}" ${n.hex === "transparent" ? "disabled" : ""}></label>
@@ -1570,6 +1643,13 @@ class FilamentWerkstattPanel extends HTMLElement {
             <button class="knopf klein-knopf" data-aktion="spule-neu">Anlegen</button></div>
         </div>
         <button class="knopf leise breit" data-aktion="dialog-zu">Schließen</button>`;
+    } else if (this._dialog === "eigen-material" || this._dialog === "eigen-art") {
+      const art = this._dialog === "eigen-art";
+      inhalt = `<h2>${art ? `Neue Art für ${esc(this._neu.material)}` : "Neues Material"}</h2>
+        <p class="leise klein">Taucht danach bei jedem neuen Filament als Schnellauswahl auf.</p>
+        <div class="regler-zeile"><input id="eigen-name" class="text" placeholder="${art ? "z. B. Glow, Marble" : "z. B. ABS, PA, PLA-CF"}" autocomplete="off">
+          <button class="knopf klein-knopf" data-aktion="eigen-anlegen" data-id="${art ? "art" : "material"}">Hinzufügen</button></div>
+        <button class="knopf leise breit oben-abstand" data-aktion="dialog-zu">Abbrechen</button>`;
     } else if (this._dialog === "groesse") {
       const c = this._rechner;
       const groessen = [...new Set([...this._daten.rollen.map((x) => x.nenn_g || 1000), ...STANDARD_GROESSEN])].sort((a, b) => a - b);
