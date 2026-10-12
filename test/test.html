@@ -1,5 +1,5 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body{margin:0;height:100%;background:#000}</style></head><body>
+<style>html,body{margin:0;background:#000}</style></head><body>
 <script>
 // Nachgebautes Home Assistant: nur das, was die Seite benutzt
 const P = "sensor.p1s_01p00c572701906_";
@@ -21,7 +21,7 @@ window.speicher = speicher;
 <script type="module">
 await import("../filament-werkstatt.js");
 const el = document.createElement("filament-werkstatt-panel");
-el.style.height = "100vh";
+
 document.body.appendChild(el);
 el.narrow = window.innerWidth < 870;
 el.hass = window.hass;

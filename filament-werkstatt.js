@@ -262,14 +262,15 @@ function farbfamilie(rolle) {
 
 const GEWINDE = ["M2", "M2.5", "M3", "M4", "M5", "M6"];
 
-// Normmaße für die Zeichnungen (Zylinderkopf DIN 912, Mutter DIN 934, Scheibe DIN 125)
+// Normmaße (Zylinderkopf DIN 912 / ISO 4762 mit Innensechskant-SW, Mutter DIN 934, Scheibe DIN 125,
+// Durchgangsloch DIN EN 20273 mittel, Senkung DIN 974-1 für Zylinderschrauben)
 const NORM = {
-  M2: { kopf_d: 3.8, kopf_h: 2, mutter_sw: 4, mutter_h: 1.6, scheibe_d: 5, scheibe_h: 0.3 },
-  "M2.5": { kopf_d: 4.5, kopf_h: 2.5, mutter_sw: 5, mutter_h: 2, scheibe_d: 6, scheibe_h: 0.5 },
-  M3: { kopf_d: 5.5, kopf_h: 3, mutter_sw: 5.5, mutter_h: 2.4, scheibe_d: 7, scheibe_h: 0.5 },
-  M4: { kopf_d: 7, kopf_h: 4, mutter_sw: 7, mutter_h: 3.2, scheibe_d: 9, scheibe_h: 0.8 },
-  M5: { kopf_d: 8.5, kopf_h: 5, mutter_sw: 8, mutter_h: 4, scheibe_d: 10, scheibe_h: 1 },
-  M6: { kopf_d: 10, kopf_h: 6, mutter_sw: 10, mutter_h: 5, scheibe_d: 12, scheibe_h: 1.6 },
+  M2: { kopf_d: 3.8, kopf_h: 2, inbus: 1.5, loch: 2.4, senk_d: 4.4, mutter_sw: 4, mutter_h: 1.6, scheibe_d: 5, scheibe_h: 0.3 },
+  "M2.5": { kopf_d: 4.5, kopf_h: 2.5, inbus: 2, loch: 2.9, senk_d: 5.5, mutter_sw: 5, mutter_h: 2, scheibe_d: 6, scheibe_h: 0.5 },
+  M3: { kopf_d: 5.5, kopf_h: 3, inbus: 2.5, loch: 3.4, senk_d: 6.5, mutter_sw: 5.5, mutter_h: 2.4, scheibe_d: 7, scheibe_h: 0.5 },
+  M4: { kopf_d: 7, kopf_h: 4, inbus: 3, loch: 4.5, senk_d: 8, mutter_sw: 7, mutter_h: 3.2, scheibe_d: 9, scheibe_h: 0.8 },
+  M5: { kopf_d: 8.5, kopf_h: 5, inbus: 4, loch: 5.5, senk_d: 10, mutter_sw: 8, mutter_h: 4, scheibe_d: 10, scheibe_h: 1 },
+  M6: { kopf_d: 10, kopf_h: 6, inbus: 5, loch: 6.6, senk_d: 11, mutter_sw: 10, mutter_h: 5, scheibe_d: 12, scheibe_h: 1.6 },
 };
 const gewindeD = (g) => parseFloat(String(g || "M3").slice(1)) || 3;
 
@@ -409,7 +410,12 @@ const STIL = `
   --rot: #ff6b6b;
   --radius: 18px;
   display: block;
-  height: 100%;
+  /* Immer genau so hoch wie das Fenster: sonst wächst die Seite mit dem Inhalt
+     und es scrollt die ganze Seite statt nur der Liste bzw. der Detailansicht */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  overflow: clip;
   font-family: var(--paper-font-body1_-_font-family, "Roboto", system-ui, sans-serif);
   color: var(--text);
   background: var(--grund);
@@ -427,7 +433,7 @@ p { margin: 4px 0 12px; }
 .rot { color: var(--rot); }
 
 .app {
-  position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden;
+  position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; overflow: clip;
   background:
     radial-gradient(1200px 500px at 85% -10%, rgba(62,230,168,0.10), transparent 60%),
     radial-gradient(800px 400px at -10% 110%, rgba(62,230,168,0.06), transparent 60%),
@@ -457,7 +463,7 @@ p { margin: 4px 0 12px; }
 .icon-knopf { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-size: 18px; flex: none; }
 .icon-knopf:hover { background: var(--flaeche-hover); }
 
-.haupt { flex: 1; overflow-y: auto; padding: 24px; position: relative; z-index: 1; }
+.haupt { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px; position: relative; z-index: 1; }
 .mobil .haupt { padding: 16px 16px 96px; }
 .nav-unten {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; justify-content: space-around;
@@ -537,7 +543,7 @@ p { margin: 4px 0 12px; }
 .tabs { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--rand); }
 .tab { padding: 10px 14px; color: var(--leise); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tab.an { color: var(--mint); border-color: var(--mint); }
-.sheet-inhalt { flex: 1; overflow-y: auto; padding: 16px 20px 24px; }
+.sheet-inhalt { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 24px; }
 .sheet-fuss { display: flex; gap: 10px; justify-content: flex-end; padding: 14px 20px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--rand); }
 .mobil .sheet-fuss .knopf { flex: 1; }
 
@@ -599,6 +605,7 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: none; b
 .info-zeile { display: flex; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--rand); font-size: 14px; }
 .info-zeile:last-child { border-bottom: none; }
 .info-zeile span { color: var(--leise); }
+.info-zeile .norm { display: block; font-size: 11px; opacity: .7; margin-top: 1px; }
 textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; resize: vertical; }
 
 /* Knöpfe, Dialog, Meldung */
@@ -632,7 +639,7 @@ textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid va
 .werkzeug .alle { padding: 10px 18px; }
 .auswahl { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 6px 30px 6px 12px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); min-width: 130px; cursor: pointer; }
 .auswahl::after { content: "▾"; position: absolute; right: 11px; top: 50%; transform: translateY(-50%); color: var(--leise); pointer-events: none; }
-.auswahl span { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); }
+.auswahl > span { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); }
 .auswahl select { appearance: none; -webkit-appearance: none; background: transparent; border: none; color: var(--text); font: inherit; font-size: 14px; padding: 0; outline: none; cursor: pointer; width: 100%; }
 .auswahl select option, .auswahl select optgroup { background: #111816; color: var(--text); }
 .auswahl.an { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
@@ -661,8 +668,7 @@ button.zeile-kopf:hover .z-name { color: var(--mint); }
 .zeile.auf { background: rgba(62,230,168,.04); margin: 0 -14px; padding: 10px 14px; }
 .zeile-kopf.statisch { cursor: default; }
 .mini.mint-rand { color: var(--mint); border-color: rgba(62,230,168,.4); margin: 6px 0 4px; }
-select.text { appearance: auto; }
-select.text option { background: #111816; }
+
 
 /* Letzter Druck */
 .letzter-druck { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 14px; border: 1px dashed var(--rand); background: var(--flaeche); margin-bottom: 12px; }
@@ -697,7 +703,43 @@ select.text option { background: #111816; }
 .farbwahl input { width: 64px; height: 38px; border: 1px solid var(--rand); border-radius: 10px; background: none; padding: 2px; cursor: pointer; }
 
 /* Dialog-Listen */
-.dialog { max-height: calc(100% - 40px); overflow-y: auto; }
+.dialog { max-height: calc(100% - 40px); overflow-y: auto; overscroll-behavior: contain; animation: auf .18s ease; }
+@keyframes auf { from { opacity: 0; transform: translate(-50%, -48%) scale(.97); } }
+.schleier { animation: blende .2s ease; }
+@keyframes blende { from { opacity: 0; } }
+.toast { animation: blende .2s ease; }
+.still { animation: none !important; }
+.klapp { display: block; }
+
+/* Eigene Auswahllisten */
+select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: none; width: 1px; height: 1px; margin: 0; padding: 0; border: 0; }
+.dd-knopf { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 14px; color: var(--text); }
+.dd-knopf .dd-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-knopf .dd-text.leise { color: var(--leise); }
+.dd-pfeil { color: var(--leise); transition: transform .18s ease; font-size: 12px; }
+.dd-knopf.offen .dd-pfeil { transform: rotate(180deg); color: var(--mint); }
+.auswahl .dd-knopf { padding: 0; }
+.auswahl .dd-pfeil { display: none; }
+.auswahl.an .dd-knopf { color: var(--mint); }
+.auswahl:has(.dd-knopf.offen) { border-color: rgba(62,230,168,.6); }
+.dd-knopf.text { padding: 10px 12px; }
+.dd-knopf.text:hover, .dd-knopf.text.offen { border-color: rgba(62,230,168,.5); }
+.dd-liste {
+  position: absolute; z-index: 40; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
+  background: rgba(16,23,21,.97); border: 1px solid rgba(62,230,168,.28); border-radius: 16px;
+  backdrop-filter: blur(18px); box-shadow: 0 18px 50px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3);
+  animation: dd-rein .16s cubic-bezier(.2,.7,.2,1); transform-origin: top center;
+}
+.dd-liste.nach-oben { transform-origin: bottom center; }
+@keyframes dd-rein { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
+.dd-liste.nach-oben { animation-name: dd-rein-oben; }
+@keyframes dd-rein-oben { from { opacity: 0; transform: translateY(6px) scale(.98); } }
+.dd-gruppe { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--leise); padding: 10px 10px 4px; }
+.dd-option { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 10px; font-size: 14px; }
+.dd-option.eingerueckt { padding-left: 20px; }
+.dd-option:hover { background: var(--flaeche-hover); }
+.dd-option.an { background: var(--mint-weich); color: var(--mint); }
+.dd-option i { font-style: normal; font-size: 12px; }
 .liste { display: grid; gap: 8px; margin: 12px 0; }
 .wahl.kompakt { padding: 10px 14px; margin: 0; }
 .wahl.an { border-color: rgba(62,230,168,.6); background: var(--mint-weich); }
@@ -777,7 +819,7 @@ function passendeTeile(t, alle) {
 
 // ---- Zeichnungen (schematisch, maßstäblich innerhalb des Teils) ----------
 function teilSvg(t, gross = false) {
-  const B = gross ? 240 : 120, H = gross ? 120 : 64;
+  const B = gross ? 240 : 120, H = gross ? (t.kat === "schraube" ? 160 : 120) : 64;
   const linie = "rgba(232,241,236,.85)";
   const mass = (x1, y1, x2, y2, text, tx, ty) => gross
     ? `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--mint)" stroke-width="1" marker-start="url(#pf)" marker-end="url(#pf)"/>
@@ -788,14 +830,19 @@ function teilSvg(t, gross = false) {
   const norm = NORM[t.gewinde] || NORM.M3;
   if (t.kat === "schraube") {
     const L = t.laenge || 10, k = norm.kopf_h, dk = norm.kopf_d;
-    const s = Math.min((B - (gross ? 70 : 30)) / (L + k), (H - 36) / dk);
-    const x0 = (B - (L + k) * s) / 2, y = H / 2 - (gross ? 6 : 0);
+    const s = Math.min((B - (gross ? 100 : 30)) / (L + k), (H - (gross ? 70 : 36)) / dk);
+    const x0 = (B - (L + k) * s) / 2 + (gross ? 10 : 0), y = H / 2 + (gross ? 2 : 0);
     let gewinde = "";
     for (let x = x0 + k * s + 3; x < x0 + (k + L) * s - 1; x += Math.max(3, 0.5 * s)) gewinde += `<line x1="${x}" y1="${y - (m * s) / 2}" x2="${x + 2}" y2="${y + (m * s) / 2}" stroke="${linie}" stroke-opacity=".35"/>`;
     innen = `<rect x="${x0}" y="${y - (dk * s) / 2}" width="${k * s}" height="${dk * s}" rx="2" fill="#3a4541" stroke="${linie}"/>
       <rect x="${x0 + k * s}" y="${y - (m * s) / 2}" width="${L * s}" height="${m * s}" fill="#2b3431" stroke="${linie}"/>${gewinde}
       ${mass(x0 + k * s, y + (dk * s) / 2 + 12, x0 + (k + L) * s, y + (dk * s) / 2 + 12, `L ${z(L)} mm`, x0 + (k + L / 2) * s, y + (dk * s) / 2 + 26)}
-      ${mass(x0 + (k + L) * s + 10, y - (m * s) / 2, x0 + (k + L) * s + 10, y + (m * s) / 2, t.gewinde, x0 + (k + L) * s + 26, y + 4)}`;
+      ${mass(x0 + (k + L) * s + 10, y - (m * s) / 2, x0 + (k + L) * s + 10, y + (m * s) / 2, t.gewinde, x0 + (k + L) * s + 26, y + 4)}
+      ${gross ? `<line x1="${x0 + k * s * 0.15}" y1="${y - 2.5}" x2="${x0 + k * s * 0.15}" y2="${y + 2.5}" stroke="${linie}" stroke-opacity=".5"/>
+      ${mass(x0 - 10, y - (dk * s) / 2, x0 - 10, y + (dk * s) / 2, "", 0, 0)}
+      <text x="${x0 - 16}" y="${y - 2}" fill="var(--mint)" font-size="10" text-anchor="end">Kopf</text>
+      <text x="${x0 - 16}" y="${y + 11}" fill="var(--mint)" font-size="10" text-anchor="end">Ø ${z(dk)}</text>
+      ${mass(x0, y - (dk * s) / 2 - 10, x0 + k * s, y - (dk * s) / 2 - 10, `k ${z(k)}`, x0 + (k * s) / 2, y - (dk * s) / 2 - 16)}` : ""}`;
   } else if (t.kat === "mutter" || t.kat === "scheibe") {
     const r = (H - (gross ? 30 : 12)) / 2, cx = B / 2, cy = H / 2;
     const loch = r * (m / (t.kat === "mutter" ? norm.mutter_sw : norm.scheibe_d)) * 1.05;
@@ -913,7 +960,7 @@ const InventarAnsicht = {
       <section class="werkzeug">
         <button class="chip alle ${aktiv ? "" : "an"}" data-aktion="inv-alle">Alle</button>
         ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="filter-auf"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
-        ${!this._mobil || this._filterAuf ? `<div class="unterfilter">${filter}</div>` : ""}
+        ${!this._mobil || this._filterAuf ? `<div class="unterfilter" data-einmal="filter">${filter}</div>` : ""}
         <label class="auswahl sort"><span>Sortieren</span>
           <select id="inv-sortierung">${INV_SORTIERUNG.map((s) => opt(s.id, s.name, this._invSort)).join("")}</select></label>
         <input id="inv-suche" class="suche" type="search" placeholder="Suchen: z. B. M3x12, Feder 5 mm, Einsatz M4 …" value="${esc(this._invSuche || "")}" autocomplete="off">
@@ -983,12 +1030,16 @@ const InventarAnsicht = {
         return `<div class="zeile eigen ${auf ? "auf" : ""}" data-zeile="inv-${f.k}">
           <button class="zeile-kopf" data-aktion="zeile" data-k="inv-${f.k}"><span class="z-name">${f.name}</span>
             <span class="z-wert"><span class="wert">${zahl(t[f.k], f.nk ?? 0)} ${f.e}</span></span></button>
-          ${auf ? `<div class="regler-zeile">
+          ${auf ? `<div class="klapp" data-klapp="z:inv-${f.k}"><div class="regler-zeile">
             <button class="rund" data-aktion="inv-schritt" data-k="${f.k}" data-d="-1">−</button>
             <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${t[f.k] ?? f.min}" data-inv-mass="${f.k}">
-            <button class="rund" data-aktion="inv-schritt" data-k="${f.k}" data-d="1">+</button></div>` : ""}
+            <button class="rund" data-aktion="inv-schritt" data-k="${f.k}" data-d="1">+</button></div></div>` : ""}
         </div>`;
       }).join("")}</div></div>`;
+      if (t.kat === "schraube") {
+        const n = NORM[t.gewinde] || NORM.M3;
+        html += this._invNormHtml(t, n);
+      }
     } else if (t.kat === "mutter" || t.kat === "scheibe") {
       html += `<p class="leise klein">Maße nach Norm (${t.kat === "mutter" ? "DIN 934" : "DIN 125"}), gelten für alle ${esc(t.gewinde)}-${t.kat === "mutter" ? "Muttern" : "Scheiben"}.</p>`;
     }
@@ -1024,8 +1075,8 @@ const InventarAnsicht = {
         <button class="knopf rot-knopf breit oben-abstand" data-aktion="inv-loeschen">Teil löschen</button>`;
     }
 
-    return `<div class="schleier" data-aktion="schliessen"></div>
-      <section class="sheet" role="dialog" aria-label="${esc(teilName(t))}">
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="${esc(teilName(t))}">
         <div class="griff"></div>
         <header class="sheet-kopf">
           <div class="teil-kopf-bild">${teilSvg(t)}</div>
@@ -1140,6 +1191,20 @@ const InventarAnsicht = {
     return false;
   },
 
+  // Maße zum Konstruieren (Kopf, Loch, Senkung) mit Normangabe
+  _invNormHtml(t, n) {
+    const z = (v) => zahl(v, 1);
+    const zeile = (name, wert, norm) => `<div class="info-zeile"><span>${name}<small class="norm">${norm}</small></span><strong>${wert}</strong></div>`;
+    return `<h3>📐 Zum Konstruieren (${esc(t.gewinde)})</h3><div class="info-liste">
+      ${zeile("Kopfdurchmesser dk", `${z(n.kopf_d)} mm`, "DIN 912 / ISO 4762")}
+      ${zeile("Kopfhöhe k", `${z(n.kopf_h)} mm`, "DIN 912 / ISO 4762")}
+      ${zeile("Innensechskant", `SW ${z(n.inbus)}`, "DIN 912 / ISO 4762")}
+      ${zeile("Durchgangsloch", `Ø ${z(n.loch)} mm`, "DIN EN 20273, mittel")}
+      ${zeile("Senkung für den Kopf", `Ø ${z(n.senk_d)} × ${z(n.kopf_h + 0.4)} mm tief`, "Richtwert, vgl. DIN 974-1")}
+    </div>
+    <p class="leise klein">Maße nach DIN 912 / ISO 4762 (Zylinderschraube mit Innensechskant). Durchgangsloch nach DIN EN 20273 (ISO 273), Reihe mittel. Die Senkung ist ein Richtwert (Ø mit Spiel, Tiefe = Kopfhöhe + 0,4 mm, damit der Kopf bündig verschwindet); die genauen Werte stehen in DIN 974-1. Für den 3D-Druck Löcher etwa 0,1–0,2 mm größer zeichnen.</p>`;
+  },
+
   _invAenderung(t) {
     if (t.dataset.invFilter != null) { this._invF = { ...this._invF, [t.dataset.invFilter]: t.value }; this._zeichnen(); return true; }
     if (t.id === "inv-sortierung") { this._invSort = t.value; this._zeichnen(); return true; }
@@ -1152,7 +1217,7 @@ const InventarAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -1233,6 +1298,13 @@ class FilamentWerkstattPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    // Stil einmal anlegen statt bei jedem Neuzeichnen neu einzulesen (spart Rechenzeit, kein Flackern)
+    try {
+      const blatt = new CSSStyleSheet();
+      blatt.replaceSync(STIL);
+      this.shadowRoot.adoptedStyleSheets = [blatt];
+      this._stilFest = true;
+    } catch (e) { this._stilFest = false; }
     this._daten = null;
     this._fehler = null;
     this._ansicht = "filament";
@@ -1283,6 +1355,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       this.shadowRoot.addEventListener("click", (e) => this._klick(e));
       this.shadowRoot.addEventListener("input", (e) => this._eingabe(e));
       this.shadowRoot.addEventListener("change", (e) => this._aenderung(e));
+      this.shadowRoot.addEventListener("scroll", (e) => { this._ddBeimScrollen(e.target); }, true);
+      this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._ddZu(); });
     }
     this._ro.observe(this);
     this._zeichnen();
@@ -1450,14 +1524,23 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   // ---- Ereignisse ---------------------------------------------------------
   _klick(e) {
+    // Tipp auf den Label-Text: der Browser klickt danach selbst den Listen-Knopf
+    if (e.target.closest("label") && e.target.closest("label").querySelector(".dd-knopf") && !e.target.closest(".dd-knopf, input, textarea")) return;
+    if (this._ddOffen && !e.target.closest(".dd-liste")) {
+      const war = this._ddOffen;
+      this._ddZu();
+      if (e.target.closest(".dd-knopf") === war.knopf) return;
+    }
     const el = e.target.closest("[data-aktion]");
     if (!el) return;
     const a = el.dataset.aktion;
+    if (a === "dd") { this._ddAuf(el); return; }
+    if (a === "dd-wahl") { this._ddWaehlen(el); return; }
     if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
+    if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
       const k = el.dataset.k;
-      this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k);
-      this._zeichnen();
+      this._klappen(`z:${k}`, this._offeneZeilen.has(k), () => { this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k); }, `[data-zeile="${k}"]`);
       return;
     }
     const rolle = this._rolle();
@@ -1493,14 +1576,15 @@ class FilamentWerkstattPanel extends HTMLElement {
         break;
       case "gruppe": {
         const g = el.dataset.id;
-        this._gruppen.has(g) ? this._gruppen.delete(g) : this._gruppen.add(g);
-        break;
+        this._klappen(`g:${g}`, this._gruppen.has(g), () => { this._gruppen.has(g) ? this._gruppen.delete(g) : this._gruppen.add(g); }, `[data-gruppe="${g}"]`);
+        return;
       }
       case "zeile": {
         const k = el.dataset.k;
+        const teil = this._bearbeiten || this._modus === "neu";   // sonst ändert sich auch der Fuß: alles neu zeichnen
         if (!this._bearbeiten) this._bearbeitenStarten(rolle, false);
-        this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k);
-        break;
+        this._klappen(`z:${k}`, this._offeneZeilen.has(k), () => { this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k); }, teil ? `[data-zeile="${k}"]` : null);
+        return;
       }
       case "verwerfen":
         this._bearbeiten = false; this._entwurf = null; this._nachTest = false; this._offeneZeilen.clear();
@@ -1824,8 +1908,10 @@ class FilamentWerkstattPanel extends HTMLElement {
     const scrollHaupt = haupt ? haupt.scrollTop : 0;
     if (sheet) this._sheetScroll = sheet.scrollTop;
     const fokusId = root.activeElement && ["suche", "inv-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
+    const schonDa = new Set([...root.querySelectorAll("[data-einmal]")].map((x) => x.dataset.einmal));
+    this._ddOffen = null;
 
-    root.innerHTML = `<style>${STIL}</style>
+    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
         <main class="haupt">${this._inhaltHtml()}</main>
@@ -1835,7 +1921,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         ${this._modus === "neu" ? this._neuSheetHtml() : ""}
         ${this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : ""}
         ${this._dialogHtml()}
-        ${this._toastText ? `<div class="toast">${esc(this._toastText)}</div>` : ""}
+        ${this._toastText ? `<div class="toast" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}</div>` : ""}
       </div>`;
 
     const h = root.querySelector(".haupt");
@@ -1847,6 +1933,150 @@ class FilamentWerkstattPanel extends HTMLElement {
       i.focus();
       i.setSelectionRange(i.value.length, i.value.length);
     }
+    // Einblend-Animationen nur beim ersten Erscheinen, nicht bei jedem Neuzeichnen
+    root.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });
+    this._auswahlenBauen();
+    if (this._klappNeu) {
+      const k = root.querySelector(`[data-klapp="${this._klappNeu}"]`);
+      this._klappNeu = null;
+      if (k) this._klappAnimieren(k, true);
+    }
+  }
+
+  // ---- Aufklappen mit Animation (nach unten fahren) -----------------------
+  // teil: Selektor des Bereichs, der allein neu gezeichnet werden darf (schneller, nichts flackert)
+  _klappen(schluessel, istAuf, umschalten, teil) {
+    const neu = () => (teil && this._teilweise(teil)) || (this._zeichnen(), true);
+    const el = istAuf && this.shadowRoot.querySelector(`[data-klapp="${schluessel}"]`);
+    if (!el) {
+      umschalten();
+      if (istAuf) { neu(); return; }
+      this._klappNeu = schluessel;
+      neu();
+      const k = this._klappNeu && this.shadowRoot.querySelector(`[data-klapp="${schluessel}"]`);
+      this._klappNeu = null;
+      if (k) this._klappAnimieren(k, true);
+      return;
+    }
+    const gruppe = el.parentElement.closest(".gruppe");
+    if (gruppe && schluessel.startsWith("g:")) gruppe.classList.remove("auf");
+    this._klappLaeuft = true;
+    this._klappAnimieren(el, false, () => { this._klappLaeuft = false; umschalten(); neu(); });
+  }
+
+  // Nur ein Element der offenen Detailansicht durch seine neue Fassung ersetzen
+  _teilweise(selektor) {
+    const root = this.shadowRoot;
+    const alt = root.querySelector(`.sheet ${selektor}`);
+    if (!alt) return false;
+    const html = this._modus === "detail" ? this._sheetHtml() : this._modus === "neu" ? this._neuSheetHtml()
+      : this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : null;
+    if (!html) return false;
+    const vorlage = document.createElement("template");
+    vorlage.innerHTML = html;
+    const neu = vorlage.content.querySelector(selektor);
+    if (!neu) return false;
+    alt.replaceWith(neu);
+    this._auswahlenBauen();
+    return true;
+  }
+
+  _klappAnimieren(el, auf, fertig) {
+    const h = el.scrollHeight;
+    const ruhig = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (ruhig || !el.animate) { fertig && fertig(); return; }
+    el.style.overflow = "hidden";
+    const schritte = [{ height: "0px", opacity: 0 }, { height: `${h}px`, opacity: 1 }];
+    const anim = el.animate(auf ? schritte : schritte.reverse(), { duration: Math.min(320, 160 + h * 0.4), easing: "cubic-bezier(.2,.7,.2,1)" });
+    anim.onfinish = () => { el.style.overflow = ""; fertig && fertig(); };
+    if (auf) {
+      const pfeil = el.parentElement.querySelector(":scope > .gruppe-kopf .pfeil");
+      if (pfeil) pfeil.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(90deg)" }], { duration: 180, easing: "ease" });
+    }
+  }
+
+  // ---- Eigene Auswahllisten statt der Browser-Liste -----------------------
+  // Das <select> bleibt (unsichtbar) die Quelle des Werts; ein Knopf zeigt ihn an.
+  _auswahlenBauen() {
+    this.shadowRoot.querySelectorAll("select:not(.dd-nativ)").forEach((sel) => {
+      const i = (this._ddNr = (this._ddNr || 0) + 1);
+      sel.classList.add("dd-nativ");
+      sel.tabIndex = -1;
+      sel.dataset.dd = String(i);
+      const opt = sel.options[sel.selectedIndex];
+      const knopf = document.createElement("button");
+      knopf.type = "button";
+      knopf.className = `dd-knopf ${sel.classList.contains("text") ? "text" : ""}`;
+      knopf.dataset.aktion = "dd";
+      knopf.dataset.dd = String(i);
+      knopf.innerHTML = `<span class="dd-text ${!opt || opt.disabled ? "leise" : ""}"></span><span class="dd-pfeil">▾</span>`;
+      knopf.firstChild.textContent = opt ? opt.textContent : "";
+      sel.before(knopf);   // zuerst im <label>, damit ein Tipp aufs Label die Liste öffnet
+    });
+  }
+
+  _ddAuf(knopf) {
+    const root = this.shadowRoot;
+    const sel = root.querySelector(`select[data-dd="${knopf.dataset.dd}"]`);
+    const app = root.querySelector(".app");
+    if (!sel || !app) return;
+    let html = "";
+    for (const kind of sel.children) {
+      if (kind.tagName === "OPTGROUP") {
+        html += `<div class="dd-gruppe">${esc(kind.label)}</div>`;
+        for (const o of kind.children) html += this._ddOptionHtml(o, sel, true);
+      } else html += this._ddOptionHtml(kind, sel, false);
+    }
+    const liste = document.createElement("div");
+    liste.className = "dd-liste";
+    liste.setAttribute("role", "listbox");
+    liste.innerHTML = html;
+    app.appendChild(liste);
+    const a = app.getBoundingClientRect(), k = knopf.getBoundingClientRect();
+    const breite = Math.max(k.width, 200);
+    const links = Math.min(Math.max(8, k.left - a.left), a.width - breite - 8);
+    const unten = a.bottom - k.bottom - 12, oben = k.top - a.top - 12;
+    const nachOben = unten < 260 && oben > unten;
+    liste.style.left = `${links}px`;
+    liste.style.width = `${breite}px`;
+    liste.style.maxHeight = `${Math.min(360, nachOben ? oben : unten)}px`;
+    if (nachOben) { liste.style.bottom = `${a.bottom - k.top + 6}px`; liste.classList.add("nach-oben"); }
+    else liste.style.top = `${k.bottom - a.top + 6}px`;
+    knopf.classList.add("offen");
+    const stand = new Map([...this.shadowRoot.querySelectorAll(".haupt, .sheet-inhalt, .dialog")].map((x) => [x, x.scrollTop]));
+    this._ddOffen = { liste, knopf, stand };
+    const an = liste.querySelector(".an");
+    if (an) liste.scrollTop = Math.max(0, an.offsetTop - liste.clientHeight / 2);
+  }
+
+  // Liste schließen, wenn die Seite darunter wirklich bewegt wird (nicht bei verspäteten Scroll-Meldungen)
+  _ddBeimScrollen(ziel) {
+    const d = this._ddOffen;
+    if (!d || d.liste.contains(ziel) || !ziel.matches || !ziel.matches(".haupt, .sheet-inhalt, .dialog")) return;
+    if (!d.stand.has(ziel)) d.stand.set(ziel, ziel.scrollTop);
+    if (Math.abs(ziel.scrollTop - d.stand.get(ziel)) > 4) this._ddZu();
+  }
+
+  _ddOptionHtml(o, sel, eingerueckt) {
+    if (o.disabled) return "";
+    const an = o.value === sel.value;
+    return `<button type="button" class="dd-option ${an ? "an" : ""} ${eingerueckt ? "eingerueckt" : ""}" role="option" data-aktion="dd-wahl" data-dd="${sel.dataset.dd}" data-wert="${esc(o.value)}">
+      <span>${esc(o.textContent)}</span>${an ? "<i>✓</i>" : ""}</button>`;
+  }
+
+  _ddWaehlen(el) {
+    const sel = this.shadowRoot.querySelector(`select[data-dd="${el.dataset.dd}"]`);
+    this._ddZu();
+    if (!sel || sel.value === el.dataset.wert) return;
+    sel.value = el.dataset.wert;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  _ddZu() {
+    if (!this._ddOffen) return;
+    this._ddOffen.liste.remove();
+    this._ddOffen.knopf.classList.remove("offen");
+    this._ddOffen = null;
   }
 
   _kopfHtml() {
@@ -1916,7 +2146,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       <section class="werkzeug">
         <button class="chip alle ${this._filterAktiv() ? "" : "an"}" data-aktion="alle">Alle</button>
         ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="filter-auf"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
-        ${!this._mobil || this._filterAuf ? `<div class="unterfilter">
+        ${!this._mobil || this._filterAuf ? `<div class="unterfilter" data-einmal="filter">
           ${this._auswahl("Material", "sorte", "Alle Materialien", mitWert(sorten, this._f.sorte))}
           ${this._auswahl("Hersteller", "hersteller", "Alle Hersteller", mitWert(hersteller, this._f.hersteller))}
           ${this._auswahl("Farbe", "farbe", "Alle Farben", mitWert(farben, this._f.farbe))}
@@ -1963,8 +2193,8 @@ class FilamentWerkstattPanel extends HTMLElement {
         fuss = `<button class="knopf amber" data-aktion="probiert">✓ Probiert</button>`;
       }
     }
-    return `<div class="schleier" data-aktion="schliessen"></div>
-      <section class="sheet" role="dialog" aria-label="${esc(r.name)}">
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="${esc(r.name)}">
         <div class="griff"></div>
         <header class="sheet-kopf">
           ${spuleSvg(r, true)}
@@ -2029,11 +2259,11 @@ class FilamentWerkstattPanel extends HTMLElement {
           return `<div class="zeile ${w.quelle} ${auf ? "auf" : ""}" data-zeile="${f.k}">
             <button class="zeile-kopf" data-aktion="zeile" data-k="${f.k}"><span class="z-name">${f.name}</span>
               <span class="z-wert"><span class="wert">${zahl(w.v, feldNk(f))} ${f.e}</span>${w.quelle === "vorschlag" ? '<span class="tag">Vorschlag</span>' : ""}</span></button>
-            ${auf ? `<div class="regler-zeile">
+            ${auf ? `<div class="klapp" data-klapp="z:${f.k}"><div class="regler-zeile">
               <button class="rund" data-aktion="schritt" data-k="${f.k}" data-d="-1" aria-label="weniger">−</button>
               <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${w.v ?? f.min}" data-feld="${f.k}">
               <button class="rund" data-aktion="schritt" data-k="${f.k}" data-d="1" aria-label="mehr">+</button>
-            </div>` : ""}
+            </div></div>` : ""}
           </div>`;
         }).join(""));
       if (g.id === "fluss") html += this._platteHtml(r, anzeige);
@@ -2056,18 +2286,18 @@ class FilamentWerkstattPanel extends HTMLElement {
       `<div class="zeile ${w.quelle} ${auf ? "auf" : ""}" data-zeile="platte">
         <button class="zeile-kopf" data-aktion="zeile" data-k="platte"><span class="z-name">Druckbetttyp</span>
           <span class="z-wert"><span class="wert">${esc(w.v || "–")}</span>${w.quelle === "vorschlag" ? '<span class="tag">Vorschlag</span>' : ""}</span></button>
-        ${auf ? `<select class="text" data-platte="1">${PLATTEN.map((p) => `<option ${p === w.v ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>` : ""}
+        ${auf ? `<div class="klapp" data-klapp="z:platte"><select class="text" data-platte="1">${PLATTEN.map((p) => `<option ${p === w.v ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></div>` : ""}
       </div>`);
   }
 
   _gruppeHtml(id, icon, name, zusammenfassung, nurVorschlag, inhalt) {
     const auf = this._gruppen.has(id);
-    return `<div class="gruppe ${auf ? "auf" : ""}">
+    return `<div class="gruppe ${auf ? "auf" : ""}" data-gruppe="${id}">
       <button class="gruppe-kopf" data-aktion="gruppe" data-id="${id}">
         <span class="g-icon">${icon}</span><span class="g-name">${name}</span>
         <span class="g-zus ${nurVorschlag ? "amber" : ""}">${zusammenfassung}</span><span class="pfeil">›</span>
       </button>
-      ${auf ? `<div class="gruppe-inhalt">${inhalt}</div>` : ""}
+      ${auf ? `<div class="klapp" data-klapp="g:${id}"><div class="gruppe-inhalt">${inhalt}</div></div>` : ""}
     </div>`;
   }
 
@@ -2174,8 +2404,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     const bekannt = [...new Set(this._daten.rollen.map((r) => r.hersteller))].sort((a, b) => a.localeCompare(b, "de"));
     const c = this._rechner;
     const groessen = [...new Set([...this._daten.rollen.map((r) => r.nenn_g || 1000), ...STANDARD_GROESSEN])].sort((a, b) => a - b);
-    return `<div class="schleier" data-aktion="schliessen"></div>
-      <section class="sheet" role="dialog" aria-label="Neues Filament">
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="Neues Filament">
         <div class="griff"></div>
         <header class="sheet-kopf"><div id="neu-vorschau" class="neu-vorschau">${this._neuVorschauHtml()}</div>
           <button class="icon-knopf" data-aktion="schliessen" aria-label="Schließen">✕</button></header>
@@ -2271,7 +2501,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         <div class="chips">${groessen.map((g) => `<button class="chip ${c.nenn_g === g ? "an" : ""}" data-aktion="groesse-wahl" data-g="${g}">${gramm(g)}</button>`).join("")}</div>
         <button class="knopf breit oben-abstand" data-aktion="dialog-zu">Fertig</button>`;
     }
-    return `<div class="schleier oben" data-aktion="dialog-zu"></div><div class="dialog" role="dialog">${inhalt}</div>`;
+    return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-${this._dialog}"></div><div class="dialog" role="dialog" data-einmal="dialog-${this._dialog}">${inhalt}</div>`;
   }
 
   _systemHtml() {

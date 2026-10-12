@@ -6,14 +6,15 @@
 
 const GEWINDE = ["M2", "M2.5", "M3", "M4", "M5", "M6"];
 
-// Normmaße für die Zeichnungen (Zylinderkopf DIN 912, Mutter DIN 934, Scheibe DIN 125)
+// Normmaße (Zylinderkopf DIN 912 / ISO 4762 mit Innensechskant-SW, Mutter DIN 934, Scheibe DIN 125,
+// Durchgangsloch DIN EN 20273 mittel, Senkung DIN 974-1 für Zylinderschrauben)
 const NORM = {
-  M2: { kopf_d: 3.8, kopf_h: 2, mutter_sw: 4, mutter_h: 1.6, scheibe_d: 5, scheibe_h: 0.3 },
-  "M2.5": { kopf_d: 4.5, kopf_h: 2.5, mutter_sw: 5, mutter_h: 2, scheibe_d: 6, scheibe_h: 0.5 },
-  M3: { kopf_d: 5.5, kopf_h: 3, mutter_sw: 5.5, mutter_h: 2.4, scheibe_d: 7, scheibe_h: 0.5 },
-  M4: { kopf_d: 7, kopf_h: 4, mutter_sw: 7, mutter_h: 3.2, scheibe_d: 9, scheibe_h: 0.8 },
-  M5: { kopf_d: 8.5, kopf_h: 5, mutter_sw: 8, mutter_h: 4, scheibe_d: 10, scheibe_h: 1 },
-  M6: { kopf_d: 10, kopf_h: 6, mutter_sw: 10, mutter_h: 5, scheibe_d: 12, scheibe_h: 1.6 },
+  M2: { kopf_d: 3.8, kopf_h: 2, inbus: 1.5, loch: 2.4, senk_d: 4.4, mutter_sw: 4, mutter_h: 1.6, scheibe_d: 5, scheibe_h: 0.3 },
+  "M2.5": { kopf_d: 4.5, kopf_h: 2.5, inbus: 2, loch: 2.9, senk_d: 5.5, mutter_sw: 5, mutter_h: 2, scheibe_d: 6, scheibe_h: 0.5 },
+  M3: { kopf_d: 5.5, kopf_h: 3, inbus: 2.5, loch: 3.4, senk_d: 6.5, mutter_sw: 5.5, mutter_h: 2.4, scheibe_d: 7, scheibe_h: 0.5 },
+  M4: { kopf_d: 7, kopf_h: 4, inbus: 3, loch: 4.5, senk_d: 8, mutter_sw: 7, mutter_h: 3.2, scheibe_d: 9, scheibe_h: 0.8 },
+  M5: { kopf_d: 8.5, kopf_h: 5, inbus: 4, loch: 5.5, senk_d: 10, mutter_sw: 8, mutter_h: 4, scheibe_d: 10, scheibe_h: 1 },
+  M6: { kopf_d: 10, kopf_h: 6, inbus: 5, loch: 6.6, senk_d: 11, mutter_sw: 10, mutter_h: 5, scheibe_d: 12, scheibe_h: 1.6 },
 };
 const gewindeD = (g) => parseFloat(String(g || "M3").slice(1)) || 3;
 

@@ -42,7 +42,7 @@ function passendeTeile(t, alle) {
 
 // ---- Zeichnungen (schematisch, maßstäblich innerhalb des Teils) ----------
 function teilSvg(t, gross = false) {
-  const B = gross ? 240 : 120, H = gross ? 120 : 64;
+  const B = gross ? 240 : 120, H = gross ? (t.kat === "schraube" ? 160 : 120) : 64;
   const linie = "rgba(232,241,236,.85)";
   const mass = (x1, y1, x2, y2, text, tx, ty) => gross
     ? `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--mint)" stroke-width="1" marker-start="url(#pf)" marker-end="url(#pf)"/>
@@ -53,14 +53,19 @@ function teilSvg(t, gross = false) {
   const norm = NORM[t.gewinde] || NORM.M3;
   if (t.kat === "schraube") {
     const L = t.laenge || 10, k = norm.kopf_h, dk = norm.kopf_d;
-    const s = Math.min((B - (gross ? 70 : 30)) / (L + k), (H - 36) / dk);
-    const x0 = (B - (L + k) * s) / 2, y = H / 2 - (gross ? 6 : 0);
+    const s = Math.min((B - (gross ? 100 : 30)) / (L + k), (H - (gross ? 70 : 36)) / dk);
+    const x0 = (B - (L + k) * s) / 2 + (gross ? 10 : 0), y = H / 2 + (gross ? 2 : 0);
     let gewinde = "";
     for (let x = x0 + k * s + 3; x < x0 + (k + L) * s - 1; x += Math.max(3, 0.5 * s)) gewinde += `<line x1="${x}" y1="${y - (m * s) / 2}" x2="${x + 2}" y2="${y + (m * s) / 2}" stroke="${linie}" stroke-opacity=".35"/>`;
     innen = `<rect x="${x0}" y="${y - (dk * s) / 2}" width="${k * s}" height="${dk * s}" rx="2" fill="#3a4541" stroke="${linie}"/>
       <rect x="${x0 + k * s}" y="${y - (m * s) / 2}" width="${L * s}" height="${m * s}" fill="#2b3431" stroke="${linie}"/>${gewinde}
       ${mass(x0 + k * s, y + (dk * s) / 2 + 12, x0 + (k + L) * s, y + (dk * s) / 2 + 12, `L ${z(L)} mm`, x0 + (k + L / 2) * s, y + (dk * s) / 2 + 26)}
-      ${mass(x0 + (k + L) * s + 10, y - (m * s) / 2, x0 + (k + L) * s + 10, y + (m * s) / 2, t.gewinde, x0 + (k + L) * s + 26, y + 4)}`;
+      ${mass(x0 + (k + L) * s + 10, y - (m * s) / 2, x0 + (k + L) * s + 10, y + (m * s) / 2, t.gewinde, x0 + (k + L) * s + 26, y + 4)}
+      ${gross ? `<line x1="${x0 + k * s * 0.15}" y1="${y - 2.5}" x2="${x0 + k * s * 0.15}" y2="${y + 2.5}" stroke="${linie}" stroke-opacity=".5"/>
+      ${mass(x0 - 10, y - (dk * s) / 2, x0 - 10, y + (dk * s) / 2, "", 0, 0)}
+      <text x="${x0 - 16}" y="${y - 2}" fill="var(--mint)" font-size="10" text-anchor="end">Kopf</text>
+      <text x="${x0 - 16}" y="${y + 11}" fill="var(--mint)" font-size="10" text-anchor="end">Ø ${z(dk)}</text>
+      ${mass(x0, y - (dk * s) / 2 - 10, x0 + k * s, y - (dk * s) / 2 - 10, `k ${z(k)}`, x0 + (k * s) / 2, y - (dk * s) / 2 - 16)}` : ""}`;
   } else if (t.kat === "mutter" || t.kat === "scheibe") {
     const r = (H - (gross ? 30 : 12)) / 2, cx = B / 2, cy = H / 2;
     const loch = r * (m / (t.kat === "mutter" ? norm.mutter_sw : norm.scheibe_d)) * 1.05;
@@ -178,7 +183,7 @@ const InventarAnsicht = {
       <section class="werkzeug">
         <button class="chip alle ${aktiv ? "" : "an"}" data-aktion="inv-alle">Alle</button>
         ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="filter-auf"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
-        ${!this._mobil || this._filterAuf ? `<div class="unterfilter">${filter}</div>` : ""}
+        ${!this._mobil || this._filterAuf ? `<div class="unterfilter" data-einmal="filter">${filter}</div>` : ""}
         <label class="auswahl sort"><span>Sortieren</span>
           <select id="inv-sortierung">${INV_SORTIERUNG.map((s) => opt(s.id, s.name, this._invSort)).join("")}</select></label>
         <input id="inv-suche" class="suche" type="search" placeholder="Suchen: z. B. M3x12, Feder 5 mm, Einsatz M4 …" value="${esc(this._invSuche || "")}" autocomplete="off">
@@ -248,12 +253,16 @@ const InventarAnsicht = {
         return `<div class="zeile eigen ${auf ? "auf" : ""}" data-zeile="inv-${f.k}">
           <button class="zeile-kopf" data-aktion="zeile" data-k="inv-${f.k}"><span class="z-name">${f.name}</span>
             <span class="z-wert"><span class="wert">${zahl(t[f.k], f.nk ?? 0)} ${f.e}</span></span></button>
-          ${auf ? `<div class="regler-zeile">
+          ${auf ? `<div class="klapp" data-klapp="z:inv-${f.k}"><div class="regler-zeile">
             <button class="rund" data-aktion="inv-schritt" data-k="${f.k}" data-d="-1">−</button>
             <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${t[f.k] ?? f.min}" data-inv-mass="${f.k}">
-            <button class="rund" data-aktion="inv-schritt" data-k="${f.k}" data-d="1">+</button></div>` : ""}
+            <button class="rund" data-aktion="inv-schritt" data-k="${f.k}" data-d="1">+</button></div></div>` : ""}
         </div>`;
       }).join("")}</div></div>`;
+      if (t.kat === "schraube") {
+        const n = NORM[t.gewinde] || NORM.M3;
+        html += this._invNormHtml(t, n);
+      }
     } else if (t.kat === "mutter" || t.kat === "scheibe") {
       html += `<p class="leise klein">Maße nach Norm (${t.kat === "mutter" ? "DIN 934" : "DIN 125"}), gelten für alle ${esc(t.gewinde)}-${t.kat === "mutter" ? "Muttern" : "Scheiben"}.</p>`;
     }
@@ -289,8 +298,8 @@ const InventarAnsicht = {
         <button class="knopf rot-knopf breit oben-abstand" data-aktion="inv-loeschen">Teil löschen</button>`;
     }
 
-    return `<div class="schleier" data-aktion="schliessen"></div>
-      <section class="sheet" role="dialog" aria-label="${esc(teilName(t))}">
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="${esc(teilName(t))}">
         <div class="griff"></div>
         <header class="sheet-kopf">
           <div class="teil-kopf-bild">${teilSvg(t)}</div>
@@ -403,6 +412,20 @@ const InventarAnsicht = {
     }
     if (t.dataset.invText) { this._teil()[t.dataset.invText] = t.value; return true; }
     return false;
+  },
+
+  // Maße zum Konstruieren (Kopf, Loch, Senkung) mit Normangabe
+  _invNormHtml(t, n) {
+    const z = (v) => zahl(v, 1);
+    const zeile = (name, wert, norm) => `<div class="info-zeile"><span>${name}<small class="norm">${norm}</small></span><strong>${wert}</strong></div>`;
+    return `<h3>📐 Zum Konstruieren (${esc(t.gewinde)})</h3><div class="info-liste">
+      ${zeile("Kopfdurchmesser dk", `${z(n.kopf_d)} mm`, "DIN 912 / ISO 4762")}
+      ${zeile("Kopfhöhe k", `${z(n.kopf_h)} mm`, "DIN 912 / ISO 4762")}
+      ${zeile("Innensechskant", `SW ${z(n.inbus)}`, "DIN 912 / ISO 4762")}
+      ${zeile("Durchgangsloch", `Ø ${z(n.loch)} mm`, "DIN EN 20273, mittel")}
+      ${zeile("Senkung für den Kopf", `Ø ${z(n.senk_d)} × ${z(n.kopf_h + 0.4)} mm tief`, "Richtwert, vgl. DIN 974-1")}
+    </div>
+    <p class="leise klein">Maße nach DIN 912 / ISO 4762 (Zylinderschraube mit Innensechskant). Durchgangsloch nach DIN EN 20273 (ISO 273), Reihe mittel. Die Senkung ist ein Richtwert (Ø mit Spiel, Tiefe = Kopfhöhe + 0,4 mm, damit der Kopf bündig verschwindet); die genauen Werte stehen in DIN 974-1. Für den 3D-Druck Löcher etwa 0,1–0,2 mm größer zeichnen.</p>`;
   },
 
   _invAenderung(t) {
