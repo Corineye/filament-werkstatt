@@ -6,7 +6,7 @@
 // Oberfläche anders eingefärbt, bis Corin sie übernimmt oder ändert.
 // ---------------------------------------------------------------------------
 
-const DATEN_VERSION = 2;
+const DATEN_VERSION = 3;
 
 // Leergewicht der Spulen in Gramm (Blatt „Tabelle2“)
 // Ändert sich das Gewicht einer Spule, gilt es für alle Rollen, die diese Spule nutzen.
@@ -211,6 +211,7 @@ function standardDaten() {
     spulen: JSON.parse(JSON.stringify(SPULEN)),
     materialien_eigen: [],
     arten_eigen: {},
+    inventar: standardInventar(),
   };
 }
 
@@ -220,6 +221,7 @@ function migrieren(d) {
     d.rollen.forEach((r) => { r.vorschlag = { ...richtwerteFuer(r.material, r.art), ...r.vorschlag }; });
     d.spulen.forEach((s) => { const std = SPULEN.find((x) => x.id === s.id); if (!s.hersteller) s.hersteller = std ? std.hersteller : s.name; });
   }
+  if (!d.inventar) d.inventar = standardInventar();
   if (!d.materialien_eigen) d.materialien_eigen = [];
   if (!d.arten_eigen) d.arten_eigen = {};
   d.version = DATEN_VERSION;
@@ -253,6 +255,143 @@ function farbfamilie(rolle) {
   return "Rosa";
 }
 // ---------------------------------------------------------------------------
+// Inventar: Kategorien, Maße und Corins Startbestand
+// (aus federn.csv, gewindeeinsaetze.csv, schrauben.csv, duesen.csv und dem
+// Blatt „Zubehör“ der Filament-Tabelle, Stand 12.10.2026)
+// ---------------------------------------------------------------------------
+
+const GEWINDE = ["M2", "M2.5", "M3", "M4", "M5", "M6"];
+
+// Normmaße (Zylinderkopf DIN 912 / ISO 4762 mit Innensechskant-SW, Mutter DIN 934, Scheibe DIN 125,
+// Durchgangsloch DIN EN 20273 mittel, Senkung DIN 974-1 für Zylinderschrauben)
+const NORM = {
+  M2: { kopf_d: 3.8, kopf_h: 2, inbus: 1.5, loch: 2.4, senk_d: 4.4, mutter_sw: 4, mutter_h: 1.6, scheibe_d: 5, scheibe_h: 0.3 },
+  "M2.5": { kopf_d: 4.5, kopf_h: 2.5, inbus: 2, loch: 2.9, senk_d: 5.5, mutter_sw: 5, mutter_h: 2, scheibe_d: 6, scheibe_h: 0.5 },
+  M3: { kopf_d: 5.5, kopf_h: 3, inbus: 2.5, loch: 3.4, senk_d: 6.5, mutter_sw: 5.5, mutter_h: 2.4, scheibe_d: 7, scheibe_h: 0.5 },
+  M4: { kopf_d: 7, kopf_h: 4, inbus: 3, loch: 4.5, senk_d: 8, mutter_sw: 7, mutter_h: 3.2, scheibe_d: 9, scheibe_h: 0.8 },
+  M5: { kopf_d: 8.5, kopf_h: 5, inbus: 4, loch: 5.5, senk_d: 10, mutter_sw: 8, mutter_h: 4, scheibe_d: 10, scheibe_h: 1 },
+  M6: { kopf_d: 10, kopf_h: 6, inbus: 5, loch: 6.6, senk_d: 11, mutter_sw: 10, mutter_h: 5, scheibe_d: 12, scheibe_h: 1.6 },
+};
+const gewindeD = (g) => parseFloat(String(g || "M3").slice(1)) || 3;
+
+// Felder je Kategorie. Zahlenwerte werden mit Reglern geändert.
+const MASS = {
+  laenge: { name: "Länge", e: "mm", min: 1, max: 60, step: 1 },
+  aussen: { name: "Außendurchmesser", e: "mm", min: 1, max: 30, step: 0.1, nk: 1 },
+  draht: { name: "Drahtstärke", e: "mm", min: 0.1, max: 2, step: 0.1, nk: 1 },
+  groesse: { name: "Düsengröße", e: "mm", min: 0.2, max: 1, step: 0.2, nk: 1 },
+  durchmesser: { name: "Durchmesser", e: "mm", min: 1, max: 30, step: 0.01, nk: 2 },
+  breite: { name: "Breite", e: "mm", min: 1, max: 50, step: 0.01, nk: 2 },
+  dicke: { name: "Dicke", e: "mm", min: 0.1, max: 10, step: 0.01, nk: 2 },
+};
+
+const KATEGORIEN = [
+  { id: "schraube", name: "Schrauben", einzahl: "Schraube", icon: "🔩", gewinde: true, masse: ["laenge"],
+    worte: "schraube schrauben zylinderkopf inbus innensechskant bolt screw" },
+  { id: "mutter", name: "Muttern", einzahl: "Mutter", icon: "⬡", gewinde: true, masse: [],
+    worte: "mutter muttern sechskant nut" },
+  { id: "scheibe", name: "Unterlegscheiben", einzahl: "Unterlegscheibe", icon: "◯", gewinde: true, masse: [],
+    worte: "scheibe scheiben unterlegscheibe beilagscheibe washer" },
+  { id: "einsatz", name: "Gewindeeinsätze", einzahl: "Gewindeeinsatz", icon: "🟡", gewinde: true, masse: ["laenge", "aussen"],
+    worte: "einsatz einsätze gewindeeinsatz einschmelzgewinde einschmelzmutter rändelmutter insert heat messing" },
+  { id: "feder", name: "Federn", einzahl: "Feder", icon: "🌀", gewinde: false, masse: ["draht", "aussen", "laenge"],
+    worte: "feder federn druckfeder spring edelstahl" },
+  { id: "duese", name: "Düsen", einzahl: "Düse", icon: "🔻", gewinde: false, masse: ["groesse"],
+    worte: "düse düsen duese nozzle hotend" },
+  { id: "magnet", name: "Magnete", einzahl: "Magnet", icon: "🧲", gewinde: false, masse: ["durchmesser", "breite", "dicke"],
+    worte: "magnet magnete neodym magnetfolie" },
+];
+const kategorie = (id) => KATEGORIEN.find((k) => k.id === id) || KATEGORIEN[0];
+
+function standardInventar() {
+  const liste = [];
+  const add = (x) => liste.push({ gezaehlt: false, min: null, notiz: "", ...x });
+  // Schrauben, Muttern, Scheiben (1080er Set)
+  [["M2", [4, 6, 8, 12, 16, 20], 30], ["M3", [4, 8, 12, 16, 20, 30], 20], ["M4", [6, 10, 14, 18, 20, 30], 10]].forEach(([g, laengen, n]) =>
+    laengen.forEach((l) => add({ id: `schraube-${g}-${l}`, kat: "schraube", gewinde: g, laenge: l, kopf: "Zylinderkopf Innensechskant", menge: n, quelle: "1080er Set" })));
+  [["M2", 180], ["M3", 120], ["M4", 60]].forEach(([g, n]) => {
+    add({ id: `mutter-${g}`, kat: "mutter", gewinde: g, menge: n, quelle: "1080er Set" });
+    add({ id: `scheibe-${g}`, kat: "scheibe", gewinde: g, menge: n, quelle: "1080er Set" });
+  });
+  // Gewindeeinsätze (HUI JI, je 50 Stück)
+  [["M2", 3, 3.2, 1.65], ["M2", 3, 3.5, 1.69], ["M2", 3, 4.0, 1.69], ["M3", 5, 5.0, 2.25], ["M4", 5, 6.0, 2.49], ["M5", 5, 7.0, 2.69], ["M6", 5, 9.0, 4.59]].forEach(([g, l, d, preis]) =>
+    add({ id: `einsatz-${g}-${l}-${d}`, kat: "einsatz", gewinde: g, laenge: l, aussen: d, material: "Messing", menge: 50, preis, shop: "HUI JI Official Store", quelle: "Bestellung" }));
+  // Federn (Sortimentsbox, Edelstahl 304, je 16 Stück)
+  [[0.5, 6, 1], [0.4, 5, 2], [0.3, 4, 3]].forEach(([draht, d, reihe]) =>
+    [10, 15, 20, 25, 30].forEach((l, i) =>
+      add({ id: `feder-${draht}-${d}-${l}`, kat: "feder", draht, aussen: d, laenge: l, material: "Edelstahl 304", menge: 16, fach: `R${reihe}F${i + 1}`, quelle: "Sortimentsbox" })));
+  // Düsen für den P1S
+  [[0.2, 1], [0.4, 2], [0.6, 1]].forEach(([g, n]) => add({ id: `duese-${g}`, kat: "duese", groesse: g, menge: n, gezaehlt: true, drucker: "Bambu Lab P1S", material: "" }));
+  // Magnete (Menge noch nicht erfasst)
+  add({ id: "magnet-10-1.54", kat: "magnet", form: "rund", durchmesser: 10, dicke: 1.54, menge: null });
+  add({ id: "magnet-3-0.94", kat: "magnet", form: "rund", durchmesser: 3, dicke: 0.94, menge: null });
+  add({ id: "magnet-5-0.95", kat: "magnet", form: "rund", durchmesser: 5, dicke: 0.95, menge: null });
+  add({ id: "magnet-3.97x5", kat: "magnet", form: "quader", durchmesser: 3.97, breite: 5, dicke: 1.94, menge: null, notiz: "Maße aus der Tabelle: 3,97 × 5" });
+  add({ id: "magnet-3.97x9.95", kat: "magnet", form: "quader", durchmesser: 3.97, breite: 9.95, dicke: 1.96, menge: null, notiz: "Maße aus der Tabelle: 3,97 × 9,95" });
+  add({ id: "magnetfolie-a4", kat: "magnet", form: "folie", breite: 297, durchmesser: 210, dicke: 0.68, menge: null, name: "Magnetfolie DIN A4" });
+  return liste;
+}
+
+function teilName(t) {
+  const z = (v, nk = 2) => Number(v).toLocaleString("de-DE", { maximumFractionDigits: nk });
+  switch (t.kat) {
+    case "schraube": return `${t.gewinde} × ${z(t.laenge)}`;
+    case "mutter": return `Mutter ${t.gewinde}`;
+    case "scheibe": return `Scheibe ${t.gewinde}`;
+    case "einsatz": return `${t.gewinde} · ${z(t.laenge)} mm`;
+    case "feder": return `Ø ${z(t.aussen)} × ${z(t.laenge)} mm`;
+    case "duese": return `${z(t.groesse, 1)} mm Düse`;
+    case "magnet":
+      if (t.name) return t.name;
+      return t.form === "rund" ? `Ø ${z(t.durchmesser)} × ${z(t.dicke)} mm` : `${z(t.durchmesser)} × ${z(t.breite)} × ${z(t.dicke)} mm`;
+    default: return t.name || "Teil";
+  }
+}
+
+function teilUntertitel(t) {
+  const z = (v) => Number(v).toLocaleString("de-DE", { maximumFractionDigits: 2 });
+  switch (t.kat) {
+    case "schraube": return t.kopf || "Schraube";
+    case "mutter": return "Sechskantmutter";
+    case "scheibe": return "Unterlegscheibe";
+    case "einsatz": return `Ø außen ${z(t.aussen)} mm · ${t.material || "Messing"}`;
+    case "feder": return `Draht ${z(t.draht)} mm${t.fach ? ` · Fach ${t.fach}` : ""}`;
+    case "duese": return `${t.material || "Material unbekannt"} · ${t.drucker || "P1S"}`;
+    case "magnet": return t.form === "folie" ? `Dicke ${z(t.dicke)} mm` : t.form === "rund" ? "Scheibenmagnet" : "Quadermagnet";
+    default: return "";
+  }
+}
+
+// Unscharfe Suche: jedes Suchwort muss passen (Teilwort, Zahl oder ein Tippfehler Abstand)
+function abstand(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return 2;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+function suchWorte(q) {
+  return q.toLowerCase().replace(/,/g, ".").replace(/ø/g, " ").replace(/(\d)\s*[x×*]\s*(\d)/g, "$1 $2").replace(/(m\d(?:\.\d)?)(?=\d|x|×)/g, "$1 ")
+    .split(/[\s×]+/).map((w) => w.replace(/^x$/, "")).filter(Boolean);
+}
+function teilText(t) {
+  const k = kategorie(t.kat);
+  const zahlen = ["laenge", "aussen", "draht", "groesse", "durchmesser", "breite", "dicke"].filter((m) => t[m] != null).map((m) => String(t[m]));
+  return { text: `${k.worte} ${teilName(t)} ${teilUntertitel(t)} ${t.gewinde || ""} ${t.fach || ""} ${t.notiz || ""}`.toLowerCase().replace(/,/g, "."), zahlen };
+}
+function passtZurSuche(t, worte) {
+  if (!worte.length) return true;
+  const { text, zahlen } = teilText(t);
+  const woerter = text.split(/[^a-z0-9äöüß.]+/).filter(Boolean);
+  return worte.every((w) => {
+    if (/^\d+(\.\d+)?$/.test(w)) return zahlen.some((z) => Number(z) === Number(w));
+    if (text.includes(w)) return true;
+    return w.length >= 4 && woerter.some((x) => x.length >= 4 && abstand(w, x) <= 1);
+  });
+}
+// ---------------------------------------------------------------------------
 // Aussehen: dunkler Tech-Look, Mint-Akzente, Glas-Karten, Rasterhintergrund
 // ---------------------------------------------------------------------------
 
@@ -271,7 +410,12 @@ const STIL = `
   --rot: #ff6b6b;
   --radius: 18px;
   display: block;
-  height: 100%;
+  /* Immer genau so hoch wie das Fenster: sonst wächst die Seite mit dem Inhalt
+     und es scrollt die ganze Seite statt nur der Liste bzw. der Detailansicht */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  overflow: clip;
   font-family: var(--paper-font-body1_-_font-family, "Roboto", system-ui, sans-serif);
   color: var(--text);
   background: var(--grund);
@@ -289,7 +433,7 @@ p { margin: 4px 0 12px; }
 .rot { color: var(--rot); }
 
 .app {
-  position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden;
+  position: relative; height: 100%; display: flex; flex-direction: column; overflow: hidden; overflow: clip;
   background:
     radial-gradient(1200px 500px at 85% -10%, rgba(62,230,168,0.10), transparent 60%),
     radial-gradient(800px 400px at -10% 110%, rgba(62,230,168,0.06), transparent 60%),
@@ -319,7 +463,7 @@ p { margin: 4px 0 12px; }
 .icon-knopf { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-size: 18px; flex: none; }
 .icon-knopf:hover { background: var(--flaeche-hover); }
 
-.haupt { flex: 1; overflow-y: auto; padding: 24px; position: relative; z-index: 1; }
+.haupt { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px; position: relative; z-index: 1; }
 .mobil .haupt { padding: 16px 16px 96px; }
 .nav-unten {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; justify-content: space-around;
@@ -399,7 +543,7 @@ p { margin: 4px 0 12px; }
 .tabs { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--rand); }
 .tab { padding: 10px 14px; color: var(--leise); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tab.an { color: var(--mint); border-color: var(--mint); }
-.sheet-inhalt { flex: 1; overflow-y: auto; padding: 16px 20px 24px; }
+.sheet-inhalt { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 24px; }
 .sheet-fuss { display: flex; gap: 10px; justify-content: flex-end; padding: 14px 20px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--rand); }
 .mobil .sheet-fuss .knopf { flex: 1; }
 
@@ -461,6 +605,7 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border: none; b
 .info-zeile { display: flex; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--rand); font-size: 14px; }
 .info-zeile:last-child { border-bottom: none; }
 .info-zeile span { color: var(--leise); }
+.info-zeile .norm { display: block; font-size: 11px; opacity: .7; margin-top: 1px; }
 textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; resize: vertical; }
 
 /* Knöpfe, Dialog, Meldung */
@@ -494,7 +639,7 @@ textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid va
 .werkzeug .alle { padding: 10px 18px; }
 .auswahl { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 6px 30px 6px 12px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); min-width: 130px; cursor: pointer; }
 .auswahl::after { content: "▾"; position: absolute; right: 11px; top: 50%; transform: translateY(-50%); color: var(--leise); pointer-events: none; }
-.auswahl span { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); }
+.auswahl > span { font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); }
 .auswahl select { appearance: none; -webkit-appearance: none; background: transparent; border: none; color: var(--text); font: inherit; font-size: 14px; padding: 0; outline: none; cursor: pointer; width: 100%; }
 .auswahl select option, .auswahl select optgroup { background: #111816; color: var(--text); }
 .auswahl.an { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
@@ -523,8 +668,7 @@ button.zeile-kopf:hover .z-name { color: var(--mint); }
 .zeile.auf { background: rgba(62,230,168,.04); margin: 0 -14px; padding: 10px 14px; }
 .zeile-kopf.statisch { cursor: default; }
 .mini.mint-rand { color: var(--mint); border-color: rgba(62,230,168,.4); margin: 6px 0 4px; }
-select.text { appearance: auto; }
-select.text option { background: #111816; }
+
 
 /* Letzter Druck */
 .letzter-druck { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 14px; border: 1px dashed var(--rand); background: var(--flaeche); margin-bottom: 12px; }
@@ -559,7 +703,43 @@ select.text option { background: #111816; }
 .farbwahl input { width: 64px; height: 38px; border: 1px solid var(--rand); border-radius: 10px; background: none; padding: 2px; cursor: pointer; }
 
 /* Dialog-Listen */
-.dialog { max-height: calc(100% - 40px); overflow-y: auto; }
+.dialog { max-height: calc(100% - 40px); overflow-y: auto; overscroll-behavior: contain; animation: auf .18s ease; }
+@keyframes auf { from { opacity: 0; transform: translate(-50%, -48%) scale(.97); } }
+.schleier { animation: blende .2s ease; }
+@keyframes blende { from { opacity: 0; } }
+.toast { animation: blende .2s ease; }
+.still { animation: none !important; }
+.klapp { display: block; }
+
+/* Eigene Auswahllisten */
+select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: none; width: 1px; height: 1px; margin: 0; padding: 0; border: 0; }
+.dd-knopf { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 14px; color: var(--text); }
+.dd-knopf .dd-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-knopf .dd-text.leise { color: var(--leise); }
+.dd-pfeil { color: var(--leise); transition: transform .18s ease; font-size: 12px; }
+.dd-knopf.offen .dd-pfeil { transform: rotate(180deg); color: var(--mint); }
+.auswahl .dd-knopf { padding: 0; }
+.auswahl .dd-pfeil { display: none; }
+.auswahl.an .dd-knopf { color: var(--mint); }
+.auswahl:has(.dd-knopf.offen) { border-color: rgba(62,230,168,.6); }
+.dd-knopf.text { padding: 10px 12px; }
+.dd-knopf.text:hover, .dd-knopf.text.offen { border-color: rgba(62,230,168,.5); }
+.dd-liste {
+  position: absolute; z-index: 40; overflow-y: auto; overscroll-behavior: contain; padding: 6px;
+  background: rgba(16,23,21,.97); border: 1px solid rgba(62,230,168,.28); border-radius: 16px;
+  backdrop-filter: blur(18px); box-shadow: 0 18px 50px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.3);
+  animation: dd-rein .16s cubic-bezier(.2,.7,.2,1); transform-origin: top center;
+}
+.dd-liste.nach-oben { transform-origin: bottom center; }
+@keyframes dd-rein { from { opacity: 0; transform: translateY(-6px) scale(.98); } }
+.dd-liste.nach-oben { animation-name: dd-rein-oben; }
+@keyframes dd-rein-oben { from { opacity: 0; transform: translateY(6px) scale(.98); } }
+.dd-gruppe { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--leise); padding: 10px 10px 4px; }
+.dd-option { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; padding: 9px 12px; border-radius: 10px; font-size: 14px; }
+.dd-option.eingerueckt { padding-left: 20px; }
+.dd-option:hover { background: var(--flaeche-hover); }
+.dd-option.an { background: var(--mint-weich); color: var(--mint); }
+.dd-option i { font-style: normal; font-size: 12px; }
 .liste { display: grid; gap: 8px; margin: 12px 0; }
 .wahl.kompakt { padding: 10px 14px; margin: 0; }
 .wahl.an { border-color: rgba(62,230,168,.6); background: var(--mint-weich); }
@@ -567,13 +747,477 @@ select.text option { background: #111816; }
 .neu-spule .text { margin: 0; }
 .oben-abstand { margin-top: 16px; }
 .dialog .chips { margin-top: 10px; }
+
+/* Inventar */
+.inv-stats { grid-template-columns: repeat(4, 1fr); }
+.mobil .inv-stats { grid-template-columns: repeat(2, 1fr); }
+.mobil .inv-stats .stat:nth-child(n+3) { display: flex; }
+.kats { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin-bottom: 18px; }
+.mobil .kats { display: flex; overflow-x: auto; gap: 8px; padding-bottom: 4px; scrollbar-width: none; }
+.kat { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 16px; background: var(--flaeche); border: 1px solid var(--rand); }
+.mobil .kat { flex: none; min-width: 132px; }
+.kat:hover { background: var(--flaeche-hover); }
+.kat.an { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.kat-icon { font-size: 20px; }
+.kat strong { font-size: 14px; }
+.kat small { font-size: 11px; color: var(--leise); }
+.teil-bild { height: 64px; margin-bottom: 8px; display: flex; align-items: center; }
+.teil-svg { height: 100%; width: auto; max-width: 100%; display: block; }
+.teil-svg.gross { width: 100%; height: auto; max-height: 200px; }
+.zeichnung { padding: 12px; border-radius: 16px; background: rgba(0,0,0,.25); border: 1px solid var(--rand); margin-bottom: 12px;
+  background-image: linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px); background-size: 12px 12px; }
+.teil-kopf-bild { width: 84px; height: 48px; flex: none; display: flex; align-items: center; }
+.kachel.wenig { border-color: rgba(255,107,107,.5); }
+.rot-badge { color: var(--rot) !important; background: rgba(255,107,107,.14) !important; }
+.passend-titel { margin-top: 24px; }
+.ohne-rand { border-top: none; }
+.formular-zeile { display: grid; gap: 6px; font-size: 13px; color: var(--leise); margin-top: 12px; }
+.mengen-knoepfe { justify-content: space-between; }
+.mengen-knoepfe .rund { flex: 1; height: 40px; }
 `;
+// ---------------------------------------------------------------------------
+// Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
+// Änderungen werden sofort in Home Assistant gespeichert.
+// ---------------------------------------------------------------------------
+
+const INV_STATUS = [
+  { id: "wenig", name: "Wenig Bestand" },
+  { id: "ungezaehlt", name: "Nicht nachgezählt" },
+  { id: "ohne", name: "Menge fehlt" },
+];
+const INV_SORTIERUNG = [
+  { id: "kategorie", name: "Kategorie" },
+  { id: "groesse", name: "Größe" },
+  { id: "menge_auf", name: "Menge: wenig zuerst" },
+  { id: "menge_ab", name: "Menge: viel zuerst" },
+];
+
+// Maße eines Teils, je nach Form mit passender Bezeichnung
+function masseFuer(t) {
+  const k = kategorie(t.kat);
+  if (t.kat === "magnet") {
+    if (t.form === "folie") return [];
+    if (t.form === "rund") return [{ k: "durchmesser", ...MASS.durchmesser }, { k: "dicke", ...MASS.dicke }];
+    return [{ k: "durchmesser", ...MASS.durchmesser, name: "Länge" }, { k: "breite", ...MASS.breite }, { k: "dicke", ...MASS.dicke }];
+  }
+  return k.masse.map((m) => ({ k: m, ...MASS[m] }));
+}
+
+function wenigBestand(t) { return t.menge != null && t.min != null && t.min > 0 && t.menge <= t.min; }
+
+// Größe zum Sortieren: Gewinde, dann Länge bzw. Durchmesser
+function groessenWert(t) {
+  return (t.gewinde ? gewindeD(t.gewinde) * 1000 : 0) + (t.aussen || t.durchmesser || t.groesse || 0) * 10 + (t.laenge || t.dicke || 0) / 100;
+}
+
+// Teile, die zusammenpassen (gleiches Gewinde: Schraube, Mutter, Scheibe, Einsatz)
+function passendeTeile(t, alle) {
+  if (!t.gewinde) return [];
+  return alle.filter((x) => x !== t && x.gewinde === t.gewinde && x.kat !== t.kat)
+    .sort((a, b) => KATEGORIEN.findIndex((k) => k.id === a.kat) - KATEGORIEN.findIndex((k) => k.id === b.kat) || groessenWert(a) - groessenWert(b));
+}
+
+// ---- Zeichnungen (schematisch, maßstäblich innerhalb des Teils) ----------
+function teilSvg(t, gross = false) {
+  const B = gross ? 240 : 120, H = gross ? (t.kat === "schraube" ? 160 : 120) : 64;
+  const linie = "rgba(232,241,236,.85)";
+  const mass = (x1, y1, x2, y2, text, tx, ty) => gross
+    ? `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--mint)" stroke-width="1" marker-start="url(#pf)" marker-end="url(#pf)"/>
+       <text x="${tx}" y="${ty}" fill="var(--mint)" font-size="10" text-anchor="middle">${text}</text>` : "";
+  const z = (v) => Number(v).toLocaleString("de-DE", { maximumFractionDigits: 2 });
+  let innen = "";
+  const m = gewindeD(t.gewinde);
+  const norm = NORM[t.gewinde] || NORM.M3;
+  if (t.kat === "schraube") {
+    const L = t.laenge || 10, k = norm.kopf_h, dk = norm.kopf_d;
+    const s = Math.min((B - (gross ? 100 : 30)) / (L + k), (H - (gross ? 70 : 36)) / dk);
+    const x0 = (B - (L + k) * s) / 2 + (gross ? 10 : 0), y = H / 2 + (gross ? 2 : 0);
+    let gewinde = "";
+    for (let x = x0 + k * s + 3; x < x0 + (k + L) * s - 1; x += Math.max(3, 0.5 * s)) gewinde += `<line x1="${x}" y1="${y - (m * s) / 2}" x2="${x + 2}" y2="${y + (m * s) / 2}" stroke="${linie}" stroke-opacity=".35"/>`;
+    innen = `<rect x="${x0}" y="${y - (dk * s) / 2}" width="${k * s}" height="${dk * s}" rx="2" fill="#3a4541" stroke="${linie}"/>
+      <rect x="${x0 + k * s}" y="${y - (m * s) / 2}" width="${L * s}" height="${m * s}" fill="#2b3431" stroke="${linie}"/>${gewinde}
+      ${mass(x0 + k * s, y + (dk * s) / 2 + 12, x0 + (k + L) * s, y + (dk * s) / 2 + 12, `L ${z(L)} mm`, x0 + (k + L / 2) * s, y + (dk * s) / 2 + 26)}
+      ${mass(x0 + (k + L) * s + 10, y - (m * s) / 2, x0 + (k + L) * s + 10, y + (m * s) / 2, t.gewinde, x0 + (k + L) * s + 26, y + 4)}
+      ${gross ? `<line x1="${x0 + k * s * 0.15}" y1="${y - 2.5}" x2="${x0 + k * s * 0.15}" y2="${y + 2.5}" stroke="${linie}" stroke-opacity=".5"/>
+      ${mass(x0 - 10, y - (dk * s) / 2, x0 - 10, y + (dk * s) / 2, "", 0, 0)}
+      <text x="${x0 - 16}" y="${y - 2}" fill="var(--mint)" font-size="10" text-anchor="end">Kopf</text>
+      <text x="${x0 - 16}" y="${y + 11}" fill="var(--mint)" font-size="10" text-anchor="end">Ø ${z(dk)}</text>
+      ${mass(x0, y - (dk * s) / 2 - 10, x0 + k * s, y - (dk * s) / 2 - 10, `k ${z(k)}`, x0 + (k * s) / 2, y - (dk * s) / 2 - 16)}` : ""}`;
+  } else if (t.kat === "mutter" || t.kat === "scheibe") {
+    const r = (H - (gross ? 30 : 12)) / 2, cx = B / 2, cy = H / 2;
+    const loch = r * (m / (t.kat === "mutter" ? norm.mutter_sw : norm.scheibe_d)) * 1.05;
+    if (t.kat === "mutter") {
+      const pkt = Array.from({ length: 6 }, (_, i) => { const a = Math.PI / 6 + (i * Math.PI) / 3; return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`; }).join(" ");
+      innen = `<polygon points="${pkt}" fill="#3a4541" stroke="${linie}"/>`;
+    } else innen = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#3a4541" stroke="${linie}"/>`;
+    innen += `<circle cx="${cx}" cy="${cy}" r="${loch}" fill="var(--grund)" stroke="${linie}"/>`;
+    if (gross) innen += `<text x="${cx + r + 36}" y="${cy - 6}" fill="var(--mint)" font-size="10" text-anchor="middle">${t.kat === "mutter" ? `SW ${z(norm.mutter_sw)}` : `Ø ${z(norm.scheibe_d)}`}</text>
+      <text x="${cx + r + 36}" y="${cy + 10}" fill="var(--mint)" font-size="10" text-anchor="middle">${t.kat === "mutter" ? `Höhe ${z(norm.mutter_h)}` : `Dicke ${z(norm.scheibe_h)}`}</text>`;
+  } else if (t.kat === "einsatz") {
+    const L = t.laenge || 5, D = t.aussen || 5;
+    const s = Math.min((B - 50) / L, (H - 36) / D) * 0.9;
+    const x0 = (B - L * s) / 2, y = H / 2 - (gross ? 6 : 0), h = D * s;
+    let raendel = "";
+    for (let x = x0 + 2; x < x0 + L * s - h * 0.35 - 1; x += Math.max(4, s * 0.6)) raendel += `<line x1="${x}" y1="${y - h / 2}" x2="${x + h * 0.35}" y2="${y + h / 2}" stroke="#7a5a12" stroke-width="1.2"/>`;
+    innen = `<rect x="${x0}" y="${y - h / 2}" width="${L * s}" height="${h}" rx="2" fill="#d6a933" stroke="#f3d27a"/>${raendel}
+      <rect x="${x0}" y="${y - (m * s) / 2}" width="${L * s}" height="${m * s}" fill="none" stroke="#5a420c" stroke-dasharray="3 2"/>
+      ${mass(x0, y + h / 2 + 12, x0 + L * s, y + h / 2 + 12, `${z(L)} mm`, x0 + (L * s) / 2, y + h / 2 + 26)}
+      ${mass(x0 + L * s + 12, y - h / 2, x0 + L * s + 12, y + h / 2, `Ø ${z(D)}`, x0 + L * s + 32, y + 4)}`;
+  } else if (t.kat === "feder") {
+    const L = t.laenge || 20, D = t.aussen || 5;
+    const s = Math.min((B - 50) / L, (H - 36) / D);
+    const x0 = (B - L * s) / 2, y = H / 2 - (gross ? 6 : 0), h = D * s;
+    const windungen = Math.max(4, Math.min(16, Math.round(L / (D * 0.45))));
+    let pfad = `M ${x0} ${y}`;
+    for (let i = 0; i < windungen; i++) {
+      const xa = x0 + (i / windungen) * L * s, xb = x0 + ((i + 0.5) / windungen) * L * s, xc = x0 + ((i + 1) / windungen) * L * s;
+      pfad += ` L ${(xa + xb) / 2} ${y - h / 2} L ${(xb + xc) / 2} ${y + h / 2}`;
+    }
+    pfad += ` L ${x0 + L * s} ${y}`;
+    innen = `<path d="${pfad}" fill="none" stroke="#c9d3cf" stroke-width="${Math.max(1, (t.draht || 0.4) * s * 0.8)}" stroke-linejoin="round"/>
+      ${mass(x0, y + h / 2 + 12, x0 + L * s, y + h / 2 + 12, `${z(L)} mm`, x0 + (L * s) / 2, y + h / 2 + 26)}
+      ${mass(x0 + L * s + 12, y - h / 2, x0 + L * s + 12, y + h / 2, `Ø ${z(D)}`, x0 + L * s + 32, y + 4)}`;
+  } else if (t.kat === "duese") {
+    const cx = B / 2, top = gross ? 10 : 6, s = gross ? 1.6 : 0.85;
+    innen = `<rect x="${cx - 18 * s}" y="${top}" width="${36 * s}" height="${30 * s}" rx="3" fill="#3a4541" stroke="${linie}"/>
+      <path d="M ${cx - 22 * s} ${top + 30 * s} h ${44 * s} l ${-6 * s} ${12 * s} h ${-32 * s} z" fill="#b08d3e" stroke="${linie}"/>
+      <path d="M ${cx - 12 * s} ${top + 42 * s} h ${24 * s} l ${-9 * s} ${14 * s} h ${-6 * s} z" fill="#d6a933" stroke="${linie}"/>
+      <text x="${cx}" y="${top + 20 * s}" fill="var(--mint)" font-size="${gross ? 16 : 10}" font-weight="700" text-anchor="middle">${z(t.groesse)}</text>`;
+  } else if (t.kat === "magnet") {
+    const cx = B / 2, cy = H / 2;
+    if (t.form === "folie") {
+      innen = `<rect x="${cx - 26}" y="${cy - 20}" width="52" height="40" rx="2" fill="#3a4541" stroke="${linie}"/><text x="${cx}" y="${cy + 4}" fill="var(--leise)" font-size="10" text-anchor="middle">A4</text>`;
+    } else if (t.form === "rund") {
+      const r = Math.min((H - (gross ? 30 : 12)) / 2, 6 + (t.durchmesser || 5) * 2.2);
+      innen = `<path d="M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy} Z" fill="#c0392b"/><path d="M ${cx - r} ${cy} A ${r} ${r} 0 0 0 ${cx + r} ${cy} Z" fill="#2c6fbf"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${linie}"/>
+        ${gross ? `<text x="${cx}" y="${cy - r / 3}" fill="#fff" font-size="11" text-anchor="middle">N</text><text x="${cx}" y="${cy + r / 2}" fill="#fff" font-size="11" text-anchor="middle">S</text>
+        <text x="${cx + r + 40}" y="${cy - 6}" fill="var(--mint)" font-size="10" text-anchor="middle">Ø ${z(t.durchmesser)}</text>
+        <text x="${cx + r + 40}" y="${cy + 10}" fill="var(--mint)" font-size="10" text-anchor="middle">Dicke ${z(t.dicke)}</text>` : ""}`;
+    } else {
+      const s = Math.min((B - 80) / (t.breite || 5), (H - 30) / (t.durchmesser || 4));
+      const w = (t.breite || 5) * s, h = (t.durchmesser || 4) * s;
+      innen = `<rect x="${cx - w / 2}" y="${cy - h / 2}" width="${w / 2}" height="${h}" fill="#c0392b"/><rect x="${cx}" y="${cy - h / 2}" width="${w / 2}" height="${h}" fill="#2c6fbf"/>
+        <rect x="${cx - w / 2}" y="${cy - h / 2}" width="${w}" height="${h}" fill="none" stroke="${linie}"/>`;
+    }
+  }
+  return `<svg viewBox="0 0 ${B} ${H}" class="teil-svg${gross ? " gross" : ""}" aria-hidden="true">
+    <defs><marker id="pf" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L6 3 L0 6 z" fill="var(--mint)"/></marker></defs>
+    ${innen}</svg>`;
+}
+
+const InventarAnsicht = {
+  _inv() { return this._daten.inventar; },
+  _teil(id = this._invOffen) { return this._modus === "inv-neu" ? this._invNeu : this._inv().find((t) => t.id === id); },
+
+  _invGefiltert() {
+    const f = this._invF;
+    const worte = suchWorte(this._invSuche || "");
+    const liste = this._inv().filter((t) => {
+      if (f.kat && t.kat !== f.kat) return false;
+      if (f.gewinde && t.gewinde !== f.gewinde) return false;
+      if (f.status === "wenig" && !wenigBestand(t)) return false;
+      if (f.status === "ungezaehlt" && (t.gezaehlt || t.menge == null)) return false;
+      if (f.status === "ohne" && t.menge != null) return false;
+      return passtZurSuche(t, worte);
+    });
+    const katI = (t) => KATEGORIEN.findIndex((k) => k.id === t.kat);
+    const s = {
+      kategorie: (a, b) => katI(a) - katI(b) || groessenWert(a) - groessenWert(b),
+      groesse: (a, b) => groessenWert(a) - groessenWert(b) || katI(a) - katI(b),
+      menge_auf: (a, b) => (a.menge ?? 1e9) - (b.menge ?? 1e9),
+      menge_ab: (a, b) => (b.menge ?? -1) - (a.menge ?? -1),
+    };
+    return liste.sort(s[this._invSort] || s.kategorie);
+  },
+
+  _invHtml() {
+    const inv = this._inv();
+    const f = this._invF;
+    const stueck = inv.reduce((s, t) => s + (t.menge || 0), 0);
+    const wenig = inv.filter(wenigBestand).length;
+    const opt = (w, t, an) => `<option value="${esc(w)}" ${an === w ? "selected" : ""}>${esc(t)}</option>`;
+    const anzahl = Object.values(f).filter(Boolean).length;
+    const aktiv = anzahl || this._invSuche;
+    const kats = KATEGORIEN.map((k) => {
+      const teile = inv.filter((t) => t.kat === k.id);
+      return `<button class="kat ${f.kat === k.id ? "an" : ""}" data-aktion="inv-kat" data-id="${k.id}">
+        <span class="kat-icon">${k.icon}</span><strong>${k.name}</strong>
+        <small>${teile.length} Sorten · ${zahl(teile.reduce((s, t) => s + (t.menge || 0), 0))} Stück</small></button>`;
+    }).join("");
+    const filter = `
+      ${this._invAuswahl("Kategorie", "kat", "Alle Kategorien", KATEGORIEN.map((k) => opt(k.id, k.name, f.kat)).join(""))}
+      ${this._invAuswahl("Gewinde", "gewinde", "Alle Gewinde", GEWINDE.filter((g) => inv.some((t) => t.gewinde === g)).map((g) => opt(g, g, f.gewinde)).join(""))}
+      ${this._invAuswahl("Status", "status", "Jeder Status", INV_STATUS.map((s) => opt(s.id, s.name, f.status)).join(""))}`;
+    return `
+      <section class="stats inv-stats">
+        <div class="stat"><strong>${inv.length}</strong><span>Sorten</span></div>
+        <div class="stat"><strong>${zahl(stueck)}</strong><span>Teile gesamt</span></div>
+        ${this._mobil ? "" : `<div class="stat ${wenig ? "rot" : ""}"><strong>${wenig}</strong><span>wenig Bestand</span></div>
+        <div class="stat amber"><strong>${inv.filter((t) => t.menge == null).length}</strong><span>Menge fehlt</span></div>`}
+      </section>
+      <section class="kats">${kats}</section>
+      <section class="werkzeug">
+        <button class="chip alle ${aktiv ? "" : "an"}" data-aktion="inv-alle">Alle</button>
+        ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="filter-auf"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
+        ${!this._mobil || this._filterAuf ? `<div class="unterfilter" data-einmal="filter">${filter}</div>` : ""}
+        <label class="auswahl sort"><span>Sortieren</span>
+          <select id="inv-sortierung">${INV_SORTIERUNG.map((s) => opt(s.id, s.name, this._invSort)).join("")}</select></label>
+        <input id="inv-suche" class="suche" type="search" placeholder="Suchen: z. B. M3x12, Feder 5 mm, Einsatz M4 …" value="${esc(this._invSuche || "")}" autocomplete="off">
+      </section>
+      <section id="inv-raster">${this._invRasterHtml()}</section>`;
+  },
+
+  _invAuswahl(name, k, leer, optionen) {
+    return `<label class="auswahl ${this._invF[k] ? "an" : ""}"><span>${name}</span>
+      <select data-inv-filter="${k}"><option value="">${leer}</option>${optionen}</select></label>`;
+  },
+
+  _invRasterHtml() {
+    const liste = this._invGefiltert();
+    let html = liste.length
+      ? `<div class="raster">${liste.map((t) => this._invKachelHtml(t)).join("")}</div>`
+      : `<div class="leer-hinweis">Nichts gefunden.</div>`;
+    // Querverweise: passende Teile zu den Treffern, die selbst nicht in der Liste sind
+    if (this._invSuche && liste.length) {
+      const dabei = new Set(liste.map((t) => t.id));
+      const passend = [];
+      liste.forEach((t) => passendeTeile(t, this._inv()).forEach((x) => { if (!dabei.has(x.id) && !passend.includes(x)) passend.push(x); }));
+      if (passend.length) {
+        html += `<h3 class="passend-titel">🔗 Passt dazu</h3><div class="chips">${passend.slice(0, 12).map((x) =>
+          `<button class="chip" data-aktion="inv-oeffnen" data-id="${esc(x.id)}">${kategorie(x.kat).icon} ${esc(teilName(x))} · ${x.menge ?? "?"} Stk</button>`).join("")}</div>`;
+      }
+    }
+    return html;
+  },
+
+  _invKachelHtml(t) {
+    const wenig = wenigBestand(t);
+    return `<button class="kachel teil ${wenig ? "wenig" : ""}" data-aktion="inv-oeffnen" data-id="${esc(t.id)}">
+      ${wenig ? `<span class="badge-offen rot-badge">wenig</span>` : ""}
+      <div class="teil-bild">${teilSvg(t)}</div>
+      <div class="kachel-name">${esc(teilName(t))}</div>
+      <div class="kachel-sub">${esc(teilUntertitel(t))}</div>
+      <div class="kachel-fuss">
+        <span class="mat" style="--m:var(--leise)">${esc(kategorie(t.kat).einzahl)}</span>
+        <span class="rest ${t.menge == null ? "leise" : wenig ? "rot" : ""}">${t.menge == null ? "Menge fehlt" : `${zahl(t.menge)} Stk${t.gezaehlt ? "" : " *"}`}</span>
+      </div>
+    </button>`;
+  },
+
+  _invSheetHtml() {
+    const t = this._teil();
+    if (!t) return "";
+    const neu = this._modus === "inv-neu";
+    const k = kategorie(t.kat);
+    const passend = neu ? [] : passendeTeile(t, this._inv());
+    const masse = masseFuer(t);
+    let html = "";
+    if (neu) {
+      html += `<h3 class="abschnitt">1 · Was ist es?</h3>
+        <div class="chips">${KATEGORIEN.map((x) => `<button class="chip ${t.kat === x.id ? "an" : ""}" data-aktion="inv-neu-kat" data-id="${x.id}">${x.icon} ${x.einzahl}</button>`).join("")}</div>`;
+      if (t.kat === "magnet") html += `<div class="chips oben-abstand">${["rund", "quader"].map((f) => `<button class="chip ${t.form === f ? "an" : ""}" data-aktion="inv-neu-form" data-id="${f}">${f === "rund" ? "Scheibe (rund)" : "Quader"}</button>`).join("")}</div>`;
+      html += `<h3 class="abschnitt">2 · Maße</h3>`;
+    }
+    html += `<div class="zeichnung">${teilSvg(t, true)}</div>`;
+    if (k.gewinde) {
+      html += `<div class="rechner-block"><div class="r-kopf"><span>Gewinde</span><strong>${esc(t.gewinde)}</strong></div>
+        <div class="chips">${GEWINDE.map((g) => `<button class="chip ${t.gewinde === g ? "an" : ""}" data-aktion="inv-gewinde" data-id="${g}">${g}</button>`).join("")}</div></div>`;
+    }
+    if (masse.length) {
+      html += `<div class="gruppe auf"><div class="gruppe-inhalt ohne-rand">${masse.map((f) => {
+        const auf = neu || this._offeneZeilen.has(`inv-${f.k}`);
+        return `<div class="zeile eigen ${auf ? "auf" : ""}" data-zeile="inv-${f.k}">
+          <button class="zeile-kopf" data-aktion="zeile" data-k="inv-${f.k}"><span class="z-name">${f.name}</span>
+            <span class="z-wert"><span class="wert">${zahl(t[f.k], f.nk ?? 0)} ${f.e}</span></span></button>
+          ${auf ? `<div class="klapp" data-klapp="z:inv-${f.k}"><div class="regler-zeile">
+            <button class="rund" data-aktion="inv-schritt" data-k="${f.k}" data-d="-1">−</button>
+            <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${t[f.k] ?? f.min}" data-inv-mass="${f.k}">
+            <button class="rund" data-aktion="inv-schritt" data-k="${f.k}" data-d="1">+</button></div></div>` : ""}
+        </div>`;
+      }).join("")}</div></div>`;
+      if (t.kat === "schraube") {
+        const n = NORM[t.gewinde] || NORM.M3;
+        html += this._invNormHtml(t, n);
+      }
+    } else if (t.kat === "mutter" || t.kat === "scheibe") {
+      html += `<p class="leise klein">Maße nach Norm (${t.kat === "mutter" ? "DIN 934" : "DIN 125"}), gelten für alle ${esc(t.gewinde)}-${t.kat === "mutter" ? "Muttern" : "Scheiben"}.</p>`;
+    }
+    if (t.kat === "magnet" && t.form !== "folie") html += `<div class="hinweis klein">💡 Loch im Druck für ${t.form === "rund" ? "Ø" : "Maß"} ${zahl(t.durchmesser, 2)} mm: etwa ${zahl(t.durchmesser + 0.15, 2)} mm einplanen (Richtwert, je nach Drucker 0,1–0,2 mm Zugabe).</div>`;
+    if (t.kat === "feder" || neu) {
+      html += `<label class="formular-zeile">Fach / Lagerort<input class="text" data-inv-text="fach" value="${esc(t.fach || "")}" placeholder="z. B. R1F3 oder Schublade 2"></label>`;
+    }
+
+    // Menge
+    html += `${neu ? `<h3 class="abschnitt">3 · Menge</h3>` : ""}
+      <div class="rechner-block menge-block">
+        <div class="r-kopf"><span>Menge</span><strong id="inv-menge">${t.menge == null ? "–" : `${zahl(t.menge)} Stück`}</strong></div>
+        <div class="regler-zeile mengen-knoepfe">
+          <button class="rund" data-aktion="inv-menge" data-d="-10">−10</button>
+          <button class="rund" data-aktion="inv-menge" data-d="-1">−1</button>
+          <button class="rund" data-aktion="inv-menge" data-d="1">+1</button>
+          <button class="rund" data-aktion="inv-menge" data-d="10">+10</button>
+        </div>
+        ${!neu && !t.gezaehlt && t.menge != null ? `<div class="hinweis klein">* Menge laut ${esc(t.quelle || "Lieferumfang")}, noch nicht nachgezählt. <button class="mini mint-rand" data-aktion="inv-gezaehlt">Stimmt, nachgezählt ✓</button></div>` : ""}
+        <div class="r-kopf oben-abstand"><span>Warnen ab (Mindestbestand)</span><strong id="inv-min">${t.min ? `${t.min} Stück` : "aus"}</strong></div>
+        <input type="range" min="0" max="100" step="1" value="${t.min || 0}" data-inv-min="1">
+      </div>`;
+
+    if (passend.length) {
+      html += `<h3>🔗 Passt dazu (${esc(t.gewinde)})</h3><div class="chips">${passend.map((x) =>
+        `<button class="chip" data-aktion="inv-oeffnen" data-id="${esc(x.id)}">${kategorie(x.kat).icon} ${esc(teilName(x))} · ${x.menge ?? "?"} Stk</button>`).join("")}</div>`;
+    }
+    if (!neu) {
+      const info = [["Material", t.material], ["Kopf", t.kopf], ["Quelle", t.quelle], ["Shop", t.shop], ["Preis", t.preis ? `${zahl(t.preis, 2)} € für ${t.kat === "einsatz" ? 50 : ""} Stück`.replace("für  Stück", "") : null], ["Drucker", t.drucker]]
+        .filter(([, v]) => v);
+      if (info.length) html += `<h3>Infos</h3><div class="info-liste">${info.map(([n, v]) => `<div class="info-zeile"><span>${n}</span><strong>${esc(v)}</strong></div>`).join("")}</div>`;
+      html += `<h3>Notizen</h3><textarea data-inv-text="notiz" rows="3" placeholder="z. B. wofür gebraucht, nachbestellen bei …">${esc(t.notiz || "")}</textarea>
+        <button class="knopf rot-knopf breit oben-abstand" data-aktion="inv-loeschen">Teil löschen</button>`;
+    }
+
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="${esc(teilName(t))}">
+        <div class="griff"></div>
+        <header class="sheet-kopf">
+          <div class="teil-kopf-bild">${teilSvg(t)}</div>
+          <div class="sheet-titel"><h2>${neu ? `Neues Teil: ${esc(teilName(t))}` : esc(teilName(t))}</h2>
+            <div class="sub">${esc(teilUntertitel(t))}</div>
+            <span class="pille mint">${k.icon} ${k.einzahl}</span></div>
+          <button class="icon-knopf" data-aktion="schliessen" aria-label="Schließen">✕</button>
+        </header>
+        <div class="sheet-inhalt">${html}</div>
+        ${neu ? `<footer class="sheet-fuss"><button class="knopf leise" data-aktion="schliessen">Abbrechen</button>
+          <button class="knopf" data-aktion="inv-anlegen">Teil anlegen</button></footer>` : ""}
+      </section>`;
+  },
+
+  _invNeuStarten() {
+    this._invNeu = { id: "neu", kat: "schraube", gewinde: "M3", laenge: 10, kopf: "Zylinderkopf Innensechskant", menge: 10, gezaehlt: true, min: null, notiz: "", fach: "" };
+    this._modus = "inv-neu";
+    this._sheetScroll = 0;
+  },
+
+  _invNeuKat(kat) {
+    const v = { schraube: { gewinde: "M3", laenge: 10, kopf: "Zylinderkopf Innensechskant" }, mutter: { gewinde: "M3" }, scheibe: { gewinde: "M3" },
+      einsatz: { gewinde: "M3", laenge: 5, aussen: 5, material: "Messing" }, feder: { draht: 0.4, aussen: 5, laenge: 20, material: "Edelstahl" },
+      duese: { groesse: 0.4, drucker: "Bambu Lab P1S", material: "" }, magnet: { form: "rund", durchmesser: 6, breite: 6, dicke: 2 } }[kat];
+    this._invNeu = { id: "neu", kat, menge: this._invNeu.menge, gezaehlt: true, min: null, notiz: "", fach: this._invNeu.fach || "", ...v };
+  },
+
+  // Gibt true zurück, wenn der Klick zum Inventar gehörte
+  _invKlick(a, el) {
+    const t = this._teil();
+    const speichernWennAlt = () => { if (this._modus !== "inv-neu") this._speichern(); };
+    switch (a) {
+      case "inv-kat": this._invF = { ...this._invF, kat: this._invF.kat === el.dataset.id ? "" : el.dataset.id }; break;
+      case "inv-alle": this._invF = { kat: "", gewinde: "", status: "" }; this._invSuche = ""; break;
+      case "inv-oeffnen":
+        this._modus = "inv-detail"; this._invOffen = el.dataset.id; this._offeneZeilen.clear(); this._sheetScroll = 0;
+        break;
+      case "inv-neu-kat": this._invNeuKat(el.dataset.id); break;
+      case "inv-neu-form": this._invNeu.form = el.dataset.id; break;
+      case "inv-gewinde": t.gewinde = el.dataset.id; speichernWennAlt(); break;
+      case "inv-schritt": {
+        const f = masseFuer(t).find((x) => x.k === el.dataset.k);
+        const schritt = (f.nk ?? 0) >= 2 ? f.step * 10 : f.step;   // feine Regler, gröbere Knöpfe
+        this._invMassSetzen(f, (t[f.k] ?? f.min) + Number(el.dataset.d) * schritt, true);
+        return true;
+      }
+      case "inv-menge": {
+        t.menge = Math.max(0, (t.menge || 0) + Number(el.dataset.d));
+        const anz = this.shadowRoot.getElementById("inv-menge");
+        if (anz) anz.textContent = `${zahl(t.menge)} Stück`;
+        speichernWennAlt();
+        return true;
+      }
+      case "inv-gezaehlt": t.gezaehlt = true; speichernWennAlt(); break;
+      case "inv-loeschen":
+        if (!confirm(`${teilName(t)} wirklich löschen?`)) return true;
+        this._daten.inventar = this._inv().filter((x) => x !== t);
+        this._modus = null; this._invOffen = null;
+        this._speichern();
+        this._toast(`${teilName(t)} gelöscht.`);
+        return true;
+      case "inv-anlegen": {
+        const n = { ...this._invNeu, id: `${this._invNeu.kat}-${Date.now().toString(36)}`, angelegt_am: new Date().toISOString() };
+        this._inv().push(n);
+        this._modus = null; this._invNeu = null;
+        this._speichern();
+        this._toast(`${teilName(n)} angelegt.`);
+        return true;
+      }
+      default: return false;
+    }
+    this._zeichnen();
+    return true;
+  },
+
+  _invMassSetzen(f, v, slider) {
+    const t = this._teil();
+    v = Math.max(f.min, Math.min(f.max, Math.round(v / f.step) * f.step));
+    t[f.k] = Number(v.toFixed((f.nk ?? 0) + 1));
+    const zeile = this.shadowRoot.querySelector(`[data-zeile="inv-${f.k}"]`);
+    if (zeile) {
+      zeile.querySelector(".wert").textContent = `${zahl(t[f.k], f.nk ?? 0)} ${f.e}`;
+      if (slider) { const i = zeile.querySelector("input"); if (i) i.value = t[f.k]; }
+    }
+    const bild = this.shadowRoot.querySelector(".zeichnung");
+    if (bild) bild.innerHTML = teilSvg(t, true);
+    const titel = this.shadowRoot.querySelector(".sheet-titel h2");
+    if (titel) titel.textContent = this._modus === "inv-neu" ? `Neues Teil: ${teilName(t)}` : teilName(t);
+    if (this._modus !== "inv-neu") this._speichern();
+  },
+
+  _invEingabe(t) {
+    if (t.id === "inv-suche") {
+      this._invSuche = t.value;
+      const r = this.shadowRoot.getElementById("inv-raster");
+      if (r) r.innerHTML = this._invRasterHtml();
+      return true;
+    }
+    if (t.dataset.invMass) {
+      const f = masseFuer(this._teil()).find((x) => x.k === t.dataset.invMass);
+      this._invMassSetzen(f, Number(t.value), false);
+      return true;
+    }
+    if (t.dataset.invMin) {
+      const teil = this._teil();
+      teil.min = Number(t.value) || null;
+      const anz = this.shadowRoot.getElementById("inv-min");
+      if (anz) anz.textContent = teil.min ? `${teil.min} Stück` : "aus";
+      return true;
+    }
+    if (t.dataset.invText) { this._teil()[t.dataset.invText] = t.value; return true; }
+    return false;
+  },
+
+  // Maße zum Konstruieren (Kopf, Loch, Senkung) mit Normangabe
+  _invNormHtml(t, n) {
+    const z = (v) => zahl(v, 1);
+    const zeile = (name, wert, norm) => `<div class="info-zeile"><span>${name}<small class="norm">${norm}</small></span><strong>${wert}</strong></div>`;
+    return `<h3>📐 Zum Konstruieren (${esc(t.gewinde)})</h3><div class="info-liste">
+      ${zeile("Kopfdurchmesser dk", `${z(n.kopf_d)} mm`, "DIN 912 / ISO 4762")}
+      ${zeile("Kopfhöhe k", `${z(n.kopf_h)} mm`, "DIN 912 / ISO 4762")}
+      ${zeile("Innensechskant", `SW ${z(n.inbus)}`, "DIN 912 / ISO 4762")}
+      ${zeile("Durchgangsloch", `Ø ${z(n.loch)} mm`, "DIN EN 20273, mittel")}
+      ${zeile("Senkung für den Kopf", `Ø ${z(n.senk_d)} × ${z(n.kopf_h + 0.4)} mm tief`, "Richtwert, vgl. DIN 974-1")}
+    </div>
+    <p class="leise klein">Maße nach DIN 912 / ISO 4762 (Zylinderschraube mit Innensechskant). Durchgangsloch nach DIN EN 20273 (ISO 273), Reihe mittel. Die Senkung ist ein Richtwert (Ø mit Spiel, Tiefe = Kopfhöhe + 0,4 mm, damit der Kopf bündig verschwindet); die genauen Werte stehen in DIN 974-1. Für den 3D-Druck Löcher etwa 0,1–0,2 mm größer zeichnen.</p>`;
+  },
+
+  _invAenderung(t) {
+    if (t.dataset.invFilter != null) { this._invF = { ...this._invF, [t.dataset.invFilter]: t.value }; this._zeichnen(); return true; }
+    if (t.id === "inv-sortierung") { this._invSort = t.value; this._zeichnen(); return true; }
+    if ((t.dataset.invMin || t.dataset.invText) && this._modus !== "inv-neu") { this._speichern(); return true; }
+    return false;
+  },
+};
 // ---------------------------------------------------------------------------
 // Die Seite selbst: ein Web-Component, das Home Assistant als Panel lädt.
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.3.0";
+const VERSION = "0.5.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -585,7 +1229,7 @@ const DRUCKER_SENSOREN = [
 
 const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
-  { id: "inventar", name: "Inventar", icon: "🔩", bald: true },
+  { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️", bald: true },
   { id: "hilfe", name: "Hilfe", icon: "💡", bald: true },
   { id: "system", name: "System", icon: "⚙️" },
@@ -654,6 +1298,13 @@ class FilamentWerkstattPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    // Stil einmal anlegen statt bei jedem Neuzeichnen neu einzulesen (spart Rechenzeit, kein Flackern)
+    try {
+      const blatt = new CSSStyleSheet();
+      blatt.replaceSync(STIL);
+      this.shadowRoot.adoptedStyleSheets = [blatt];
+      this._stilFest = true;
+    } catch (e) { this._stilFest = false; }
     this._daten = null;
     this._fehler = null;
     this._ansicht = "filament";
@@ -677,6 +1328,11 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._mobil = false;
     this._narrow = false;
     this._check = null;
+    this._invF = { kat: "", gewinde: "", status: "" };
+    this._invSort = "kategorie";
+    this._invSuche = "";
+    this._invOffen = null;
+    this._invNeu = null;
   }
 
   // ---- Home Assistant -----------------------------------------------------
@@ -699,6 +1355,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       this.shadowRoot.addEventListener("click", (e) => this._klick(e));
       this.shadowRoot.addEventListener("input", (e) => this._eingabe(e));
       this.shadowRoot.addEventListener("change", (e) => this._aenderung(e));
+      this.shadowRoot.addEventListener("scroll", (e) => { this._ddBeimScrollen(e.target); }, true);
+      this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._ddZu(); });
     }
     this._ro.observe(this);
     this._zeichnen();
@@ -758,8 +1416,15 @@ class FilamentWerkstattPanel extends HTMLElement {
   _toast(text) {
     this._toastText = text;
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { this._toastText = null; this._zeichnen(); }, 2600);
+    this._toastTimer = setTimeout(() => this._toastWeg(), 2600);
     this._zeichnen();
+  }
+
+  // Nur die Meldung entfernen, nicht neu zeichnen (sonst gehen Eingaben verloren)
+  _toastWeg() {
+    this._toastText = null;
+    const t = this.shadowRoot.querySelector(".toast");
+    if (t) t.remove();
   }
 
   // ---- Hilfsfunktionen ----------------------------------------------------
@@ -859,9 +1524,25 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   // ---- Ereignisse ---------------------------------------------------------
   _klick(e) {
+    // Tipp auf den Label-Text: der Browser klickt danach selbst den Listen-Knopf
+    if (e.target.closest("label") && e.target.closest("label").querySelector(".dd-knopf") && !e.target.closest(".dd-knopf, input, textarea")) return;
+    if (this._ddOffen && !e.target.closest(".dd-liste")) {
+      const war = this._ddOffen;
+      this._ddZu();
+      if (e.target.closest(".dd-knopf") === war.knopf) return;
+    }
     const el = e.target.closest("[data-aktion]");
     if (!el) return;
     const a = el.dataset.aktion;
+    if (a === "dd") { this._ddAuf(el); return; }
+    if (a === "dd-wahl") { this._ddWaehlen(el); return; }
+    if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
+    if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
+    if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
+      const k = el.dataset.k;
+      this._klappen(`z:${k}`, this._offeneZeilen.has(k), () => { this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k); }, `[data-zeile="${k}"]`);
+      return;
+    }
     const rolle = this._rolle();
     switch (a) {
       case "menue":
@@ -870,6 +1551,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       case "ansicht":
         if (el.dataset.bald) { this._toast("Kommt in einem der nächsten Schritte."); return; }
         this._ansicht = el.dataset.id;
+        this._filterAuf = false;
         if (this._ansicht === "system") this._systemcheck();
         break;
       case "alle":
@@ -886,7 +1568,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._rechner = null;
         this._sheetScroll = 0;
         break;
-      case "neu": this._neuStarten(); break;
+      case "neu": this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
       case "tab":
         if (this._tab === "rest" && this._rechnerGeaendert()) this._toast(this._restSpeichern(false));
@@ -894,14 +1576,15 @@ class FilamentWerkstattPanel extends HTMLElement {
         break;
       case "gruppe": {
         const g = el.dataset.id;
-        this._gruppen.has(g) ? this._gruppen.delete(g) : this._gruppen.add(g);
-        break;
+        this._klappen(`g:${g}`, this._gruppen.has(g), () => { this._gruppen.has(g) ? this._gruppen.delete(g) : this._gruppen.add(g); }, `[data-gruppe="${g}"]`);
+        return;
       }
       case "zeile": {
         const k = el.dataset.k;
+        const teil = this._bearbeiten || this._modus === "neu";   // sonst ändert sich auch der Fuß: alles neu zeichnen
         if (!this._bearbeiten) this._bearbeitenStarten(rolle, false);
-        this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k);
-        break;
+        this._klappen(`z:${k}`, this._offeneZeilen.has(k), () => { this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k); }, teil ? `[data-zeile="${k}"]` : null);
+        return;
       }
       case "verwerfen":
         this._bearbeiten = false; this._entwurf = null; this._nachTest = false; this._offeneZeilen.clear();
@@ -1016,6 +1699,11 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _schliessen() {
     if (this._dialog) { this._dialog = null; return true; }
+    if (this._modus === "inv-neu" && !confirm("Neues Teil verwerfen?")) return false;
+    if (this._modus === "inv-detail" || this._modus === "inv-neu") {
+      this._modus = null; this._invOffen = null; this._invNeu = null; this._offeneZeilen.clear();
+      return true;
+    }
     if (this._modus === "neu") {
       if (!confirm("Neues Filament verwerfen?")) return false;
     } else if (this._bearbeiten) {
@@ -1023,7 +1711,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     } else if (this._tab === "rest" && this._rechnerGeaendert()) {
       this._toastText = this._restSpeichern(false);
       clearTimeout(this._toastTimer);
-      this._toastTimer = setTimeout(() => { this._toastText = null; this._zeichnen(); }, 2600);
+      this._toastTimer = setTimeout(() => this._toastWeg(), 2600);
     }
     this._modus = null; this._offen = null; this._neu = null;
     this._bearbeiten = false; this._entwurf = null; this._rechner = null; this._offeneZeilen.clear();
@@ -1094,6 +1782,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _eingabe(e) {
     const t = e.target;
+    if (this._invEingabe(t)) return;
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -1119,6 +1808,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _aenderung(e) {
     const t = e.target;
+    if (this._invAenderung(t)) return;
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -1176,6 +1866,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (slider) { const s = this.shadowRoot.querySelector(`[data-rechner="${k}"]`); if (s) s.value = v; }
     const erg = this.shadowRoot.getElementById("r-ergebnis");
     if (erg) erg.innerHTML = this._rechnerErgebnisHtml();
+    const verwerfen = this.shadowRoot.querySelector('[data-aktion="rest-verwerfen"]');
+    if (verwerfen) verwerfen.disabled = !this._rechnerGeaendert();
     if (k === "nenn_g") this.shadowRoot.querySelectorAll("[data-aktion=groesse-wahl]").forEach((c) => c.classList.toggle("an", Number(c.dataset.g) === v));
   }
 
@@ -1215,29 +1907,176 @@ class FilamentWerkstattPanel extends HTMLElement {
     const sheet = root.querySelector(".sheet-inhalt");
     const scrollHaupt = haupt ? haupt.scrollTop : 0;
     if (sheet) this._sheetScroll = sheet.scrollTop;
-    const fokusSuche = root.activeElement && root.activeElement.id === "suche";
+    const fokusId = root.activeElement && ["suche", "inv-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
+    const schonDa = new Set([...root.querySelectorAll("[data-einmal]")].map((x) => x.dataset.einmal));
+    this._ddOffen = null;
 
-    root.innerHTML = `<style>${STIL}</style>
+    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
         <main class="haupt">${this._inhaltHtml()}</main>
-        ${this._ansicht === "filament" && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Filament hinzufügen" title="Filament hinzufügen">+</button>` : ""}
+        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
         ${this._mobil ? this._navHtml("unten") : ""}
         ${this._modus === "detail" ? this._sheetHtml() : ""}
         ${this._modus === "neu" ? this._neuSheetHtml() : ""}
+        ${this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : ""}
         ${this._dialogHtml()}
-        ${this._toastText ? `<div class="toast">${esc(this._toastText)}</div>` : ""}
+        ${this._toastText ? `<div class="toast" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}</div>` : ""}
       </div>`;
 
     const h = root.querySelector(".haupt");
     if (h) h.scrollTop = scrollHaupt;
     const s = root.querySelector(".sheet-inhalt");
     if (s && this._sheetScroll) s.scrollTop = this._sheetScroll;
-    if (fokusSuche) {
-      const i = root.getElementById("suche");
+    const i = fokusId && root.getElementById(fokusId);
+    if (i) {
       i.focus();
       i.setSelectionRange(i.value.length, i.value.length);
     }
+    // Einblend-Animationen nur beim ersten Erscheinen, nicht bei jedem Neuzeichnen
+    root.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });
+    this._auswahlenBauen();
+    if (this._klappNeu) {
+      const k = root.querySelector(`[data-klapp="${this._klappNeu}"]`);
+      this._klappNeu = null;
+      if (k) this._klappAnimieren(k, true);
+    }
+  }
+
+  // ---- Aufklappen mit Animation (nach unten fahren) -----------------------
+  // teil: Selektor des Bereichs, der allein neu gezeichnet werden darf (schneller, nichts flackert)
+  _klappen(schluessel, istAuf, umschalten, teil) {
+    const neu = () => (teil && this._teilweise(teil)) || (this._zeichnen(), true);
+    const el = istAuf && this.shadowRoot.querySelector(`[data-klapp="${schluessel}"]`);
+    if (!el) {
+      umschalten();
+      if (istAuf) { neu(); return; }
+      this._klappNeu = schluessel;
+      neu();
+      const k = this._klappNeu && this.shadowRoot.querySelector(`[data-klapp="${schluessel}"]`);
+      this._klappNeu = null;
+      if (k) this._klappAnimieren(k, true);
+      return;
+    }
+    const gruppe = el.parentElement.closest(".gruppe");
+    if (gruppe && schluessel.startsWith("g:")) gruppe.classList.remove("auf");
+    this._klappLaeuft = true;
+    this._klappAnimieren(el, false, () => { this._klappLaeuft = false; umschalten(); neu(); });
+  }
+
+  // Nur ein Element der offenen Detailansicht durch seine neue Fassung ersetzen
+  _teilweise(selektor) {
+    const root = this.shadowRoot;
+    const alt = root.querySelector(`.sheet ${selektor}`);
+    if (!alt) return false;
+    const html = this._modus === "detail" ? this._sheetHtml() : this._modus === "neu" ? this._neuSheetHtml()
+      : this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : null;
+    if (!html) return false;
+    const vorlage = document.createElement("template");
+    vorlage.innerHTML = html;
+    const neu = vorlage.content.querySelector(selektor);
+    if (!neu) return false;
+    alt.replaceWith(neu);
+    this._auswahlenBauen();
+    return true;
+  }
+
+  _klappAnimieren(el, auf, fertig) {
+    const h = el.scrollHeight;
+    const ruhig = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (ruhig || !el.animate) { fertig && fertig(); return; }
+    el.style.overflow = "hidden";
+    const schritte = [{ height: "0px", opacity: 0 }, { height: `${h}px`, opacity: 1 }];
+    const anim = el.animate(auf ? schritte : schritte.reverse(), { duration: Math.min(320, 160 + h * 0.4), easing: "cubic-bezier(.2,.7,.2,1)" });
+    anim.onfinish = () => { el.style.overflow = ""; fertig && fertig(); };
+    if (auf) {
+      const pfeil = el.parentElement.querySelector(":scope > .gruppe-kopf .pfeil");
+      if (pfeil) pfeil.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(90deg)" }], { duration: 180, easing: "ease" });
+    }
+  }
+
+  // ---- Eigene Auswahllisten statt der Browser-Liste -----------------------
+  // Das <select> bleibt (unsichtbar) die Quelle des Werts; ein Knopf zeigt ihn an.
+  _auswahlenBauen() {
+    this.shadowRoot.querySelectorAll("select:not(.dd-nativ)").forEach((sel) => {
+      const i = (this._ddNr = (this._ddNr || 0) + 1);
+      sel.classList.add("dd-nativ");
+      sel.tabIndex = -1;
+      sel.dataset.dd = String(i);
+      const opt = sel.options[sel.selectedIndex];
+      const knopf = document.createElement("button");
+      knopf.type = "button";
+      knopf.className = `dd-knopf ${sel.classList.contains("text") ? "text" : ""}`;
+      knopf.dataset.aktion = "dd";
+      knopf.dataset.dd = String(i);
+      knopf.innerHTML = `<span class="dd-text ${!opt || opt.disabled ? "leise" : ""}"></span><span class="dd-pfeil">▾</span>`;
+      knopf.firstChild.textContent = opt ? opt.textContent : "";
+      sel.before(knopf);   // zuerst im <label>, damit ein Tipp aufs Label die Liste öffnet
+    });
+  }
+
+  _ddAuf(knopf) {
+    const root = this.shadowRoot;
+    const sel = root.querySelector(`select[data-dd="${knopf.dataset.dd}"]`);
+    const app = root.querySelector(".app");
+    if (!sel || !app) return;
+    let html = "";
+    for (const kind of sel.children) {
+      if (kind.tagName === "OPTGROUP") {
+        html += `<div class="dd-gruppe">${esc(kind.label)}</div>`;
+        for (const o of kind.children) html += this._ddOptionHtml(o, sel, true);
+      } else html += this._ddOptionHtml(kind, sel, false);
+    }
+    const liste = document.createElement("div");
+    liste.className = "dd-liste";
+    liste.setAttribute("role", "listbox");
+    liste.innerHTML = html;
+    app.appendChild(liste);
+    const a = app.getBoundingClientRect(), k = knopf.getBoundingClientRect();
+    const breite = Math.max(k.width, 200);
+    const links = Math.min(Math.max(8, k.left - a.left), a.width - breite - 8);
+    const unten = a.bottom - k.bottom - 12, oben = k.top - a.top - 12;
+    const nachOben = unten < 260 && oben > unten;
+    liste.style.left = `${links}px`;
+    liste.style.width = `${breite}px`;
+    liste.style.maxHeight = `${Math.min(360, nachOben ? oben : unten)}px`;
+    if (nachOben) { liste.style.bottom = `${a.bottom - k.top + 6}px`; liste.classList.add("nach-oben"); }
+    else liste.style.top = `${k.bottom - a.top + 6}px`;
+    knopf.classList.add("offen");
+    const stand = new Map([...this.shadowRoot.querySelectorAll(".haupt, .sheet-inhalt, .dialog")].map((x) => [x, x.scrollTop]));
+    this._ddOffen = { liste, knopf, stand };
+    const an = liste.querySelector(".an");
+    if (an) liste.scrollTop = Math.max(0, an.offsetTop - liste.clientHeight / 2);
+  }
+
+  // Liste schließen, wenn die Seite darunter wirklich bewegt wird (nicht bei verspäteten Scroll-Meldungen)
+  _ddBeimScrollen(ziel) {
+    const d = this._ddOffen;
+    if (!d || d.liste.contains(ziel) || !ziel.matches || !ziel.matches(".haupt, .sheet-inhalt, .dialog")) return;
+    if (!d.stand.has(ziel)) d.stand.set(ziel, ziel.scrollTop);
+    if (Math.abs(ziel.scrollTop - d.stand.get(ziel)) > 4) this._ddZu();
+  }
+
+  _ddOptionHtml(o, sel, eingerueckt) {
+    if (o.disabled) return "";
+    const an = o.value === sel.value;
+    return `<button type="button" class="dd-option ${an ? "an" : ""} ${eingerueckt ? "eingerueckt" : ""}" role="option" data-aktion="dd-wahl" data-dd="${sel.dataset.dd}" data-wert="${esc(o.value)}">
+      <span>${esc(o.textContent)}</span>${an ? "<i>✓</i>" : ""}</button>`;
+  }
+
+  _ddWaehlen(el) {
+    const sel = this.shadowRoot.querySelector(`select[data-dd="${el.dataset.dd}"]`);
+    this._ddZu();
+    if (!sel || sel.value === el.dataset.wert) return;
+    sel.value = el.dataset.wert;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  _ddZu() {
+    if (!this._ddOffen) return;
+    this._ddOffen.liste.remove();
+    this._ddOffen.knopf.classList.remove("offen");
+    this._ddOffen = null;
   }
 
   _kopfHtml() {
@@ -1263,6 +2102,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     }
     if (this._ansicht === "system") return this._systemHtml();
     if (!this._daten) return `<div class="laden">Lade Daten aus Home Assistant …</div>`;
+    if (this._ansicht === "inventar") return this._invHtml();
     return this._filamentHtml();
   }
 
@@ -1306,7 +2146,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       <section class="werkzeug">
         <button class="chip alle ${this._filterAktiv() ? "" : "an"}" data-aktion="alle">Alle</button>
         ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="filter-auf"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
-        ${!this._mobil || this._filterAuf ? `<div class="unterfilter">
+        ${!this._mobil || this._filterAuf ? `<div class="unterfilter" data-einmal="filter">
           ${this._auswahl("Material", "sorte", "Alle Materialien", mitWert(sorten, this._f.sorte))}
           ${this._auswahl("Hersteller", "hersteller", "Alle Hersteller", mitWert(hersteller, this._f.hersteller))}
           ${this._auswahl("Farbe", "farbe", "Alle Farben", mitWert(farben, this._f.farbe))}
@@ -1353,8 +2193,8 @@ class FilamentWerkstattPanel extends HTMLElement {
         fuss = `<button class="knopf amber" data-aktion="probiert">✓ Probiert</button>`;
       }
     }
-    return `<div class="schleier" data-aktion="schliessen"></div>
-      <section class="sheet" role="dialog" aria-label="${esc(r.name)}">
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="${esc(r.name)}">
         <div class="griff"></div>
         <header class="sheet-kopf">
           ${spuleSvg(r, true)}
@@ -1419,11 +2259,11 @@ class FilamentWerkstattPanel extends HTMLElement {
           return `<div class="zeile ${w.quelle} ${auf ? "auf" : ""}" data-zeile="${f.k}">
             <button class="zeile-kopf" data-aktion="zeile" data-k="${f.k}"><span class="z-name">${f.name}</span>
               <span class="z-wert"><span class="wert">${zahl(w.v, feldNk(f))} ${f.e}</span>${w.quelle === "vorschlag" ? '<span class="tag">Vorschlag</span>' : ""}</span></button>
-            ${auf ? `<div class="regler-zeile">
+            ${auf ? `<div class="klapp" data-klapp="z:${f.k}"><div class="regler-zeile">
               <button class="rund" data-aktion="schritt" data-k="${f.k}" data-d="-1" aria-label="weniger">−</button>
               <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${w.v ?? f.min}" data-feld="${f.k}">
               <button class="rund" data-aktion="schritt" data-k="${f.k}" data-d="1" aria-label="mehr">+</button>
-            </div>` : ""}
+            </div></div>` : ""}
           </div>`;
         }).join(""));
       if (g.id === "fluss") html += this._platteHtml(r, anzeige);
@@ -1446,18 +2286,18 @@ class FilamentWerkstattPanel extends HTMLElement {
       `<div class="zeile ${w.quelle} ${auf ? "auf" : ""}" data-zeile="platte">
         <button class="zeile-kopf" data-aktion="zeile" data-k="platte"><span class="z-name">Druckbetttyp</span>
           <span class="z-wert"><span class="wert">${esc(w.v || "–")}</span>${w.quelle === "vorschlag" ? '<span class="tag">Vorschlag</span>' : ""}</span></button>
-        ${auf ? `<select class="text" data-platte="1">${PLATTEN.map((p) => `<option ${p === w.v ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>` : ""}
+        ${auf ? `<div class="klapp" data-klapp="z:platte"><select class="text" data-platte="1">${PLATTEN.map((p) => `<option ${p === w.v ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></div>` : ""}
       </div>`);
   }
 
   _gruppeHtml(id, icon, name, zusammenfassung, nurVorschlag, inhalt) {
     const auf = this._gruppen.has(id);
-    return `<div class="gruppe ${auf ? "auf" : ""}">
+    return `<div class="gruppe ${auf ? "auf" : ""}" data-gruppe="${id}">
       <button class="gruppe-kopf" data-aktion="gruppe" data-id="${id}">
         <span class="g-icon">${icon}</span><span class="g-name">${name}</span>
         <span class="g-zus ${nurVorschlag ? "amber" : ""}">${zusammenfassung}</span><span class="pfeil">›</span>
       </button>
-      ${auf ? `<div class="gruppe-inhalt">${inhalt}</div>` : ""}
+      ${auf ? `<div class="klapp" data-klapp="g:${id}"><div class="gruppe-inhalt">${inhalt}</div></div>` : ""}
     </div>`;
   }
 
@@ -1564,8 +2404,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     const bekannt = [...new Set(this._daten.rollen.map((r) => r.hersteller))].sort((a, b) => a.localeCompare(b, "de"));
     const c = this._rechner;
     const groessen = [...new Set([...this._daten.rollen.map((r) => r.nenn_g || 1000), ...STANDARD_GROESSEN])].sort((a, b) => a - b);
-    return `<div class="schleier" data-aktion="schliessen"></div>
-      <section class="sheet" role="dialog" aria-label="Neues Filament">
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="Neues Filament">
         <div class="griff"></div>
         <header class="sheet-kopf"><div id="neu-vorschau" class="neu-vorschau">${this._neuVorschauHtml()}</div>
           <button class="icon-knopf" data-aktion="schliessen" aria-label="Schließen">✕</button></header>
@@ -1661,7 +2501,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         <div class="chips">${groessen.map((g) => `<button class="chip ${c.nenn_g === g ? "an" : ""}" data-aktion="groesse-wahl" data-g="${g}">${gramm(g)}</button>`).join("")}</div>
         <button class="knopf breit oben-abstand" data-aktion="dialog-zu">Fertig</button>`;
     }
-    return `<div class="schleier oben" data-aktion="dialog-zu"></div><div class="dialog" role="dialog">${inhalt}</div>`;
+    return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-${this._dialog}"></div><div class="dialog" role="dialog" data-einmal="dialog-${this._dialog}">${inhalt}</div>`;
   }
 
   _systemHtml() {
@@ -1676,6 +2516,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     </div>`;
   }
 }
+
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);

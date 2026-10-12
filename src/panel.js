@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.3.0";
+const VERSION = "0.5.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -15,7 +15,7 @@ const DRUCKER_SENSOREN = [
 
 const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
-  { id: "inventar", name: "Inventar", icon: "🔩", bald: true },
+  { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️", bald: true },
   { id: "hilfe", name: "Hilfe", icon: "💡", bald: true },
   { id: "system", name: "System", icon: "⚙️" },
@@ -84,6 +84,13 @@ class FilamentWerkstattPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    // Stil einmal anlegen statt bei jedem Neuzeichnen neu einzulesen (spart Rechenzeit, kein Flackern)
+    try {
+      const blatt = new CSSStyleSheet();
+      blatt.replaceSync(STIL);
+      this.shadowRoot.adoptedStyleSheets = [blatt];
+      this._stilFest = true;
+    } catch (e) { this._stilFest = false; }
     this._daten = null;
     this._fehler = null;
     this._ansicht = "filament";
@@ -107,6 +114,11 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._mobil = false;
     this._narrow = false;
     this._check = null;
+    this._invF = { kat: "", gewinde: "", status: "" };
+    this._invSort = "kategorie";
+    this._invSuche = "";
+    this._invOffen = null;
+    this._invNeu = null;
   }
 
   // ---- Home Assistant -----------------------------------------------------
@@ -129,6 +141,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       this.shadowRoot.addEventListener("click", (e) => this._klick(e));
       this.shadowRoot.addEventListener("input", (e) => this._eingabe(e));
       this.shadowRoot.addEventListener("change", (e) => this._aenderung(e));
+      this.shadowRoot.addEventListener("scroll", (e) => { this._ddBeimScrollen(e.target); }, true);
+      this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._ddZu(); });
     }
     this._ro.observe(this);
     this._zeichnen();
@@ -188,8 +202,15 @@ class FilamentWerkstattPanel extends HTMLElement {
   _toast(text) {
     this._toastText = text;
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { this._toastText = null; this._zeichnen(); }, 2600);
+    this._toastTimer = setTimeout(() => this._toastWeg(), 2600);
     this._zeichnen();
+  }
+
+  // Nur die Meldung entfernen, nicht neu zeichnen (sonst gehen Eingaben verloren)
+  _toastWeg() {
+    this._toastText = null;
+    const t = this.shadowRoot.querySelector(".toast");
+    if (t) t.remove();
   }
 
   // ---- Hilfsfunktionen ----------------------------------------------------
@@ -289,9 +310,25 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   // ---- Ereignisse ---------------------------------------------------------
   _klick(e) {
+    // Tipp auf den Label-Text: der Browser klickt danach selbst den Listen-Knopf
+    if (e.target.closest("label") && e.target.closest("label").querySelector(".dd-knopf") && !e.target.closest(".dd-knopf, input, textarea")) return;
+    if (this._ddOffen && !e.target.closest(".dd-liste")) {
+      const war = this._ddOffen;
+      this._ddZu();
+      if (e.target.closest(".dd-knopf") === war.knopf) return;
+    }
     const el = e.target.closest("[data-aktion]");
     if (!el) return;
     const a = el.dataset.aktion;
+    if (a === "dd") { this._ddAuf(el); return; }
+    if (a === "dd-wahl") { this._ddWaehlen(el); return; }
+    if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
+    if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
+    if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
+      const k = el.dataset.k;
+      this._klappen(`z:${k}`, this._offeneZeilen.has(k), () => { this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k); }, `[data-zeile="${k}"]`);
+      return;
+    }
     const rolle = this._rolle();
     switch (a) {
       case "menue":
@@ -300,6 +337,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       case "ansicht":
         if (el.dataset.bald) { this._toast("Kommt in einem der nächsten Schritte."); return; }
         this._ansicht = el.dataset.id;
+        this._filterAuf = false;
         if (this._ansicht === "system") this._systemcheck();
         break;
       case "alle":
@@ -316,7 +354,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._rechner = null;
         this._sheetScroll = 0;
         break;
-      case "neu": this._neuStarten(); break;
+      case "neu": this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
       case "tab":
         if (this._tab === "rest" && this._rechnerGeaendert()) this._toast(this._restSpeichern(false));
@@ -324,14 +362,15 @@ class FilamentWerkstattPanel extends HTMLElement {
         break;
       case "gruppe": {
         const g = el.dataset.id;
-        this._gruppen.has(g) ? this._gruppen.delete(g) : this._gruppen.add(g);
-        break;
+        this._klappen(`g:${g}`, this._gruppen.has(g), () => { this._gruppen.has(g) ? this._gruppen.delete(g) : this._gruppen.add(g); }, `[data-gruppe="${g}"]`);
+        return;
       }
       case "zeile": {
         const k = el.dataset.k;
+        const teil = this._bearbeiten || this._modus === "neu";   // sonst ändert sich auch der Fuß: alles neu zeichnen
         if (!this._bearbeiten) this._bearbeitenStarten(rolle, false);
-        this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k);
-        break;
+        this._klappen(`z:${k}`, this._offeneZeilen.has(k), () => { this._offeneZeilen.has(k) ? this._offeneZeilen.delete(k) : this._offeneZeilen.add(k); }, teil ? `[data-zeile="${k}"]` : null);
+        return;
       }
       case "verwerfen":
         this._bearbeiten = false; this._entwurf = null; this._nachTest = false; this._offeneZeilen.clear();
@@ -446,6 +485,11 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _schliessen() {
     if (this._dialog) { this._dialog = null; return true; }
+    if (this._modus === "inv-neu" && !confirm("Neues Teil verwerfen?")) return false;
+    if (this._modus === "inv-detail" || this._modus === "inv-neu") {
+      this._modus = null; this._invOffen = null; this._invNeu = null; this._offeneZeilen.clear();
+      return true;
+    }
     if (this._modus === "neu") {
       if (!confirm("Neues Filament verwerfen?")) return false;
     } else if (this._bearbeiten) {
@@ -453,7 +497,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     } else if (this._tab === "rest" && this._rechnerGeaendert()) {
       this._toastText = this._restSpeichern(false);
       clearTimeout(this._toastTimer);
-      this._toastTimer = setTimeout(() => { this._toastText = null; this._zeichnen(); }, 2600);
+      this._toastTimer = setTimeout(() => this._toastWeg(), 2600);
     }
     this._modus = null; this._offen = null; this._neu = null;
     this._bearbeiten = false; this._entwurf = null; this._rechner = null; this._offeneZeilen.clear();
@@ -524,6 +568,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _eingabe(e) {
     const t = e.target;
+    if (this._invEingabe(t)) return;
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -549,6 +594,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _aenderung(e) {
     const t = e.target;
+    if (this._invAenderung(t)) return;
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -606,6 +652,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (slider) { const s = this.shadowRoot.querySelector(`[data-rechner="${k}"]`); if (s) s.value = v; }
     const erg = this.shadowRoot.getElementById("r-ergebnis");
     if (erg) erg.innerHTML = this._rechnerErgebnisHtml();
+    const verwerfen = this.shadowRoot.querySelector('[data-aktion="rest-verwerfen"]');
+    if (verwerfen) verwerfen.disabled = !this._rechnerGeaendert();
     if (k === "nenn_g") this.shadowRoot.querySelectorAll("[data-aktion=groesse-wahl]").forEach((c) => c.classList.toggle("an", Number(c.dataset.g) === v));
   }
 
@@ -645,29 +693,176 @@ class FilamentWerkstattPanel extends HTMLElement {
     const sheet = root.querySelector(".sheet-inhalt");
     const scrollHaupt = haupt ? haupt.scrollTop : 0;
     if (sheet) this._sheetScroll = sheet.scrollTop;
-    const fokusSuche = root.activeElement && root.activeElement.id === "suche";
+    const fokusId = root.activeElement && ["suche", "inv-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
+    const schonDa = new Set([...root.querySelectorAll("[data-einmal]")].map((x) => x.dataset.einmal));
+    this._ddOffen = null;
 
-    root.innerHTML = `<style>${STIL}</style>
+    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
         <main class="haupt">${this._inhaltHtml()}</main>
-        ${this._ansicht === "filament" && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Filament hinzufügen" title="Filament hinzufügen">+</button>` : ""}
+        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
         ${this._mobil ? this._navHtml("unten") : ""}
         ${this._modus === "detail" ? this._sheetHtml() : ""}
         ${this._modus === "neu" ? this._neuSheetHtml() : ""}
+        ${this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : ""}
         ${this._dialogHtml()}
-        ${this._toastText ? `<div class="toast">${esc(this._toastText)}</div>` : ""}
+        ${this._toastText ? `<div class="toast" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}</div>` : ""}
       </div>`;
 
     const h = root.querySelector(".haupt");
     if (h) h.scrollTop = scrollHaupt;
     const s = root.querySelector(".sheet-inhalt");
     if (s && this._sheetScroll) s.scrollTop = this._sheetScroll;
-    if (fokusSuche) {
-      const i = root.getElementById("suche");
+    const i = fokusId && root.getElementById(fokusId);
+    if (i) {
       i.focus();
       i.setSelectionRange(i.value.length, i.value.length);
     }
+    // Einblend-Animationen nur beim ersten Erscheinen, nicht bei jedem Neuzeichnen
+    root.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });
+    this._auswahlenBauen();
+    if (this._klappNeu) {
+      const k = root.querySelector(`[data-klapp="${this._klappNeu}"]`);
+      this._klappNeu = null;
+      if (k) this._klappAnimieren(k, true);
+    }
+  }
+
+  // ---- Aufklappen mit Animation (nach unten fahren) -----------------------
+  // teil: Selektor des Bereichs, der allein neu gezeichnet werden darf (schneller, nichts flackert)
+  _klappen(schluessel, istAuf, umschalten, teil) {
+    const neu = () => (teil && this._teilweise(teil)) || (this._zeichnen(), true);
+    const el = istAuf && this.shadowRoot.querySelector(`[data-klapp="${schluessel}"]`);
+    if (!el) {
+      umschalten();
+      if (istAuf) { neu(); return; }
+      this._klappNeu = schluessel;
+      neu();
+      const k = this._klappNeu && this.shadowRoot.querySelector(`[data-klapp="${schluessel}"]`);
+      this._klappNeu = null;
+      if (k) this._klappAnimieren(k, true);
+      return;
+    }
+    const gruppe = el.parentElement.closest(".gruppe");
+    if (gruppe && schluessel.startsWith("g:")) gruppe.classList.remove("auf");
+    this._klappLaeuft = true;
+    this._klappAnimieren(el, false, () => { this._klappLaeuft = false; umschalten(); neu(); });
+  }
+
+  // Nur ein Element der offenen Detailansicht durch seine neue Fassung ersetzen
+  _teilweise(selektor) {
+    const root = this.shadowRoot;
+    const alt = root.querySelector(`.sheet ${selektor}`);
+    if (!alt) return false;
+    const html = this._modus === "detail" ? this._sheetHtml() : this._modus === "neu" ? this._neuSheetHtml()
+      : this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : null;
+    if (!html) return false;
+    const vorlage = document.createElement("template");
+    vorlage.innerHTML = html;
+    const neu = vorlage.content.querySelector(selektor);
+    if (!neu) return false;
+    alt.replaceWith(neu);
+    this._auswahlenBauen();
+    return true;
+  }
+
+  _klappAnimieren(el, auf, fertig) {
+    const h = el.scrollHeight;
+    const ruhig = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (ruhig || !el.animate) { fertig && fertig(); return; }
+    el.style.overflow = "hidden";
+    const schritte = [{ height: "0px", opacity: 0 }, { height: `${h}px`, opacity: 1 }];
+    const anim = el.animate(auf ? schritte : schritte.reverse(), { duration: Math.min(320, 160 + h * 0.4), easing: "cubic-bezier(.2,.7,.2,1)" });
+    anim.onfinish = () => { el.style.overflow = ""; fertig && fertig(); };
+    if (auf) {
+      const pfeil = el.parentElement.querySelector(":scope > .gruppe-kopf .pfeil");
+      if (pfeil) pfeil.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(90deg)" }], { duration: 180, easing: "ease" });
+    }
+  }
+
+  // ---- Eigene Auswahllisten statt der Browser-Liste -----------------------
+  // Das <select> bleibt (unsichtbar) die Quelle des Werts; ein Knopf zeigt ihn an.
+  _auswahlenBauen() {
+    this.shadowRoot.querySelectorAll("select:not(.dd-nativ)").forEach((sel) => {
+      const i = (this._ddNr = (this._ddNr || 0) + 1);
+      sel.classList.add("dd-nativ");
+      sel.tabIndex = -1;
+      sel.dataset.dd = String(i);
+      const opt = sel.options[sel.selectedIndex];
+      const knopf = document.createElement("button");
+      knopf.type = "button";
+      knopf.className = `dd-knopf ${sel.classList.contains("text") ? "text" : ""}`;
+      knopf.dataset.aktion = "dd";
+      knopf.dataset.dd = String(i);
+      knopf.innerHTML = `<span class="dd-text ${!opt || opt.disabled ? "leise" : ""}"></span><span class="dd-pfeil">▾</span>`;
+      knopf.firstChild.textContent = opt ? opt.textContent : "";
+      sel.before(knopf);   // zuerst im <label>, damit ein Tipp aufs Label die Liste öffnet
+    });
+  }
+
+  _ddAuf(knopf) {
+    const root = this.shadowRoot;
+    const sel = root.querySelector(`select[data-dd="${knopf.dataset.dd}"]`);
+    const app = root.querySelector(".app");
+    if (!sel || !app) return;
+    let html = "";
+    for (const kind of sel.children) {
+      if (kind.tagName === "OPTGROUP") {
+        html += `<div class="dd-gruppe">${esc(kind.label)}</div>`;
+        for (const o of kind.children) html += this._ddOptionHtml(o, sel, true);
+      } else html += this._ddOptionHtml(kind, sel, false);
+    }
+    const liste = document.createElement("div");
+    liste.className = "dd-liste";
+    liste.setAttribute("role", "listbox");
+    liste.innerHTML = html;
+    app.appendChild(liste);
+    const a = app.getBoundingClientRect(), k = knopf.getBoundingClientRect();
+    const breite = Math.max(k.width, 200);
+    const links = Math.min(Math.max(8, k.left - a.left), a.width - breite - 8);
+    const unten = a.bottom - k.bottom - 12, oben = k.top - a.top - 12;
+    const nachOben = unten < 260 && oben > unten;
+    liste.style.left = `${links}px`;
+    liste.style.width = `${breite}px`;
+    liste.style.maxHeight = `${Math.min(360, nachOben ? oben : unten)}px`;
+    if (nachOben) { liste.style.bottom = `${a.bottom - k.top + 6}px`; liste.classList.add("nach-oben"); }
+    else liste.style.top = `${k.bottom - a.top + 6}px`;
+    knopf.classList.add("offen");
+    const stand = new Map([...this.shadowRoot.querySelectorAll(".haupt, .sheet-inhalt, .dialog")].map((x) => [x, x.scrollTop]));
+    this._ddOffen = { liste, knopf, stand };
+    const an = liste.querySelector(".an");
+    if (an) liste.scrollTop = Math.max(0, an.offsetTop - liste.clientHeight / 2);
+  }
+
+  // Liste schließen, wenn die Seite darunter wirklich bewegt wird (nicht bei verspäteten Scroll-Meldungen)
+  _ddBeimScrollen(ziel) {
+    const d = this._ddOffen;
+    if (!d || d.liste.contains(ziel) || !ziel.matches || !ziel.matches(".haupt, .sheet-inhalt, .dialog")) return;
+    if (!d.stand.has(ziel)) d.stand.set(ziel, ziel.scrollTop);
+    if (Math.abs(ziel.scrollTop - d.stand.get(ziel)) > 4) this._ddZu();
+  }
+
+  _ddOptionHtml(o, sel, eingerueckt) {
+    if (o.disabled) return "";
+    const an = o.value === sel.value;
+    return `<button type="button" class="dd-option ${an ? "an" : ""} ${eingerueckt ? "eingerueckt" : ""}" role="option" data-aktion="dd-wahl" data-dd="${sel.dataset.dd}" data-wert="${esc(o.value)}">
+      <span>${esc(o.textContent)}</span>${an ? "<i>✓</i>" : ""}</button>`;
+  }
+
+  _ddWaehlen(el) {
+    const sel = this.shadowRoot.querySelector(`select[data-dd="${el.dataset.dd}"]`);
+    this._ddZu();
+    if (!sel || sel.value === el.dataset.wert) return;
+    sel.value = el.dataset.wert;
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  _ddZu() {
+    if (!this._ddOffen) return;
+    this._ddOffen.liste.remove();
+    this._ddOffen.knopf.classList.remove("offen");
+    this._ddOffen = null;
   }
 
   _kopfHtml() {
@@ -693,6 +888,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     }
     if (this._ansicht === "system") return this._systemHtml();
     if (!this._daten) return `<div class="laden">Lade Daten aus Home Assistant …</div>`;
+    if (this._ansicht === "inventar") return this._invHtml();
     return this._filamentHtml();
   }
 
@@ -736,7 +932,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       <section class="werkzeug">
         <button class="chip alle ${this._filterAktiv() ? "" : "an"}" data-aktion="alle">Alle</button>
         ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="filter-auf"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
-        ${!this._mobil || this._filterAuf ? `<div class="unterfilter">
+        ${!this._mobil || this._filterAuf ? `<div class="unterfilter" data-einmal="filter">
           ${this._auswahl("Material", "sorte", "Alle Materialien", mitWert(sorten, this._f.sorte))}
           ${this._auswahl("Hersteller", "hersteller", "Alle Hersteller", mitWert(hersteller, this._f.hersteller))}
           ${this._auswahl("Farbe", "farbe", "Alle Farben", mitWert(farben, this._f.farbe))}
@@ -783,8 +979,8 @@ class FilamentWerkstattPanel extends HTMLElement {
         fuss = `<button class="knopf amber" data-aktion="probiert">✓ Probiert</button>`;
       }
     }
-    return `<div class="schleier" data-aktion="schliessen"></div>
-      <section class="sheet" role="dialog" aria-label="${esc(r.name)}">
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="${esc(r.name)}">
         <div class="griff"></div>
         <header class="sheet-kopf">
           ${spuleSvg(r, true)}
@@ -849,11 +1045,11 @@ class FilamentWerkstattPanel extends HTMLElement {
           return `<div class="zeile ${w.quelle} ${auf ? "auf" : ""}" data-zeile="${f.k}">
             <button class="zeile-kopf" data-aktion="zeile" data-k="${f.k}"><span class="z-name">${f.name}</span>
               <span class="z-wert"><span class="wert">${zahl(w.v, feldNk(f))} ${f.e}</span>${w.quelle === "vorschlag" ? '<span class="tag">Vorschlag</span>' : ""}</span></button>
-            ${auf ? `<div class="regler-zeile">
+            ${auf ? `<div class="klapp" data-klapp="z:${f.k}"><div class="regler-zeile">
               <button class="rund" data-aktion="schritt" data-k="${f.k}" data-d="-1" aria-label="weniger">−</button>
               <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${w.v ?? f.min}" data-feld="${f.k}">
               <button class="rund" data-aktion="schritt" data-k="${f.k}" data-d="1" aria-label="mehr">+</button>
-            </div>` : ""}
+            </div></div>` : ""}
           </div>`;
         }).join(""));
       if (g.id === "fluss") html += this._platteHtml(r, anzeige);
@@ -876,18 +1072,18 @@ class FilamentWerkstattPanel extends HTMLElement {
       `<div class="zeile ${w.quelle} ${auf ? "auf" : ""}" data-zeile="platte">
         <button class="zeile-kopf" data-aktion="zeile" data-k="platte"><span class="z-name">Druckbetttyp</span>
           <span class="z-wert"><span class="wert">${esc(w.v || "–")}</span>${w.quelle === "vorschlag" ? '<span class="tag">Vorschlag</span>' : ""}</span></button>
-        ${auf ? `<select class="text" data-platte="1">${PLATTEN.map((p) => `<option ${p === w.v ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>` : ""}
+        ${auf ? `<div class="klapp" data-klapp="z:platte"><select class="text" data-platte="1">${PLATTEN.map((p) => `<option ${p === w.v ? "selected" : ""}>${esc(p)}</option>`).join("")}</select></div>` : ""}
       </div>`);
   }
 
   _gruppeHtml(id, icon, name, zusammenfassung, nurVorschlag, inhalt) {
     const auf = this._gruppen.has(id);
-    return `<div class="gruppe ${auf ? "auf" : ""}">
+    return `<div class="gruppe ${auf ? "auf" : ""}" data-gruppe="${id}">
       <button class="gruppe-kopf" data-aktion="gruppe" data-id="${id}">
         <span class="g-icon">${icon}</span><span class="g-name">${name}</span>
         <span class="g-zus ${nurVorschlag ? "amber" : ""}">${zusammenfassung}</span><span class="pfeil">›</span>
       </button>
-      ${auf ? `<div class="gruppe-inhalt">${inhalt}</div>` : ""}
+      ${auf ? `<div class="klapp" data-klapp="g:${id}"><div class="gruppe-inhalt">${inhalt}</div></div>` : ""}
     </div>`;
   }
 
@@ -994,8 +1190,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     const bekannt = [...new Set(this._daten.rollen.map((r) => r.hersteller))].sort((a, b) => a.localeCompare(b, "de"));
     const c = this._rechner;
     const groessen = [...new Set([...this._daten.rollen.map((r) => r.nenn_g || 1000), ...STANDARD_GROESSEN])].sort((a, b) => a - b);
-    return `<div class="schleier" data-aktion="schliessen"></div>
-      <section class="sheet" role="dialog" aria-label="Neues Filament">
+    return `<div class="schleier" data-aktion="schliessen" data-einmal="schleier"></div>
+      <section class="sheet" data-einmal="sheet-${this._modus}" role="dialog" aria-label="Neues Filament">
         <div class="griff"></div>
         <header class="sheet-kopf"><div id="neu-vorschau" class="neu-vorschau">${this._neuVorschauHtml()}</div>
           <button class="icon-knopf" data-aktion="schliessen" aria-label="Schließen">✕</button></header>
@@ -1091,7 +1287,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         <div class="chips">${groessen.map((g) => `<button class="chip ${c.nenn_g === g ? "an" : ""}" data-aktion="groesse-wahl" data-g="${g}">${gramm(g)}</button>`).join("")}</div>
         <button class="knopf breit oben-abstand" data-aktion="dialog-zu">Fertig</button>`;
     }
-    return `<div class="schleier oben" data-aktion="dialog-zu"></div><div class="dialog" role="dialog">${inhalt}</div>`;
+    return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-${this._dialog}"></div><div class="dialog" role="dialog" data-einmal="dialog-${this._dialog}">${inhalt}</div>`;
   }
 
   _systemHtml() {
@@ -1106,6 +1302,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     </div>`;
   }
 }
+
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);
