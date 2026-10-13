@@ -227,10 +227,11 @@ const EINSTELLUNGEN_STANDARD = {
   korrektur: {},         // Faktor je Material aus dem Abgleich beim Wiegen
   sicherung_am: null,
   sicherung_spaeter: null,
+  sicherung_start: null, // erste Erinnerung eine Woche nach dem ersten Start
 };
 function werkstattStandard() {
   return {
-    einstellungen: JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)),
+    einstellungen: { ...JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)), sicherung_start: new Date().toISOString() },
     drucke: {},
     letzte_rolle: null,
     buchen_ab: new Date().toISOString(),   // ältere Drucke nicht nachfragen
@@ -253,6 +254,7 @@ function migrieren(d) {
   const w = werkstattStandard();
   for (const k of Object.keys(w)) if (d[k] == null) d[k] = w[k];
   d.einstellungen = { ...EINSTELLUNGEN_STANDARD, ...d.einstellungen };
+  if (!d.einstellungen.sicherung_start) d.einstellungen.sicherung_start = new Date().toISOString();
   d.version = DATEN_VERSION;
   return d;
 }
@@ -1405,6 +1407,218 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .feld { display: grid; gap: 4px; margin: 10px 0; font-size: 13px; color: var(--leise); }
 .feld input { padding: 11px 12px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; font-size: 15px; }
 .feld input:focus, textarea:focus { outline: none; border-color: rgba(62,230,168,.6); }
+
+/* ---- Ansichtswechsel und gemeinsame Bausteine ---- */
+.ansicht-rein { animation: ansicht-rein .28s cubic-bezier(.2,.8,.2,1); }
+.ansicht-rein.voll { height: 100%; }
+@keyframes ansicht-rein { from { opacity: 0; transform: translateY(8px); } }
+.wechsel-rein { animation: blende .22s ease; }
+.wechsel { animation: wechsel .25s ease; }
+@keyframes wechsel { from { opacity: .2; transform: translateX(6px); } }
+.unter-tabs { margin-bottom: 16px; }
+.mobil .unter-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 14px; padding: 0 16px 4px; scroll-snap-type: x proximity; scroll-padding-inline: 16px; }
+.mobil .unter-tabs::-webkit-scrollbar { display: none; }
+.mobil .unter-tabs .chip { scroll-snap-align: start; }
+.chip { transition: background .15s, border-color .15s, color .15s, transform .1s; }
+.chip:active, .knopf:active, .rund:active { transform: scale(.96); }
+.knopf, .rund, .wahl, .mini { transition: filter .15s, background .15s, transform .1s; }
+.zahl-punkt { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--mint); color: #062018; font-size: 11px; font-weight: 800; }
+.zahl-punkt.amber-punkt { background: var(--amber); color: #2a1a00; }
+.leer-karte { display: grid; justify-items: center; text-align: center; gap: 6px; padding: 34px 20px; }
+.gross-icon { font-size: 40px; animation: schweben 3s ease-in-out infinite; }
+@keyframes schweben { 50% { transform: translateY(-5px); } }
+.farbtupfer { width: 28px; height: 28px; border-radius: 50%; flex: none; border: 2px solid rgba(255,255,255,.18); box-shadow: inset 0 -4px 8px rgba(0,0,0,.25); }
+.zeilen-knopf { width: 100%; text-align: left; align-items: center; }
+.zeilen-knopf:hover { background: var(--flaeche-hover); }
+.zeilen-knopf span { display: grid; }
+.such-feld { width: 100%; max-width: 420px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; }
+.such-feld:focus { outline: none; border-color: rgba(62,230,168,.6); }
+.datei-knopf { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.toast.mit-knopf { display: flex; align-items: center; gap: 12px; }
+.toast .mini { margin: 0; }
+.dialog textarea[readonly] { font-size: 13px; }
+.nav-oben { overflow-x: auto; scrollbar-width: none; }
+.nav-oben::-webkit-scrollbar { display: none; }
+@media (max-width: 1240px) { .nav-oben .nav-punkt { padding: 8px 10px; } }
+@media (max-width: 1080px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
+.nav-unten .nav-punkt { transition: color .15s, background .15s; border-radius: 14px; }
+.nav-unten .nav-punkt.aktiv .nav-icon { animation: tipp .3s ease; }
+@keyframes tipp { 40% { transform: scale(1.2); } }
+.such-knopf { margin-left: 4px; }
+.mobil .such-knopf { margin-left: 0; }
+.mobil .kopf { gap: 8px; padding: 10px 12px; }
+.mobil .marke { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mobil .speicher { font-size: 0; }
+.mobil .speicher::before { font-size: 14px; }
+.speicher.fehler::before { content: "● "; color: var(--rot); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* ---- Hilfe ---- */
+.hi-tabs { margin-bottom: 16px; }
+.hi-raster { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.mobil .hi-raster { grid-template-columns: 1fr; gap: 12px; }
+.hi-bild-karte { position: relative; }
+.p1s-bild, .trockner-bild { width: 100%; height: auto; display: block; }
+.p1s-punkt { cursor: pointer; outline: none; }
+.p1s-flaeche { fill: rgba(62,230,168,0); transition: fill .2s; }
+.p1s-ring { fill: #0b1512; stroke: var(--mint); stroke-width: 1.6; transition: fill .2s, r .2s; }
+.p1s-punkt text { fill: var(--mint); font-size: 11px; font-weight: 700; pointer-events: none; transition: fill .2s; }
+.p1s-punkt:hover .p1s-flaeche, .p1s-punkt:focus .p1s-flaeche { fill: rgba(62,230,168,.12); }
+.p1s-punkt.an .p1s-flaeche { fill: rgba(62,230,168,.18); }
+.p1s-punkt.an .p1s-ring { fill: var(--mint); animation: ring-puls 1.8s ease-in-out infinite; }
+.p1s-punkt.an text { fill: #062018; }
+@keyframes ring-puls { 50% { stroke-width: 5; stroke-opacity: .35; } }
+.tr-wert { fill: var(--mint); font-size: 14px; font-weight: 700; font-family: ui-monospace, monospace; }
+.hi-info h2 { margin: 2px 0 6px; }
+.hi-info h3 { margin-top: 16px; }
+.hi-nr { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--mint); color: #062018; font-weight: 800; }
+.hi-live { display: flex; justify-content: space-between; gap: 10px; padding: 10px 14px; border-radius: 12px; background: var(--mint-weich); border: 1px solid rgba(62,230,168,.3); font-size: 14px; }
+.hi-live span { color: var(--leise); }
+.hi-einst { display: grid; gap: 8px; }
+.hi-einst > div { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.2); border: 1px solid var(--rand); font-size: 14px; }
+.hi-einst .leise { font-size: 13px; }
+.info-zeile.kopfzeile { background: rgba(255,255,255,.03); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.hi-sprung .chip { min-width: 36px; justify-content: center; padding: 6px 10px; }
+.hi-tr-info { display: grid; gap: 4px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(0,0,0,.25); border: 1px solid var(--rand); font-size: 14px; min-height: 76px; }
+.tr-tabelle { display: grid; gap: 6px; }
+.tr-zeile { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rand); }
+.tr-zeile small { grid-column: 1 / -1; font-size: 12px; }
+.tr-werte { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tr-werte b { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 8px; background: var(--amber-weich); color: var(--amber); white-space: nowrap; }
+.tr-rollen { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
+.tr-rolle { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 14px; background: rgba(0,0,0,.18); border: 1px solid var(--rand); text-align: left; }
+.tr-rolle:hover { background: var(--flaeche-hover); }
+.tr-rolle svg { width: 38px; height: 38px; flex: none; }
+.tr-rolle > span:nth-child(2) { flex: 1; display: grid; min-width: 0; }
+.tr-rolle small { color: var(--leise); font-size: 12px; }
+.fb-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: start; }
+.mobil .fb-raster { grid-template-columns: 1fr; }
+.fb-karte { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); overflow: hidden; transition: border-color .2s; }
+.fb-karte.auf { border-color: rgba(255,181,71,.45); }
+.fb-kopf { width: 100%; display: flex; gap: 12px; align-items: center; padding: 10px; text-align: left; }
+.fb-kopf .fb-bild { width: 84px; flex: none; }
+.fb-kopf > span { display: grid; gap: 2px; }
+.fb-kopf small { font-size: 12px; }
+.fb-details { padding: 0 14px 14px; }
+.kal-wahl { margin-bottom: 14px; }
+.kal-kopf { display: flex; gap: 14px; align-items: center; }
+.kal-bild { width: 120px; height: auto; flex: none; border-radius: 12px; background: rgba(0,0,0,.3); }
+.mobil .kal-bild { width: 92px; }
+.kal-liste { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; }
+.kal-liste.fehler li::marker { color: var(--rot); }
+
+/* ---- Werkstatt ---- */
+.ws-kopfzeile { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+.ws-kopfzeile p { margin: 0; max-width: 760px; }
+.mobil .ws-kopfzeile { flex-direction: column; align-items: stretch; }
+.ws-liste { display: grid; gap: 10px; }
+.ws-auftrag { display: flex; gap: 14px; align-items: flex-start; padding: 14px; }
+.ws-nr { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--mint-weich); color: var(--mint); font-weight: 800; flex: none; }
+.ws-text { flex: 1; min-width: 0; display: grid; gap: 4px; justify-items: start; }
+.ws-text small { font-size: 13px; }
+.ws-knoepfe { display: flex; gap: 6px; flex: none; }
+.mobil .ws-auftrag { flex-wrap: wrap; }
+.mobil .ws-knoepfe { width: 100%; justify-content: flex-end; }
+.ws-ersatz { align-items: center; gap: 6px; }
+.ws-ersatz .chip { font-size: 12px; padding: 5px 10px; }
+.ws-einkauf, .ws-wartung { display: flex; gap: 14px; align-items: center; padding: 12px 14px; }
+.ws-einkauf > div, .ws-wartung > .ws-text { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.ws-einkauf.dringend, .ws-wartung.dringend { border-color: rgba(255,107,107,.45); background: linear-gradient(90deg, rgba(255,107,107,.08), var(--flaeche)); }
+.ws-icon { width: 28px; text-align: center; font-size: 20px; flex: none; }
+.ws-balken, .ne-balken { height: 6px; border-radius: 3px; background: rgba(255,255,255,.07); overflow: hidden; width: 100%; margin: 4px 0; }
+.ws-balken span, .ne-balken span { display: block; height: 100%; border-radius: 3px; background: var(--mint); animation: balken-wachsen .6s cubic-bezier(.2,.8,.2,1); transform-origin: left; }
+.ws-balken span.amber, .ne-balken span.amber { background: var(--amber); }
+.ws-balken span.rot, .ne-balken span.rot { background: var(--rot); }
+@keyframes balken-wachsen { from { transform: scaleX(0); } }
+.ws-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.mobil .ws-raster { grid-template-columns: 1fr; }
+.ws-modell { display: grid; gap: 10px; padding: 12px; align-content: start; }
+.mobil .ws-modell { grid-template-columns: 96px 1fr; }
+.mobil .ws-modell .ws-modell-knoepfe { grid-column: 1 / -1; }
+.ws-foto { aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,.3); display: grid; place-items: center; font-size: 34px; }
+.ws-foto img { width: 100%; height: 100%; object-fit: cover; animation: blende .3s ease; }
+.ws-modell.fehl .ws-foto { box-shadow: inset 0 0 0 2px rgba(255,107,107,.4); }
+.ws-modell-text { display: grid; gap: 3px; min-width: 0; }
+.ws-modell-text strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-modell-text small { font-size: 12px; }
+.ws-modell-knoepfe { display: flex; gap: 8px; align-items: center; }
+.ws-modell-knoepfe .knopf { flex: 1; }
+.ws-zwei { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.mobil .ws-zwei { grid-template-columns: 1fr; gap: 12px; }
+.ws-saeulen { display: flex; gap: 10px; align-items: flex-end; height: 200px; padding-top: 10px; }
+.ws-saeule { flex: 1; display: grid; grid-template-rows: auto 1fr auto; gap: 4px; height: 100%; text-align: center; font-size: 12px; }
+.ws-saeule strong { font-size: 12px; }
+.ws-saeule small { color: var(--leise); }
+.ws-saeule-bahn { display: flex; flex-direction: column-reverse; border-radius: 8px; background: rgba(255,255,255,.04); overflow: hidden; }
+.ws-saeule-bahn span { display: block; animation: saeule .7s cubic-bezier(.2,.8,.2,1); transform-origin: bottom; }
+.ws-saeule-bahn .fil, .ws-legende i.fil { background: var(--mint); }
+.ws-saeule-bahn .strom, .ws-legende i.strom { background: var(--amber); }
+@keyframes saeule { from { transform: scaleY(0); } }
+.ws-legende { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--leise); }
+.ws-legende i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* ---- Nerd ---- */
+.ne-seite .stats { grid-template-columns: repeat(6, 1fr); }
+.mobil .ne-seite .stats { grid-template-columns: repeat(3, 1fr); }
+.mobil .ne-seite .stats .stat { display: flex; padding: 10px 12px; }
+.mobil .ne-seite .stats .stat strong { font-size: 18px; }
+.ne-balken-liste { display: grid; gap: 10px; }
+.ne-balken-zeile { display: grid; grid-template-columns: minmax(0, 1fr) 1.2fr auto; gap: 10px; align-items: center; font-size: 13px; }
+.ne-balken-zeile > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ne-balken-zeile small { color: var(--leise); white-space: nowrap; }
+.ne-phasen { display: flex; gap: 12px; height: 150px; align-items: flex-end; }
+.ne-phase { flex: 1; display: grid; grid-template-rows: 1fr auto auto; height: 100%; text-align: center; gap: 4px; }
+.ne-phase small { font-size: 11px; color: var(--leise); }
+.ne-phase-bahn { display: flex; align-items: flex-end; border-radius: 8px; background: rgba(255,255,255,.04); overflow: hidden; }
+.ne-phase-bahn span { width: 100%; background: linear-gradient(var(--rot), rgba(255,107,107,.5)); animation: saeule .7s cubic-bezier(.2,.8,.2,1); transform-origin: bottom; }
+.ne-gesund { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rand); }
+.ne-gesund:last-child { border-bottom: none; }
+.ne-gesund > div { flex: 1; display: grid; gap: 2px; }
+.ne-gesund small { font-size: 12px; }
+.ne-gesund b { font-size: 14px; white-space: nowrap; }
+.ne-gesund .punkt { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: rgba(255,255,255,.06); color: var(--leise); flex: none; }
+.ne-gesund.gut .punkt { background: var(--mint-weich); color: var(--mint); }
+.ne-gesund.schlecht .punkt { background: rgba(255,107,107,.16); color: var(--rot); }
+.ne-heiz { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--rand); }
+.ne-heiz-wert { font-size: 26px; font-weight: 700; color: var(--mint); }
+.ne-heiz-wert.amber { color: var(--amber); }
+.ne-mini-saeulen { display: flex; gap: 3px; align-items: flex-end; height: 44px; }
+.ne-mini-saeulen span { flex: 1; background: rgba(62,230,168,.5); border-radius: 2px 2px 0 0; animation: saeule .6s ease; transform-origin: bottom; }
+
+/* ---- Suche ---- */
+.such-schleier { z-index: 24; }
+.such-box { position: absolute; z-index: 25; top: 70px; left: 50%; transform: translateX(-50%); width: min(640px, calc(100% - 32px)); max-height: calc(100% - 100px); display: flex; flex-direction: column;
+  border-radius: 20px; background: rgba(14,22,19,.97); border: 1px solid rgba(62,230,168,.3); box-shadow: 0 24px 60px rgba(0,0,0,.6); animation: such-rein .2s cubic-bezier(.2,.8,.2,1); overflow: hidden; }
+@keyframes such-rein { from { opacity: 0; transform: translate(-50%, -10px) scale(.98); } }
+.mobil .such-box { top: 12px; max-height: calc(100% - 24px); }
+.such-kopf { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--rand); }
+.such-kopf input { flex: 1; min-width: 0; background: none; border: none; color: var(--text); font: inherit; font-size: 17px; padding: 8px 0; outline: none; }
+.such-ergebnisse { overflow-y: auto; overscroll-behavior: contain; padding: 6px 8px 12px; }
+.such-gruppe h4 { margin: 12px 8px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--leise); font-weight: 600; }
+.such-treffer { width: 100%; display: flex; gap: 12px; align-items: center; padding: 9px 10px; border-radius: 12px; text-align: left; animation: blende .15s ease; }
+.such-treffer:hover, .such-treffer:focus, .such-treffer.erst { background: var(--flaeche-hover); outline: none; }
+.such-treffer > span:last-child { display: grid; min-width: 0; }
+.such-treffer strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.such-treffer small { font-size: 12px; }
+.such-icon { width: 28px; text-align: center; font-size: 18px; flex: none; }
+.such-passend { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 0 10px 8px 50px; }
+.such-passend .chip { font-size: 12px; padding: 4px 10px; }
+.such-leer { padding: 22px 12px; text-align: center; font-size: 14px; }
+
+/* ---- Mehr-Menü (Handy) ---- */
+.mehr-schleier { z-index: 4; }
+.mehr-sheet { position: absolute; z-index: 5; left: 0; right: 0; bottom: 0; padding: 4px 16px calc(84px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  border-radius: 22px 22px 0 0; background: rgba(14,22,19,.98); border-top: 1px solid var(--rand); animation: hoch .25s cubic-bezier(.2,.8,.2,1); }
+.mehr-sheet .griff { grid-column: 1 / -1; margin-bottom: 6px; }
+.mehr-punkt { position: relative; display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 16px; background: var(--flaeche); border: 1px solid var(--rand); text-align: left; }
+.mehr-punkt > span:first-child { font-size: 22px; }
+.mehr-punkt.aktiv { background: var(--mint-weich); border-color: rgba(62,230,168,.45); color: var(--mint); }
+.mehr-punkt .zahl-punkt { position: absolute; top: 8px; right: 8px; }
+.suche-punkt { grid-column: 1 / -1; }
+.mobil .nav-unten { z-index: 6; }
+
+/* ---- Sicherungs-Balken ---- */
+.bu-balken.blau { background: linear-gradient(90deg, rgba(92,200,255,.18), rgba(92,200,255,.05)); border-bottom-color: rgba(92,200,255,.4); }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -2750,6 +2964,1151 @@ const BuchenAnsicht = {
   },
 };
 // ---------------------------------------------------------------------------
+// Hilfe: P1S-Zeichnung mit Bereichen, Sovol-Trockner, Fehlerbilder, Kalibrierung
+// ---------------------------------------------------------------------------
+
+const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"]];
+// Welche Rollenwerte zu welchem Bereich der Zeichnung gehören
+const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "max_vol"], luefter: ["luefter_min", "luefter_max"],
+  riemen: ["v_aussen", "v_innen", "v_fuellung"], bett: ["bett"], spule: ["tr_temp", "tr_dauer"] };
+
+const HilfeAnsicht = {
+  _hiZustand() {
+    if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", kalRolle: null, kalWert: null };
+    return this._hi;
+  },
+
+  _hiHtml() {
+    const h = this._hiZustand();
+    const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml() : this._hiDruckerHtml();
+    return `<div class="hi-seite" data-einmal="hi-${h.tab}">
+      <div class="chips hi-tabs unter-tabs">${HI_TABS.map(([id, n]) => `<button class="chip ${h.tab === id ? "an" : ""}" data-aktion="hi-tab" data-id="${id}">${n}</button>`).join("")}</div>
+      ${inhalt}</div>`;
+  },
+
+  // Rolle, deren Werte in der Hilfe gezeigt werden: zuletzt verbucht, sonst die erste probierte
+  _hiRolle() {
+    const d = this._daten;
+    return d.rollen.find((r) => r.id === d.letzte_rolle) || d.rollen.find((r) => r.probiert) || d.rollen[0];
+  },
+
+  _hiDruckerHtml() {
+    const h = this._hi;
+    return `<div class="hi-raster">
+      <div class="dr-karte hi-bild-karte"><h3 class="dr-titel">Bambu Lab P1S · ${this._mobil ? "tippe auf eine Nummer" : "fahre mit der Maus über die Nummern"}</h3>${p1sSvg(h.p1s)}</div>
+      <div id="hi-info" class="dr-karte hi-info">${this._hiP1sInfoHtml()}</div>
+    </div>`;
+  },
+  _hiP1sInfoHtml() {
+    const b = P1S_BEREICHE.find((x) => x.id === this._hi.p1s) || P1S_BEREICHE[0];
+    let live = "";
+    if (b.live && this._drW) {
+      const w = this._drW(b.live);
+      if (w != null) live = `<div class="hi-live"><span>Gerade am Drucker</span><strong>${esc(DR_SCHRITTE[w] || w)}${b.einheit && !isNaN(Number(w)) ? ` ${b.einheit}` : ""}</strong></div>`;
+    }
+    const r = this._hiRolle();
+    const felder = (HI_FELDER[b.id] || []).map((k) => FELDER.find((f) => f.k === k)).filter(Boolean);
+    const werte = r && felder.length ? `<div class="info-liste oben-abstand"><div class="info-zeile kopfzeile"><span>Bei ${esc(r.name)}</span><span></span></div>
+      ${felder.map((f) => { const w = wert(r, f.k); return `<div class="info-zeile"><span>${esc(f.name)}</span><strong class="${w.quelle === "vorschlag" ? "amber" : ""}">${w.v == null ? "–" : `${zahl(w.v, f.nk || 0)} ${f.e}`}</strong></div>`; }).join("")}
+      ${b.id === "bett" ? `<div class="info-zeile"><span>Druckplatte</span><strong>${esc(wert(r, "platte").v || "–")}</strong></div>` : ""}</div>` : "";
+    return `<div class="hi-nr">${b.n}</div><h2>${esc(b.name)}</h2><p>${esc(b.text)}</p>${live}
+      <h3>Einstellungen, die hier wirken</h3>
+      <div class="hi-einst">${b.einst.map(([n, t]) => `<div><strong>${esc(n)}</strong><span class="leise">${esc(t)}</span></div>`).join("")}</div>${werte}
+      <div class="chips oben-abstand hi-sprung">${P1S_BEREICHE.map((x) => `<button class="chip ${x.id === b.id ? "an" : ""}" data-aktion="hi-p1s" data-id="${x.id}">${x.n}</button>`).join("")}</div>`;
+  },
+
+  _hiTrocknerHtml() {
+    const h = this._hi;
+    const b = TROCKNER_BEREICHE.find((x) => x.id === h.tr) || TROCKNER_BEREICHE[0];
+    const rollen = this._daten.rollen.slice().sort((a, c) => (wert(c, "tr_temp").v || 0) - (wert(a, "tr_temp").v || 0));
+    return `<div class="hi-raster">
+      <div class="dr-karte hi-bild-karte"><h3 class="dr-titel">Sovol Filament-Trockner · ${this._mobil ? "tippe auf die Felder" : "fahre über die Felder"}</h3>${trocknerSvg(h.tr)}
+        <div id="hi-tr-info" class="hi-tr-info"><strong>${TROCKNER_BEREICHE.indexOf(b) + 1} · ${esc(b.name)}</strong><span>${esc(b.text)}</span></div></div>
+      <div class="dr-karte"><h3 class="dr-titel">Richtwerte je Material</h3>
+        <div class="tr-tabelle">${TROCKNEN_TABELLE.map((t) => `<div class="tr-zeile"><strong>${esc(t.m)}</strong>
+          <span class="tr-werte"><b>${t.temp} °C</b><b>${t.h} h</b><b>&lt; ${t.ziel} %</b></span>
+          <small class="leise">Feucht, wenn: ${esc(t.zeichen)}. ${esc(t.lagern)}</small></div>`).join("")}</div></div>
+    </div>
+    <div class="dr-karte oben-abstand"><h3 class="dr-titel">Deine Rollen</h3><div class="tr-rollen">${rollen.map((r) => {
+      const t = wert(r, "tr_temp").v, d = wert(r, "tr_dauer").v, f = wert(r, "tr_feuchte").v;
+      return `<button class="tr-rolle" data-aktion="oeffnen-filament" data-id="${esc(r.id)}">${spuleSvg(r)}<span><strong>${esc(r.name)}</strong><small>${esc(r.hersteller)}</small></span>
+        <span class="tr-werte"><b>${t != null ? `${zahl(t)} °C` : "–"}</b><b>${d != null ? `${zahl(d, 1)} h` : "–"}</b><b>${f != null ? `&lt; ${zahl(f)} %` : "–"}</b></span></button>`;
+    }).join("")}</div></div>`;
+  },
+
+  _hiFehlerHtml() {
+    const h = this._hi;
+    const r = this._hiRolle();
+    return `<p class="leise">Typische Fehlerbilder mit Ursachen und was du änderst. Tippe auf ein Bild für die Lösungen${r ? `, die Werte beziehen sich auf ${esc(r.name)}` : ""}.</p>
+      <div class="fb-raster">${FEHLERBILDER.map((f) => {
+        const auf = h.fehler === f.id;
+        return `<div class="fb-karte ${auf ? "auf" : ""}" data-klapp="fb-${f.id}">
+          <button class="fb-kopf" data-aktion="hi-fehler" data-id="${f.id}">${FB_ZEICHNUNG[f.id] || ""}<span><strong>${esc(f.name)}</strong><small class="leise">${esc(f.kurz)}</small></span></button>
+          ${auf ? `<div class="fb-details"><div class="leise klein">Ursachen: ${esc(f.ursachen.join(" · "))}</div>
+            <ul class="bu-loesungen">${f.loesungen.map((l) => { const a = l.aenderung && r ? aenderungRechnen(r, l.aenderung) : null;
+              return `<li><span class="bu-punkt">•</span><span>${esc(l.text)}${a ? ` <span class="bu-aend">${esc(a.feld.name)}: ${zahl(a.alt, a.feld.nk || 0)} → <strong>${zahl(a.neu, a.feld.nk || 0)}</strong> ${esc(a.feld.e)}</span>` : ""}</span></li>`; }).join("")}</ul></div>` : ""}
+        </div>`;
+      }).join("")}</div>`;
+  },
+
+  _hiKalHtml() {
+    const h = this._hi;
+    const k = KALIBRIERUNGEN.find((x) => x.id === h.kal) || KALIBRIERUNGEN[0];
+    const f = FELDER.find((x) => x.k === k.feld);
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const r = rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+    const aktuell = wert(r, k.feld).v;
+    const w = h.kalWert != null ? h.kalWert : aktuell;
+    const kal = (r.kalibriert || {})[k.feld];
+    return `<div class="chips kal-wahl unter-tabs">${KALIBRIERUNGEN.map((x) => `<button class="chip ${x.id === k.id ? "an" : ""}" data-aktion="hi-kal" data-id="${x.id}">${x.icon} ${esc(x.name)}</button>`).join("")}</div>
+      <div class="hi-raster">
+        <div class="dr-karte" data-einmal="kal-${k.id}"><div class="kal-kopf">${k.bild}<div><h2>${esc(k.name)}</h2><p class="leise">${esc(k.wozu)}</p></div></div>
+          <h3>So geht's</h3><ol class="kal-liste">${k.so.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+          <h3>Worauf achten</h3><ul class="kal-liste">${k.achten.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>
+          <h3>Typische Fehler</h3><ul class="kal-liste fehler">${k.fehler.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>
+        <div class="dr-karte"><h3 class="dr-titel">Ergebnis eintragen</h3>
+          <label class="auswahl breit-auswahl"><span>Rolle</span><select data-hi="rolle">${rollen.map((x) => `<option value="${esc(x.id)}" ${x.id === r.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.hersteller)}</option>`).join("")}</select></label>
+          <div class="mod-regler"><div class="r-kopf"><span>${esc(f.name)}</span><strong id="hi-kal-wert">${w == null ? "–" : `${zahl(w, f.nk || 0)} ${f.e}`}</strong></div>
+            <div class="regler-zeile"><button class="rund" data-aktion="hi-kal-schritt" data-d="-1">−</button><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${w == null ? f.min : w}" data-hi="kal-wert"><button class="rund" data-aktion="hi-kal-schritt" data-d="1">+</button></div></div>
+          <p class="leise klein">Bisher: ${aktuell == null ? "–" : `${zahl(aktuell, f.nk || 0)} ${f.e}`} (${wert(r, k.feld).quelle === "vorschlag" ? "Vorschlag" : "dein Wert"})${kal ? ` · kalibriert am ${new Date(kal).toLocaleDateString("de-DE")}` : ""}</p>
+          <button class="knopf breit" data-aktion="hi-kal-speichern">In ${esc(r.name)} speichern</button></div>
+      </div>`;
+  },
+
+  // Mausbewegung über der Zeichnung: Info sofort wechseln, ohne alles neu zu zeichnen
+  _hiNachZeichnen() {
+    const svg = this.shadowRoot.querySelector(".p1s-bild, .trockner-bild");
+    if (!svg || svg._hiBereit) return;
+    svg._hiBereit = true;
+    svg.addEventListener("mouseover", (e) => {
+      const g = e.target.closest && e.target.closest(".p1s-punkt");
+      if (!g || this._mobil) return;
+      this._hiZeigen(g.dataset.aktion, g.dataset.id);
+    });
+  },
+  _hiZeigen(art, id) {
+    const h = this._hi;
+    if (art === "hi-p1s") { if (h.p1s === id) return; h.p1s = id; } else { if (h.tr === id) return; h.tr = id; }
+    this.shadowRoot.querySelectorAll(".p1s-punkt").forEach((g) => g.classList.toggle("an", g.dataset.id === id));
+    if (art === "hi-p1s") {
+      const box = this.shadowRoot.getElementById("hi-info");
+      if (box) { box.innerHTML = this._hiP1sInfoHtml(); box.classList.remove("wechsel"); void box.offsetWidth; box.classList.add("wechsel"); }
+      if (this._mobil && box) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } else {
+      const b = TROCKNER_BEREICHE.find((x) => x.id === id);
+      const box = this.shadowRoot.getElementById("hi-tr-info");
+      if (box && b) { box.innerHTML = `<strong>${TROCKNER_BEREICHE.indexOf(b) + 1} · ${esc(b.name)}</strong><span>${esc(b.text)}</span>`; box.classList.remove("wechsel"); void box.offsetWidth; box.classList.add("wechsel"); }
+    }
+  },
+
+  _hiKlick(a, el) {
+    const h = this._hiZustand();
+    switch (a) {
+      case "hi-tab": h.tab = el.dataset.id; break;
+      case "hi-p1s": case "hi-tr": this._hiZeigen(a, el.dataset.id); return;
+      case "hi-fehler": {
+        const id = el.dataset.id;
+        this._klappen(`fb-${id}`, h.fehler === id, () => { h.fehler = h.fehler === id ? null : id; });
+        return;
+      }
+      case "hi-kal": h.kal = el.dataset.id; h.kalWert = null; break;
+      case "hi-kal-schritt": {
+        const k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
+        const r = this._daten.rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+        const alt = h.kalWert != null ? h.kalWert : (wert(r, k.feld).v ?? f.min);
+        h.kalWert = Math.min(f.max, Math.max(f.min, Math.round((alt + Number(el.dataset.d) * f.step) / f.step) * f.step));
+        this._hiKalWertZeigen();
+        return;
+      }
+      case "hi-kal-speichern": {
+        const k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
+        const r = this._daten.rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+        const w = h.kalWert != null ? h.kalWert : wert(r, k.feld).v;
+        if (w == null) return;
+        r.eigen = { ...(r.eigen || {}), [k.feld]: w };
+        r.kalibriert = { ...(r.kalibriert || {}), [k.feld]: new Date().toISOString() };
+        h.kalWert = null;
+        this._speichern();
+        this._toast(`${f.name} ${zahl(w, f.nk || 0)} ${f.e} bei ${r.name} gespeichert.`);
+        return;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+  _hiKalWertZeigen() {
+    const h = this._hi, k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
+    const s = this.shadowRoot.getElementById("hi-kal-wert");
+    if (s) s.textContent = `${zahl(h.kalWert, f.nk || 0)} ${f.e}`;
+    const i = this.shadowRoot.querySelector('[data-hi="kal-wert"]');
+    if (i) i.value = h.kalWert;
+  },
+  _hiEingabe(t) {
+    const k = t.dataset && t.dataset.hi;
+    if (!k) return false;
+    if (k === "kal-wert") { this._hi.kalWert = Number(t.value); this._hiKalWertZeigen(); }
+    return true;
+  },
+  _hiAenderung(t) {
+    const k = t.dataset && t.dataset.hi;
+    if (!k) return false;
+    if (k === "rolle") { this._hi.kalRolle = t.value; this._hi.kalWert = null; this._zeichnen(); }
+    return true;
+  },
+};
+// ---------------------------------------------------------------------------
+// Werkstatt: Warteschlange mit Bestandsprüfung, Einkaufsliste, Modell-Bibliothek,
+// Fehldrucke, Wartungsplan mit Verschleißteilen, Kosten je Druck und Monat
+// ---------------------------------------------------------------------------
+
+const WS_TABS = [["schlange", "📋 Warteschlange"], ["einkauf", "🛒 Einkauf"], ["bibliothek", "📚 Bibliothek"], ["fehl", "💥 Fehldrucke"], ["wartung", "🔧 Wartung"], ["kosten", "💶 Kosten"]];
+const WS_EINSTELLUNGEN = [
+  { k: "strompreis", name: "Strompreis", e: "€/kWh", min: 0.1, max: 0.8, step: 0.01, nk: 2 },
+  { k: "linie_g", name: "Anfangslinie je Druck", e: "g", min: 0, max: 2, step: 0.05, nk: 2 },
+  { k: "extruder_g", name: "3 Extruder-Fahrten je Druck", e: "g", min: 0, max: 1, step: 0.05, nk: 2 },
+  { k: "wechsel_g", name: "Reststück beim Rollenwechsel", e: "g", min: 0, max: 1, step: 0.05, nk: 2 },
+  { k: "mindest_g", name: "Nachkaufen je Farbe unter", e: "g", min: 0, max: 1000, step: 50 },
+  { k: "mindest_material_g", name: "Nachkaufen je Material unter", e: "g", min: 0, max: 3000, step: 100 },
+];
+const WS_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+
+// Druckname ohne Endung und Plattennummer, damit gleiche Modelle zusammenfallen
+function modellSchluessel(name) {
+  return normText(String(name || "").replace(/\.(gcode|3mf|stl)$/gi, "").replace(/[_-]?plate[_ ]?\d+$/i, "")) || "druck";
+}
+function tageSeit(iso) { return iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : null; }
+
+const WerkstattAnsicht = {
+  _wsZustand() {
+    if (!this._ws) this._ws = { tab: "schlange", neu: null };
+    return this._ws;
+  },
+
+  _wsHtml() {
+    const w = this._wsZustand();
+    const zahlen = { schlange: this._daten.warteschlange.length, einkauf: this._wsEinkauf().length, wartung: this._wsWartung().filter((a) => a.faellig).length };
+    const inhalt = { einkauf: () => this._wsEinkaufHtml(), bibliothek: () => this._wsBibliothekHtml(), fehl: () => this._wsFehlHtml(), wartung: () => this._wsWartungHtml(), kosten: () => this._wsKostenHtml() }[w.tab] || (() => this._wsSchlangeHtml());
+    return `<div class="ws-seite">
+      <div class="chips unter-tabs" role="tablist">${WS_TABS.map(([id, n]) => `<button class="chip ${w.tab === id ? "an" : ""}" data-aktion="ws-tab" data-id="${id}">${n}${zahlen[id] ? ` <span class="zahl-punkt ${id === "wartung" ? "amber-punkt" : ""}">${zahlen[id]}</span>` : ""}</button>`).join("")}</div>
+      <div class="ws-inhalt wechsel-rein" data-einmal="ws-${w.tab}">${inhalt()}</div></div>`;
+  },
+
+  // ---- Warteschlange ----
+  _wsBestand() {
+    // Aufträge der Reihe nach von den Rollen abziehen: späterer Auftrag sieht, was übrig bleibt
+    const e = this._daten.einstellungen, rest = {};
+    return this._daten.warteschlange.map((a) => {
+      const r = this._daten.rollen.find((x) => x.id === a.rolleId);
+      const bedarf = (a.gewicht || 0) + e.linie_g + e.extruder_g;
+      if (!r) return { a, r: null, stufe: "ohne", bedarf };
+      if (r.rest_g == null) return { a, r, stufe: "ungewogen", bedarf };
+      const vorher = r.id in rest ? rest[r.id] : r.rest_g;
+      rest[r.id] = vorher - bedarf;
+      const stufe = !a.gewicht ? "unbekannt" : vorher >= bedarf * 1.1 ? "ok" : vorher >= bedarf ? "knapp" : "fehlt";
+      const ersatz = stufe === "fehlt" || stufe === "knapp" ? this._daten.rollen.filter((x) => x !== r && x.material === r.material && x.rest_g != null && x.rest_g >= bedarf * 1.1)
+        .sort((x, y) => (farbfamilie(y) === farbfamilie(r)) - (farbfamilie(x) === farbfamilie(r)) || x.rest_g - y.rest_g).slice(0, 3) : [];
+      return { a, r, stufe, bedarf, vorher, danach: vorher - bedarf, ersatz };
+    });
+  },
+  _wsSchlangeHtml() {
+    const liste = this._wsBestand();
+    const text = { ok: ["✓ reicht", "mint"], knapp: ["knapp", "amber"], fehlt: ["reicht nicht", "rot"], ungewogen: ["Rolle nicht gewogen", "amber"], unbekannt: ["Gewicht unbekannt", "leise"], ohne: ["keine Rolle gewählt", "amber"] };
+    return `<div class="ws-kopfzeile"><p class="leise">Was als Nächstes gedruckt wird. Die Bestandsprüfung rechnet die Aufträge der Reihe nach von den Rollen ab.</p>
+      <button class="knopf" data-aktion="ws-neu">＋ Auftrag</button></div>
+      ${!liste.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📋</span><strong>Die Warteschlange ist leer</strong>
+        <span class="leise">Füge Aufträge hier hinzu, aus dem 3D-Modell-Viewer oder mit „Nochmal drucken“ in der Bibliothek.</span></div>` : ""}
+      <div class="ws-liste">${liste.map((x, i) => {
+        const [st, farbe] = text[x.stufe];
+        return `<div class="ws-auftrag dr-karte" data-einmal="ws-a-${esc(x.a.id)}">
+          <div class="ws-nr">${i + 1}</div>
+          <div class="ws-text"><strong>${esc(x.a.name)}</strong>
+            <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${x.a.zeit ? ` · ${esc(x.a.zeit)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}</small>
+            <span class="pille ${farbe}">${st}${x.vorher != null && x.a.gewicht ? (x.danach < 0 ? ` · es fehlen ${zahl(-x.danach)} g` : ` · danach ${zahl(x.danach)} g`) : ""}</span>
+            ${x.ersatz && x.ersatz.length ? `<div class="chips ws-ersatz"><span class="leise klein">Reicht stattdessen:</span>${x.ersatz.map((r) => `<button class="chip" data-aktion="ws-rolle" data-id="${esc(x.a.id)}" data-rolle="${esc(r.id)}">${esc(r.name)} · ${zahl(r.rest_g)} g</button>`).join("")}</div>` : ""}
+            ${x.a.notiz ? `<small class="leise">📝 ${esc(x.a.notiz)}</small>` : ""}</div>
+          <div class="ws-knoepfe">
+            <button class="rund" data-aktion="ws-hoch" data-id="${esc(x.a.id)}" ${i === 0 ? "disabled" : ""} aria-label="Nach oben">↑</button>
+            <button class="rund" data-aktion="ws-runter" data-id="${esc(x.a.id)}" ${i === liste.length - 1 ? "disabled" : ""} aria-label="Nach unten">↓</button>
+            <button class="rund" data-aktion="ws-bearbeiten" data-id="${esc(x.a.id)}" aria-label="Bearbeiten">✎</button>
+            <button class="rund" data-aktion="ws-weg" data-id="${esc(x.a.id)}" aria-label="Entfernen">✓</button>
+          </div></div>`;
+      }).join("")}</div>`;
+  },
+  _wsAuftragNeu(werte) {
+    const voll = this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => b.rest_g - a.rest_g)[0] || this._daten.rollen[0] || {};
+    this._wsZustand().neu = { id: null, name: "", gewicht: 20, rolleId: this._daten.letzte_rolle || voll.id, notiz: "", ...werte };
+    this._dialog = "ws-auftrag";
+  },
+  _wsAuftragDialogHtml() {
+    const n = this._ws.neu;
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    return `<h2>${n.id ? "Auftrag bearbeiten" : "Neuer Auftrag"}</h2>
+      <label class="feld"><span>Was wird gedruckt?</span><input id="ws-name" value="${esc(n.name)}" placeholder="z. B. Kabelhalter" maxlength="80"></label>
+      <div class="mod-regler"><div class="r-kopf"><span>Filament</span><strong id="ws-gewicht">${zahl(n.gewicht, 1)} g</strong></div>
+        <div class="regler-zeile"><button class="rund" data-aktion="ws-g" data-d="-5">−5</button><input type="range" min="0" max="1000" step="0.5" value="${n.gewicht}" data-ws="gewicht"><button class="rund" data-aktion="ws-g" data-d="5">+5</button></div></div>
+      <label class="auswahl breit-auswahl"><span>Rolle</span><select data-ws="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${r.id === n.rolleId ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : ""}</option>`).join("")}</select></label>
+      <label class="feld"><span>Notiz (optional)</span><input id="ws-notiz" value="${esc(n.notiz)}" maxlength="140"></label>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf" data-aktion="ws-speichern">${n.id ? "Speichern" : "Hinzufügen"}</button></div>`;
+  },
+  // Aus dem STL-/G-Code-Viewer: Name, Gewicht und gewählte Rolle übernehmen
+  _wsAusModell() {
+    const m = this._mod;
+    if (!m || m.laedt) return;
+    let g = null;
+    if (m.art === "gcode") g = m.gcode && m.gcode.info.gramm;
+    else if (m.kenn) { const r = this._modRolle(); g = gewichtSchaetzen(m.kenn, materialInfo(r ? r.material : "PLA").dichte, { duese: m.duese, waende: m.waende, fuellung: m.fuellung }).gramm; }
+    this._daten.warteschlange.push({ id: `a-${Date.now().toString(36)}`, name: m.name.replace(/\.(gcode\.3mf|gcode|3mf|stl)$/i, ""), gewicht: g ? Math.round(g * 10) / 10 : null,
+      zeit: m.art === "gcode" ? m.gcode.info.zeit || null : null, rolleId: m.rolleId, notiz: "", am: new Date().toISOString(), quelle: m.art });
+    this._speichern();
+    this._toast(`„${m.name}“ steht jetzt in der Warteschlange (Platz ${this._daten.warteschlange.length}).`);
+  },
+
+  // ---- Einkaufsliste ----
+  _wsEinkauf() {
+    const d = this._daten, e = d.einstellungen, liste = [];
+    const gruppen = {};
+    for (const r of d.rollen) {
+      if (r.rest_g == null) continue;
+      const k = `${r.material}|${farbfamilie(r)}`;
+      (gruppen[k] = gruppen[k] || { material: r.material, farbe: farbfamilie(r), g: 0, rollen: [] });
+      gruppen[k].g += r.rest_g; gruppen[k].rollen.push(r);
+    }
+    for (const x of Object.values(gruppen)) {
+      if (x.g < e.mindest_g) liste.push({ art: "farbe", titel: `${x.material} ${x.farbe}`, text: `nur noch ${zahl(x.g)} g (${x.rollen.map((r) => r.name).join(", ")})`, hex: x.rollen[0].hex, dringend: x.g < e.mindest_g / 2 });
+    }
+    const mats = {};
+    for (const r of d.rollen) if (r.rest_g != null) mats[r.material] = (mats[r.material] || 0) + r.rest_g;
+    for (const [m, g] of Object.entries(mats)) if (g < e.mindest_material_g) liste.push({ art: "material", titel: `${m} allgemein`, text: `insgesamt nur noch ${zahl(g)} g ${m}`, dringend: g < e.mindest_material_g / 2 });
+    for (const t of d.inventar) {
+      if (wenigBestand(t) || (t.menge === 0)) liste.push({ art: "teil", titel: teilName(t), text: `${t.menge} Stk${t.min ? `, Mindestbestand ${t.min}` : ""}`, id: t.id, dringend: t.menge === 0, icon: kategorie(t.kat).icon });
+    }
+    const h = this._drZ ? this._drZ("stunden") : null;
+    if (h != null) for (const t of this._wsTeile()) {
+      const genutzt = h - (t.eingebaut_h || 0);
+      if (genutzt >= t.lebensdauer_h * 0.9) liste.push({ art: "verschleiss", titel: t.name, text: `${zahl(genutzt)} von ~${zahl(t.lebensdauer_h)} Druckstunden`, dringend: genutzt >= t.lebensdauer_h, icon: "⚙️" });
+    }
+    return liste.sort((a, b) => b.dringend - a.dringend);
+  },
+  _wsEinkaufHtml() {
+    const l = this._wsEinkauf(), e = this._daten.einstellungen;
+    const ungewogen = this._daten.rollen.filter((r) => r.rest_g == null).length;
+    return `<div class="ws-kopfzeile"><p class="leise">Filament unter ${zahl(e.mindest_g)} g je Farbe oder ${zahl(e.mindest_material_g)} g je Material, Teile unter dem Mindestbestand und abgenutzte Verschleißteile. Grenzen änderst du unter 💶 Kosten.</p>
+      ${l.length ? `<button class="knopf leise" data-aktion="ws-kopieren">📋 Liste kopieren</button>` : ""}</div>
+      ${!l.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">✅</span><strong>Nichts nachzukaufen</strong><span class="leise">Alle Farben, Materialien und Teile sind über den Grenzen.</span></div>` : ""}
+      <div class="ws-liste">${l.map((x) => `<div class="ws-einkauf dr-karte ${x.dringend ? "dringend" : ""}">
+        ${x.hex ? `<span class="farbtupfer" style="background:${esc(x.hex)}"></span>` : `<span class="ws-icon">${x.icon || "🧵"}</span>`}
+        <div><strong>${esc(x.titel)}</strong><small class="leise">${esc(x.text)}</small></div>
+        ${x.dringend ? `<span class="pille rot">dringend</span>` : ""}
+        ${x.id ? `<button class="mini" data-aktion="such-teil" data-id="${esc(x.id)}">Öffnen</button>` : ""}</div>`).join("")}</div>
+      ${ungewogen ? `<p class="leise klein oben-abstand">${ungewogen} Rollen sind nicht gewogen und fehlen in der Rechnung.</p>` : ""}`;
+  },
+  _wsEinkaufText() {
+    return "Einkaufsliste 3D-Drucker\n" + this._wsEinkauf().map((x) => `- ${x.titel}: ${x.text}${x.dringend ? " (dringend)" : ""}`).join("\n");
+  },
+
+  // ---- Modell-Bibliothek ----
+  _wsModelle() {
+    const gruppen = new Map();
+    for (const d of this._buAlle()) {
+      if (d.status === "laeuft") continue;
+      const k = modellSchluessel(d.name);
+      const x = this._buExtra(d.uid);
+      const g = gruppen.get(k) || { name: d.name, drucke: [], ok: 0, fehl: 0 };
+      g.drucke.push(d);
+      const erg = x.gebucht ? x.gebucht.ergebnis : d.status === "finish" ? "ok" : null;
+      if (erg === "ok") g.ok++; else if (erg === "fehl") g.fehl++;
+      if (!g.rolle && x.gebucht) g.rolle = x.gebucht.rolle;
+      gruppen.set(k, g);
+    }
+    return [...gruppen.values()].sort((a, b) => (b.drucke[0].start || "").localeCompare(a.drucke[0].start || ""));
+  },
+  _wsBibliothekHtml() {
+    const modelle = this._wsModelle();
+    const q = this._ws.suche || "";
+    const zeige = q ? modelle.filter((m) => suchPunkte(q, m.name)) : modelle;
+    return `<div class="ws-kopfzeile"><input class="such-feld" data-ws="suche" value="${esc(q)}" placeholder="Modell suchen …" aria-label="Modell suchen"></div>
+      ${!modelle.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📚</span><strong>Noch keine Modelle</strong><span class="leise">Jeder Druck aus dem Druckverlauf landet hier, gleiche Modelle werden zusammengefasst.</span></div>` : ""}
+      <div class="ws-raster" id="ws-bib">${zeige.map((m) => this._wsModellKarte(m)).join("") || (modelle.length ? `<p class="leise">Kein Modell passt zu „${esc(q)}“.</p>` : "")}</div>`;
+  },
+  _wsModellKarte(m) {
+    const d = m.drucke[0], f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+    const r = this._daten.rollen.find((x) => x.id === m.rolle);
+    const quote = m.ok + m.fehl ? Math.round((m.ok / (m.ok + m.fehl)) * 100) : null;
+    return `<div class="ws-modell dr-karte">
+      <div class="ws-foto" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="" loading="lazy">` : `<span>🧊</span>`}</div>
+      <div class="ws-modell-text"><strong title="${esc(m.name)}">${esc(m.name)}</strong>
+        <small class="leise">${m.drucke.length}× gedruckt · zuletzt ${esc(d.zeit || "–")}</small>
+        <small class="leise">${d.gewicht != null ? `${zahl(d.gewicht, 1)} g` : "–"}${r ? ` · ${esc(r.name)}` : ""}${quote != null ? ` · ${quote} % geglückt` : ""}</small></div>
+      <div class="ws-modell-knoepfe"><button class="knopf klein-knopf" data-aktion="ws-nochmal" data-uid="${esc(d.uid)}">↻ Nochmal drucken</button>
+        <button class="mini" data-aktion="zum-druck" data-uid="${esc(d.uid)}">Details</button></div></div>`;
+  },
+
+  // ---- Fehldrucke ----
+  _wsFehldrucke() {
+    return this._buAlle().filter((d) => { const g = this._buExtra(d.uid).gebucht; return g && g.ergebnis === "fehl"; });
+  },
+  _wsFehlHtml() {
+    const l = this._wsFehldrucke();
+    if (!l.length) return `<div class="leer-karte dr-karte"><span class="gross-icon">🎉</span><strong>Keine Fehldrucke</strong><span class="leise">Wird ein abgebrochener Druck als Fehldruck verbucht, landet er hier mit Endfoto und Ursache.</span></div>`;
+    return `<p class="leise">${l.length} Fehldrucke mit Endfoto, Ursache und was geändert wurde.</p>
+      <div class="ws-raster">${l.map((d) => {
+        const x = this._buExtra(d.uid), f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+        const r = this._daten.rollen.find((y) => y.id === x.gebucht.rolle);
+        const ursachen = ((x.fehl && x.fehl.ursachen) || []).map((id) => fehlerbild(id)).filter(Boolean);
+        return `<div class="ws-modell dr-karte fehl">
+          <div class="ws-foto" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="" loading="lazy">` : `<span>💥</span>`}</div>
+          <div class="ws-modell-text"><strong>${esc(d.name)}</strong>
+            <small class="leise">${esc(d.zeit || "")} · bei ${zahl(x.gebucht.fortschritt)} %${r ? ` · ${esc(r.name)}` : ""}</small>
+            ${ursachen.length ? `<small>🩺 ${esc(ursachen.map((u) => u.name).join(", "))}</small>` : `<small class="leise">Ursache nicht angegeben</small>`}
+            ${x.fehl && x.fehl.geaendert && x.fehl.geaendert.length ? `<small class="mint">Geändert: ${esc(x.fehl.geaendert.join(", "))}</small>` : ""}</div>
+          <div class="ws-modell-knoepfe"><button class="mini" data-aktion="zum-druck" data-uid="${esc(d.uid)}">Details</button></div></div>`;
+      }).join("")}</div>`;
+  },
+
+  // ---- Wartung ----
+  _wsTeile() {
+    const w = this._daten.wartung;
+    return w.teile || ERSATZTEILE_STANDARD.map((t) => ({ ...t }));
+  },
+  _wsWartung() {
+    const h = this._drZ ? this._drZ("stunden") : null;
+    const auf = this._daten.wartung.aufgaben || {};
+    return WARTUNG_AUFGABEN.map((a) => {
+      const z = auf[a.id];
+      if (!z) return { a, neu: true, faellig: false, anteil: 0 };
+      const seitH = h != null && z.h != null ? h - z.h : null;
+      const seitT = tageSeit(z.am);
+      const anteil = Math.max(seitH != null ? seitH / a.alle_h : 0, seitT / a.alle_tage);
+      return { a, z, seitH, seitT, anteil, faellig: anteil >= 1 };
+    }).sort((x, y) => y.anteil - x.anteil);
+  },
+  _wsWartungHtml() {
+    const h = this._drZ ? this._drZ("stunden") : null;
+    const liste = this._wsWartung();
+    const teile = this._wsTeile();
+    const balken = (anteil) => `<div class="ws-balken"><span style="width:${Math.min(100, Math.round(anteil * 100))}%" class="${anteil >= 1 ? "rot" : anteil >= 0.8 ? "amber" : ""}"></span></div>`;
+    return `<div class="ws-kopfzeile"><p class="leise">Fällig nach Druckstunden oder Tagen, je nachdem was zuerst kommt. ${h != null ? `Der Drucker hat ${zahl(h)} Betriebsstunden.` : "Betriebsstunden gerade nicht abrufbar, gezählt wird nach Tagen."}</p></div>
+      <div class="ws-liste">${liste.map((x) => `<div class="ws-wartung dr-karte ${x.faellig ? "dringend" : ""}">
+        <div class="ws-text"><strong>${esc(x.a.name)}</strong><small class="leise">${esc(x.a.text)}</small>
+          ${x.neu ? `<small class="amber">Noch nicht erfasst. Tippe auf „Erledigt“, wenn du es zuletzt gemacht hast, dann zählt es ab heute.</small>`
+            : `${balken(x.anteil)}<small class="leise">Zuletzt vor ${zahl(x.seitT)} Tagen${x.seitH != null ? ` und ${zahl(x.seitH)} Druckstunden` : ""} · alle ${x.a.alle_h} h oder ${x.a.alle_tage} Tage</small>`}</div>
+        <button class="knopf ${x.faellig ? "" : "leise"} klein-knopf" data-aktion="ws-erledigt" data-id="${x.a.id}">✓ Erledigt</button></div>`).join("")}</div>
+      <h3>⚙️ Verschleißteile</h3>
+      <div class="ws-liste">${teile.map((t) => {
+        const genutzt = h != null ? Math.max(0, h - (t.eingebaut_h || 0)) : null;
+        const anteil = genutzt != null ? genutzt / t.lebensdauer_h : 0;
+        return `<div class="ws-wartung dr-karte ${anteil >= 1 ? "dringend" : ""}"><div class="ws-text"><strong>${esc(t.name)}</strong>
+          ${genutzt != null ? `${balken(anteil)}<small class="leise">${zahl(genutzt)} von ~${zahl(t.lebensdauer_h)} Druckstunden${t.getauscht_am ? ` · getauscht am ${new Date(t.getauscht_am).toLocaleDateString("de-DE")}` : " · seit Inbetriebnahme"}</small>` : `<small class="leise">Richtwert ~${zahl(t.lebensdauer_h)} Druckstunden</small>`}</div>
+          <button class="knopf leise klein-knopf" data-aktion="ws-getauscht" data-id="${t.id}" ${h == null ? "disabled" : ""}>Getauscht</button></div>`;
+      }).join("")}</div>`;
+  },
+
+  // ---- Kosten ----
+  _wsKosten() {
+    const monate = {};
+    const drucke = [];
+    for (const [uid, x] of Object.entries(this._daten.drucke || {})) {
+      const g = x.gebucht;
+      if (!g) continue;
+      const k = g.kosten || {};
+      const datum = x.start || g.am;
+      const m = (datum || "").slice(0, 7);
+      const eintrag = { uid, name: x.name || (x.hand && x.hand.name) || "Druck", datum, g: g.g, fil: k.filament, strom: k.strom, kwh: k.kwh, ergebnis: g.ergebnis };
+      drucke.push(eintrag);
+      const mo = (monate[m] = monate[m] || { fil: 0, strom: 0, kwh: 0, n: 0, g: 0, ohnePreis: 0 });
+      mo.fil += k.filament || 0; mo.strom += k.strom || 0; mo.kwh += k.kwh || 0; mo.n++; mo.g += g.g || 0;
+      if (k.filament == null) mo.ohnePreis++;
+    }
+    return { monate, drucke: drucke.sort((a, b) => (b.datum || "").localeCompare(a.datum || "")) };
+  },
+  _wsKostenHtml() {
+    const { monate, drucke } = this._wsKosten();
+    const e = this._daten.einstellungen;
+    const schluessel = Object.keys(monate).sort().slice(-6);
+    const max = Math.max(0.01, ...schluessel.map((k) => monate[k].fil + monate[k].strom));
+    const ohnePreis = this._daten.rollen.filter((r) => !r.preis_kg).length;
+    const eur = (v) => (v == null ? "–" : `${zahl(v, 2)} €`);
+    return `<div class="ws-zwei">
+      <div class="dr-karte"><h3 class="dr-titel">Kosten je Monat</h3>
+        ${schluessel.length ? `<div class="ws-saeulen">${schluessel.map((k) => { const m = monate[k], s = m.fil + m.strom;
+          return `<div class="ws-saeule" title="${m.n} Drucke · ${zahl(m.g)} g · ${zahl(m.kwh, 2)} kWh"><strong>${zahl(s, 2)} €</strong>
+            <div class="ws-saeule-bahn"><span class="fil" style="height:${(m.fil / max) * 100}%"></span><span class="strom" style="height:${(m.strom / max) * 100}%"></span></div>
+            <small>${WS_MONATE[Number(k.slice(5, 7)) - 1]} ${k.slice(2, 4)}</small></div>`; }).join("")}</div>
+          <div class="ws-legende"><span><i class="fil"></i>Filament</span><span><i class="strom"></i>Strom</span></div>`
+          : `<p class="leise">Noch keine verbuchten Drucke. Kosten entstehen beim Verbuchen nach jedem Druck.</p>`}
+        ${ohnePreis ? `<div class="hinweis amber klein">${ohnePreis} Rollen haben keinen Preis, ihr Filament zählt mit 0 €. Preis eintragen: Rolle öffnen › Infos.</div>` : ""}
+        ${drucke.length ? `<h3>Letzte Drucke</h3><div class="info-liste">${drucke.slice(0, 8).map((d) => `<button class="info-zeile zeilen-knopf" data-aktion="zum-druck" data-uid="${esc(d.uid)}"><span>${esc(d.name)}<small class="norm">${d.datum ? new Date(d.datum).toLocaleDateString("de-DE") : ""} · ${zahl(d.g, 1)} g${d.kwh != null ? ` · ${zahl(d.kwh, 2)} kWh` : ""}</small></span><strong>${eur((d.fil || 0) + (d.strom || 0))}</strong></button>`).join("")}</div>` : ""}
+      </div>
+      <div class="dr-karte"><h3 class="dr-titel">Einstellungen</h3>
+        ${WS_EINSTELLUNGEN.map((f) => `<div class="mod-regler"><div class="r-kopf"><span>${esc(f.name)}</span><strong id="ws-e-${f.k}">${zahl(e[f.k], f.nk || 0)} ${f.e}</strong></div>
+          <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${e[f.k]}" data-ws="e-${f.k}"></div>`).join("")}
+        <p class="leise klein">Zusatzposten werden bei jedem Verbuchen abgezogen, das Reststück beim Rollenwechsel von der alten Rolle.</p></div></div>`;
+  },
+
+  // ---- Ereignisse ----
+  _wsKlick(a, el) {
+    const w = this._wsZustand(), q = this._daten.warteschlange;
+    const idx = el.dataset.id ? q.findIndex((x) => x.id === el.dataset.id) : -1;
+    switch (a) {
+      case "ws-tab": w.tab = el.dataset.id; if (w.tab === "bibliothek" || w.tab === "fehl") this._wsFotos(); break;
+      case "ws-neu": this._wsAuftragNeu(); break;
+      case "ws-bearbeiten": if (idx < 0) return; this._wsAuftragNeu({ ...q[idx] }); break;
+      case "ws-g": { const n = w.neu; n.gewicht = Math.max(0, Math.min(1000, (n.gewicht || 0) + Number(el.dataset.d))); this._wsGewichtZeigen(); return; }
+      case "ws-speichern": {
+        const n = w.neu;
+        n.name = (this.shadowRoot.getElementById("ws-name").value || "").trim();
+        n.notiz = (this.shadowRoot.getElementById("ws-notiz").value || "").trim();
+        if (!n.name) { this._toast("Bitte einen Namen eingeben."); return; }
+        if (n.id) { const i = q.findIndex((x) => x.id === n.id); if (i >= 0) q[i] = { ...q[i], ...n }; }
+        else q.push({ ...n, id: `a-${Date.now().toString(36)}`, am: new Date().toISOString(), quelle: "hand" });
+        w.neu = null; this._dialog = null; this._speichern();
+        break;
+      }
+      case "ws-hoch": case "ws-runter": {
+        const j = idx + (a === "ws-hoch" ? -1 : 1);
+        if (idx < 0 || j < 0 || j >= q.length) return;
+        [q[idx], q[j]] = [q[j], q[idx]];
+        this._speichern();
+        break;
+      }
+      case "ws-weg": {
+        if (idx < 0) return;
+        const [weg] = q.splice(idx, 1);
+        this._wsLetzterWeg = { a: weg, i: idx };
+        this._speichern();
+        this._toastMitKnopf(`„${weg.name}“ entfernt.`, "Rückgängig", "ws-zurueck");
+        return;
+      }
+      case "ws-zurueck": {
+        const z = this._wsLetzterWeg;
+        if (z && !q.some((x) => x.id === z.a.id)) { q.splice(Math.min(z.i, q.length), 0, z.a); this._speichern(); }
+        this._wsLetzterWeg = null; this._toastText = null;
+        break;
+      }
+      case "ws-rolle": if (idx < 0) return; q[idx].rolleId = el.dataset.rolle; this._speichern(); break;
+      case "ws-aus-modell": this._wsAusModell(); return;
+      case "ws-nochmal": {
+        const d = this._buAlle().find((x) => x.uid === el.dataset.uid);
+        if (!d) return;
+        const g = this._buExtra(d.uid).gebucht;
+        q.push({ id: `a-${Date.now().toString(36)}`, name: d.name, gewicht: d.gewicht, rolleId: (g && g.rolle) || this._daten.letzte_rolle, notiz: "", am: new Date().toISOString(), quelle: "bibliothek" });
+        this._speichern();
+        this._toast(`„${d.name}“ steht in der Warteschlange (Platz ${q.length}).`);
+        return;
+      }
+      case "ws-kopieren": this._kopieren(this._wsEinkaufText(), "Einkaufsliste kopiert."); return;
+      case "ws-erledigt": {
+        const h = this._drZ("stunden");
+        this._daten.wartung.aufgaben = { ...(this._daten.wartung.aufgaben || {}), [el.dataset.id]: { h, am: new Date().toISOString() } };
+        this._speichern();
+        const t = WARTUNG_AUFGABEN.find((x) => x.id === el.dataset.id);
+        this._toast(`${t ? t.name : "Wartung"} erledigt, die Zählung beginnt neu.`);
+        return;
+      }
+      case "ws-getauscht": {
+        const h = this._drZ("stunden");
+        if (h == null) return;
+        const teile = this._wsTeile();
+        const t = teile.find((x) => x.id === el.dataset.id);
+        if (!t) return;
+        t.eingebaut_h = h; t.getauscht_am = new Date().toISOString();
+        this._daten.wartung.teile = teile;
+        this._speichern();
+        this._toast(`${t.name}: Zähler steht wieder auf 0.`);
+        return;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+  _wsGewichtZeigen() {
+    const n = this._ws.neu;
+    const s = this.shadowRoot.getElementById("ws-gewicht"); if (s) s.textContent = `${zahl(n.gewicht, 1)} g`;
+    const i = this.shadowRoot.querySelector('[data-ws="gewicht"]'); if (i) i.value = n.gewicht;
+  },
+  _wsFotos() { if (this._drVerlauf) this._drFotosLaden(); },
+  _wsEingabe(t) {
+    const k = t.dataset && t.dataset.ws;
+    if (!k) return false;
+    const w = this._wsZustand();
+    if (k === "gewicht") { w.neu.gewicht = Number(t.value); this._wsGewichtZeigen(); }
+    else if (k === "suche") {
+      w.suche = t.value;
+      const box = this.shadowRoot.getElementById("ws-bib");
+      const m = this._wsModelle(), zeige = w.suche ? m.filter((x) => suchPunkte(w.suche, x.name)) : m;
+      if (box) box.innerHTML = zeige.map((x) => this._wsModellKarte(x)).join("") || `<p class="leise">Kein Modell passt zu „${esc(w.suche)}“.</p>`;
+    } else if (k.startsWith("e-")) {
+      const f = WS_EINSTELLUNGEN.find((x) => x.k === k.slice(2));
+      this._daten.einstellungen[f.k] = Number(t.value);
+      const s = this.shadowRoot.getElementById(`ws-e-${f.k}`); if (s) s.textContent = `${zahl(Number(t.value), f.nk || 0)} ${f.e}`;
+    }
+    return true;
+  },
+  _wsAenderung(t) {
+    const k = t.dataset && t.dataset.ws;
+    if (!k) return false;
+    if (k === "rolle") this._ws.neu.rolleId = t.value;
+    else if (k.startsWith("e-")) this._speichern();
+    return true;
+  },
+};
+// ---------------------------------------------------------------------------
+// Nerd-Menü: Statistik, Fehlerquoten, wann Drucke scheitern, Schätzung gegen
+// Waage (Korrekturfaktor), eigene Werte gegen Vorschläge, Gesundheit des Druckers
+// ---------------------------------------------------------------------------
+
+const NE_TABS = [["statistik", "📊 Statistik"], ["abgleich", "⚖️ Schätzung vs. Waage"], ["werte", "🎛️ Deine Werte"], ["gesundheit", "❤️ Gesundheit"]];
+const NE_VERGLEICH = ["duese", "duese_erste", "bett", "luefter_max", "flow", "k", "max_vol", "v_aussen"];
+const NE_TAGESZEIT = [["Nacht", 0, 6], ["Morgen", 6, 12], ["Nachmittag", 12, 18], ["Abend", 18, 24]];
+
+// Zeitpunkt aus einem HA-Verlaufseintrag (komprimiert: lu in Sekunden)
+function verlaufZeit(x) {
+  if (x.lu != null) return x.lu * 1000;
+  return new Date(x.last_updated || x.last_changed || x.lc || 0).getTime();
+}
+// Aufheizvorgänge: Zieltemperatur springt hoch → Zeit, bis die Ist-Temperatur fast da ist
+function aufheizZeiten(ziel, ist, schwelle) {
+  const z = ziel.map((x) => ({ t: verlaufZeit(x), v: Number(x.s ?? x.state) })).filter((x) => !isNaN(x.v) && x.t);
+  const i = ist.map((x) => ({ t: verlaufZeit(x), v: Number(x.s ?? x.state) })).filter((x) => !isNaN(x.v) && x.t);
+  const erg = [];
+  for (let k = 1; k < z.length; k++) {
+    if (!(z[k - 1].v < schwelle && z[k].v >= schwelle)) continue;
+    const t0 = z[k].t, soll = z[k].v;
+    const start = [...i].reverse().find((x) => x.t <= t0);
+    const da = i.find((x) => x.t >= t0 && x.v >= soll - 3);
+    if (!da) continue;
+    const s = (da.t - t0) / 1000;
+    if (s > 3 && s < 1800) erg.push({ am: t0, s, soll, von: start ? start.v : null });
+  }
+  return erg;
+}
+
+const NerdAnsicht = {
+  _neZustand() {
+    if (!this._ne) this._ne = { tab: "statistik", abRolle: null, abWert: null, heiz: null };
+    return this._ne;
+  },
+  _neHtml() {
+    const n = this._neZustand();
+    const inhalt = { abgleich: () => this._neAbgleichHtml(), werte: () => this._neWerteHtml(), gesundheit: () => this._neGesundheitHtml() }[n.tab] || (() => this._neStatistikHtml());
+    return `<div class="ne-seite">
+      <div class="chips unter-tabs">${NE_TABS.map(([id, t]) => `<button class="chip ${n.tab === id ? "an" : ""}" data-aktion="ne-tab" data-id="${id}">${t}</button>`).join("")}</div>
+      <div class="wechsel-rein" data-einmal="ne-${n.tab}">${inhalt()}</div></div>`;
+  },
+
+  // Ein Datensatz je Druck: Ergebnis, Material, Rolle, Zeitpunkte
+  _neDrucke() {
+    return this._buAlle().filter((d) => d.status !== "laeuft").map((d) => {
+      const x = this._buExtra(d.uid), g = x.gebucht;
+      const ergebnis = g ? g.ergebnis : d.status === "finish" ? "ok" : d.status === "failed" ? "abbruch" : null;
+      const r = g ? this._daten.rollen.find((y) => y.id === g.rolle) : null;
+      const dauer = d.start && d.ende ? (new Date(d.ende) - new Date(d.start)) / 3600000 : null;
+      return { d, x, g, ergebnis, rolle: r, material: r ? r.material : null, dauer: dauer > 0 && dauer < 200 ? dauer : null,
+        wann: x.fehl && x.fehl.wann ? x.fehl.wann : g && g.ergebnis === "fehl" ? wannAusFortschritt(g.fortschritt) : null };
+    });
+  },
+
+  _neStatistikHtml() {
+    const l = this._neDrucke();
+    if (!l.length) return `<div class="leer-karte dr-karte"><span class="gross-icon">📊</span><strong>Noch keine Drucke</strong><span class="leise">Sobald Drucke aufgezeichnet und verbucht sind, erscheinen hier Zahlen.</span></div>`;
+    const ok = l.filter((x) => x.ergebnis === "ok").length, fehl = l.filter((x) => x.ergebnis === "fehl").length;
+    const stunden = l.reduce((s, x) => s + (x.dauer || 0), 0);
+    const gramm = l.reduce((s, x) => s + (x.g ? x.g.g : 0), 0);
+    const kwh = l.reduce((s, x) => s + (x.g && x.g.kosten && x.g.kosten.kwh ? x.g.kosten.kwh : 0), 0);
+    const quote = ok + fehl ? Math.round((ok / (ok + fehl)) * 100) : null;
+    const kachel = (w, t, k = "") => `<div class="stat ${k}"><strong>${w}</strong><span>${t}</span></div>`;
+    // Fehlerquote je Material und je Rolle
+    const gruppe = (schl) => {
+      const m = {};
+      for (const x of l) { const k = schl(x); if (!k || !(x.ergebnis === "ok" || x.ergebnis === "fehl")) continue; (m[k] = m[k] || { ok: 0, fehl: 0 })[x.ergebnis]++; }
+      return Object.entries(m).map(([k, v]) => ({ k, ...v, n: v.ok + v.fehl, q: v.fehl / (v.ok + v.fehl) })).sort((a, b) => b.q - a.q || b.n - a.n);
+    };
+    const balken = (zeilen, name) => zeilen.length ? `<div class="ne-balken-liste">${zeilen.slice(0, 8).map((z) => `<div class="ne-balken-zeile"><span>${esc(name(z.k))}</span>
+      <div class="ne-balken"><span style="width:${Math.max(2, Math.round(z.q * 100))}%" class="${z.q >= 0.3 ? "rot" : z.q >= 0.1 ? "amber" : ""}"></span></div><small>${Math.round(z.q * 100)} % · ${z.fehl}/${z.n}</small></div>`).join("")}</div>`
+      : `<p class="leise klein">Noch keine verbuchten Drucke.</p>`;
+    const rollenName = (id) => { const r = this._daten.rollen.find((x) => x.id === id); return r ? r.name : "gelöschte Rolle"; };
+    // Wann scheitern Drucke: Phase und Tageszeit
+    const fehlL = l.filter((x) => x.ergebnis === "fehl");
+    const phasen = FEHL_FRAGEN.wann.map((w) => ({ name: w.name, n: fehlL.filter((x) => x.wann === w.id).length }));
+    const maxP = Math.max(1, ...phasen.map((p) => p.n));
+    const tz = NE_TAGESZEIT.map(([name, von, bis]) => {
+      const imFenster = l.filter((x) => { if (!x.d.start || !(x.ergebnis === "ok" || x.ergebnis === "fehl")) return false; const h = new Date(x.d.start).getHours(); return h >= von && h < bis; });
+      const f = imFenster.filter((x) => x.ergebnis === "fehl").length;
+      return { name, n: imFenster.length, f, q: imFenster.length ? f / imFenster.length : 0 };
+    });
+    return `<section class="stats">
+        ${kachel(l.length, "Drucke")}${kachel(quote == null ? "–" : `${quote} %`, "geglückt", quote != null && quote < 80 ? "amber" : "")}
+        ${kachel(fehl, "Fehldrucke", fehl ? "rot" : "")}${kachel(`${zahl(stunden, 1)} h`, "Druckzeit")}
+        ${kachel(`${zahl(gramm / 1000, 2)} kg`, "verbraucht")}${kachel(`${zahl(kwh, 1)} kWh`, "Strom")}</section>
+      <div class="ws-zwei oben-abstand">
+        <div class="dr-karte"><h3 class="dr-titel">Fehlerquote je Material</h3>${balken(gruppe((x) => x.material), (k) => k)}
+          <h3>Fehlerquote je Rolle</h3>${balken(gruppe((x) => x.g && x.g.rolle), rollenName)}</div>
+        <div class="dr-karte"><h3 class="dr-titel">Wann Drucke scheitern</h3>
+          ${fehlL.length ? `<div class="ne-phasen">${phasen.map((p) => `<div class="ne-phase"><div class="ne-phase-bahn"><span style="height:${(p.n / maxP) * 100}%"></span></div><strong>${p.n}</strong><small>${esc(p.name)}</small></div>`).join("")}</div>`
+            : `<p class="leise klein">Noch keine Fehldrucke verbucht.</p>`}
+          <h3>Nach Tageszeit (Druckstart)</h3>
+          <div class="info-liste">${tz.map((t) => `<div class="info-zeile"><span>${t.name}</span><strong>${t.n ? `${t.n} ${t.n === 1 ? "Druck" : "Drucke"} · ${Math.round(t.q * 100)} % Fehldrucke` : "–"}</strong></div>`).join("")}</div>
+          ${this._neErkenntnisse(gruppe((x) => x.material), phasen, tz)}</div></div>`;
+  },
+  // Kurze Sätze aus den Zahlen, nur wenn genug Daten da sind
+  _neErkenntnisse(mats, phasen, tz) {
+    const s = [];
+    const schlecht = mats.find((m) => m.n >= 3 && m.q >= 0.25);
+    if (schlecht) s.push(`${schlecht.k} scheitert auffällig oft (${Math.round(schlecht.q * 100)} %). Ein Blick in Hilfe › Fehlerbilder und eine Kalibrierung lohnen sich.`);
+    const p = phasen.slice().sort((a, b) => b.n - a.n)[0];
+    if (p && p.n >= 2) s.push(`Die meisten Fehldrucke passieren „${p.name}“. ${FEHL_FRAGEN.wann.find((w) => w.name === p.name).hinweis}`);
+    const t = tz.filter((x) => x.n >= 3).sort((a, b) => b.q - a.q)[0];
+    if (t && t.q >= 0.3) s.push(`Drucke, die ${t.name === "Nacht" ? "nachts" : `am ${t.name}`} starten, scheitern öfter. Vielleicht kühlt der Raum ab oder niemand schaut beim ersten Layer zu.`);
+    return s.length ? `<div class="hinweis mint oben-abstand">💡 ${s.map(esc).join("<br>💡 ")}</div>` : "";
+  },
+
+  // ---- Schätzung gegen Waage ----
+  _neAbgleichHtml() {
+    const n = this._ne, d = this._daten;
+    const rollen = this._neRollen();
+    const r = this._neRolle();
+    const korr = d.einstellungen.korrektur || {};
+    const verlauf = (d.abgleich || []).slice(-8).reverse();
+    if (!r) return `<div class="hinweis amber">Wiege zuerst eine Rolle (Rolle öffnen › Rest), dann kann hier verglichen werden.</div>`;
+    const seit = this._neGebuchtSeit(r);
+    const brutto = n.abWert != null ? n.abWert : Math.round((r.rest_g || 0) + this._neSpuleG(r));
+    const netto = brutto - this._neSpuleG(r);
+    const echt = r.rest_g + seit.g - netto;   // tatsächlich verbraucht seit dem letzten Wiegen
+    const faktor = seit.druck_g > 0 ? (echt - seit.fix_g) / seit.druck_g : null;
+    return `<div class="ws-zwei">
+      <div class="dr-karte"><h3 class="dr-titel">Rolle nachwiegen</h3>
+        <p class="leise klein">Leg die Rolle mit Spule auf die Waage. Der Vergleich zeigt, ob die Gewichte aus dem Slicer zu deinem Verbrauch passen, und lernt daraus einen Korrekturfaktor je Material.</p>
+        <label class="auswahl breit-auswahl"><span>Rolle</span><select data-ne="rolle">${rollen.map((x) => `<option value="${esc(x.id)}" ${x.id === r.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.hersteller)}</option>`).join("")}</select></label>
+        <div class="mod-regler"><div class="r-kopf"><span>Waage zeigt (mit Spule)</span><strong id="ne-brutto">${zahl(brutto)} g</strong></div>
+          <div class="regler-zeile"><button class="rund" data-aktion="ne-schritt" data-d="-1">−1</button><input type="range" min="0" max="${Math.max(1500, (r.nenn_g || 1000) + 400)}" step="1" value="${brutto}" data-ne="brutto"><button class="rund" data-aktion="ne-schritt" data-d="1">+1</button></div></div>
+        <div id="ne-ergebnis">${this._neAbgleichErgebnis(r, seit, netto, echt, faktor)}</div>
+        <button class="knopf breit oben-abstand" data-aktion="ne-abgleich" ${seit.n ? "" : "disabled"}>Gewicht übernehmen und Faktor lernen</button>
+        ${seit.n ? "" : `<p class="leise klein">Seit dem letzten Wiegen wurde nichts von dieser Rolle verbucht, es gibt noch nichts zu vergleichen.</p>`}</div>
+      <div class="dr-karte"><h3 class="dr-titel">Korrekturfaktoren</h3>
+        <p class="leise klein">Damit wird das Slicer-Gewicht beim Verbuchen multipliziert. 1,00 = Slicer stimmt genau.</p>
+        <div class="info-liste">${[...new Set(d.rollen.map((x) => x.material))].map((m) => `<div class="info-zeile"><span>${esc(m)}</span><strong>${korr[m] ? zahl(korr[m], 3) : "1,000"}</strong></div>`).join("")}</div>
+        ${Object.keys(korr).length ? `<button class="knopf leise breit oben-abstand" data-aktion="ne-korr-weg">Faktoren zurücksetzen</button>` : ""}
+        ${verlauf.length ? `<h3>Letzte Abgleiche</h3><div class="info-liste">${verlauf.map((v) => `<div class="info-zeile"><span>${esc(v.name)}<small class="norm">${new Date(v.am).toLocaleDateString("de-DE")} · gebucht ${zahl(v.gebucht, 1)} g, echt ${zahl(v.echt, 1)} g</small></span><strong class="${Math.abs(v.faktor - 1) > 0.1 ? "amber" : ""}">× ${zahl(v.faktor, 3)}</strong></div>`).join("")}</div>` : ""}</div></div>`;
+  },
+  _neAbgleichErgebnis(r, seit, netto, echt, faktor) {
+    const abw = seit.g ? ((echt - seit.g) / seit.g) * 100 : 0;
+    return `<div class="info-liste oben-abstand">
+      <div class="info-zeile"><span>Zuletzt gewogen</span><strong>${r.gewogen_am ? new Date(r.gewogen_am).toLocaleDateString("de-DE") : "–"}</strong></div>
+      <div class="info-zeile"><span>Seitdem verbucht</span><strong>${seit.n} Drucke · ${zahl(seit.g, 1)} g</strong></div>
+      <div class="info-zeile"><span>Laut Waage verbraucht</span><strong class="${Math.abs(abw) > 10 ? "amber" : ""}">${zahl(echt, 1)} g${seit.g ? ` (${abw >= 0 ? "+" : ""}${zahl(abw)} %)` : ""}</strong></div>
+      <div class="info-zeile"><span>Rest neu</span><strong>${zahl(Math.max(0, netto))} g</strong></div>
+      <div class="info-zeile"><span>Faktor aus diesem Abgleich</span><strong>${faktor != null && faktor > 0 ? `× ${zahl(faktor, 3)}` : "–"}</strong></div></div>
+      ${echt < 0 ? `<div class="hinweis amber">Die Rolle wiegt mehr als erwartet. Stimmt das Spulengewicht?</div>` : ""}`;
+  },
+  // Nur gewogene Rollen lassen sich vergleichen
+  _neRollen() { return this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => a.name.localeCompare(b.name, "de")); },
+  _neRolle() {
+    const l = this._neRollen(), n = this._neZustand();
+    return l.find((x) => x.id === n.abRolle) || l.find((x) => x.id === this._daten.letzte_rolle) || l[0] || null;
+  },
+  _neSpuleG(r) {
+    const s = r.spule && this._daten.spulen.find((x) => x.id === r.spule);
+    return s ? s.g : r.spule_g != null ? r.spule_g : 0;
+  },
+  _neGebuchtSeit(r) {
+    const ab = r.gewogen_am || "";
+    let g = 0, druck_g = 0, fix_g = 0, n = 0;
+    for (const x of Object.values(this._daten.drucke || {})) {
+      const b = x.gebucht;
+      if (b && b.rolle === r.id && b.am > ab) { g += b.g; druck_g += b.druck_g || 0; fix_g += b.fix_g || 0; n++; }
+      if (b && b.wechsel && b.wechsel.rolle === r.id && b.am > ab) { g += b.wechsel.g; fix_g += b.wechsel.g; }
+    }
+    return { g, druck_g, fix_g, n };
+  },
+  _neAbgleichen() {
+    const n = this._ne, d = this._daten;
+    const r = this._neRolle();
+    if (!r || n.abWert == null) { this._toast("Bitte zuerst das Gewicht von der Waage einstellen."); return; }
+    const seit = this._neGebuchtSeit(r);
+    const netto = Math.max(0, n.abWert - this._neSpuleG(r));
+    const echt = r.rest_g + seit.g - netto;
+    let faktor = seit.druck_g > 0 ? (echt - seit.fix_g) / seit.druck_g : null;
+    if (faktor != null && (faktor < 0.5 || faktor > 1.6)) {
+      this._toast(`Faktor ${zahl(faktor, 2)} ist unplausibel (Spulengewicht oder Waage prüfen). Gewicht übernommen, Faktor nicht gelernt.`);
+      faktor = null;
+    }
+    d.abgleich = [...(d.abgleich || []), { am: new Date().toISOString(), rolle: r.id, name: r.name, material: r.material, gebucht: seit.g, echt, faktor: faktor || 1 }].slice(-60);
+    if (faktor != null) {
+      // Mittel der letzten Abgleiche dieses Materials, vorsichtig begrenzt
+      const f = d.abgleich.filter((v) => v.material === r.material && v.faktor).slice(-5).map((v) => v.faktor);
+      d.einstellungen.korrektur = { ...d.einstellungen.korrektur, [r.material]: Math.min(1.3, Math.max(0.7, f.reduce((s, v) => s + v, 0) / f.length)) };
+    }
+    r.rest_g = netto;
+    r.gewogen_am = new Date().toISOString();
+    n.abWert = null;
+    this._speichern();
+    if (faktor != null) this._toast(`${r.name}: ${zahl(netto)} g übernommen, Faktor für ${r.material} jetzt ${zahl(d.einstellungen.korrektur[r.material], 3)}.`);
+  },
+
+  // ---- Eigene Werte gegen Vorschläge ----
+  _neWerteHtml() {
+    const rollen = this._daten.rollen.filter((r) => r.eigen && Object.keys(r.eigen).length);
+    if (!rollen.length) return `<div class="leer-karte dr-karte"><span class="gross-icon">🎛️</span><strong>Noch keine eigenen Werte</strong><span class="leise">Wenn du nach einem Test Werte anpasst oder kalibrierst, siehst du hier, wo du vom Vorschlag abweichst.</span></div>`;
+    const mats = [...new Set(rollen.map((r) => r.material))];
+    const zeilen = mats.map((m) => {
+      const rs = rollen.filter((r) => r.material === m);
+      const felder = NE_VERGLEICH.map((k) => {
+        const f = FELDER.find((x) => x.k === k);
+        const diffs = rs.filter((r) => r.eigen[k] != null && r.vorschlag && r.vorschlag[k] != null).map((r) => r.eigen[k] - r.vorschlag[k]);
+        if (!diffs.length) return null;
+        const mittel = diffs.reduce((s, v) => s + v, 0) / diffs.length;
+        return Math.abs(mittel) < f.step / 2 ? null : { f, mittel, n: diffs.length };
+      }).filter(Boolean);
+      return { m, n: rs.length, felder };
+    });
+    return `<p class="leise">Wo deine eingestellten Werte im Schnitt vom Vorschlag abweichen. Weichst du immer in dieselbe Richtung ab, sind die Vorschläge für neue Rollen zu korrigieren.</p>
+      <div class="ws-raster">${zeilen.map((z) => `<div class="dr-karte"><h3 class="dr-titel">${esc(z.m)} · ${z.n} Rollen mit eigenen Werten</h3>
+        ${z.felder.length ? `<div class="info-liste">${z.felder.map((x) => `<div class="info-zeile"><span>${esc(x.f.name)}<small class="norm">bei ${x.n} Rollen</small></span><strong class="${x.mittel > 0 ? "amber" : "mint"}">${x.mittel > 0 ? "+" : ""}${zahl(x.mittel, x.f.nk || 0)} ${esc(x.f.e)}</strong></div>`).join("")}</div>`
+          : `<p class="leise klein">Deine Werte entsprechen den Vorschlägen.</p>`}</div>`).join("")}</div>
+      <h3>Je Rolle</h3>
+      <div class="info-liste">${rollen.map((r) => {
+        const anders = Object.keys(r.eigen).filter((k) => r.vorschlag && r.vorschlag[k] != null && r.eigen[k] !== r.vorschlag[k]);
+        return `<button class="info-zeile zeilen-knopf" data-aktion="oeffnen-filament" data-id="${esc(r.id)}"><span>${esc(r.name)}<small class="norm">${esc(r.hersteller)}${r.kalibriert ? " · kalibriert" : ""}</small></span><strong>${anders.length ? `${anders.length} Werte geändert` : "wie Vorschlag"}</strong></button>`;
+      }).join("")}</div>`;
+  },
+
+  // ---- Gesundheit ----
+  _neGesundheitHtml() {
+    const n = this._ne, w = (k) => this._drW(k), z = (k) => this._drZ(k);
+    const wlan = z("wlan") != null ? z("wlan") : (w("wlan") ? parseInt(w("wlan"), 10) : null);
+    const zeile = (name, wert, gut, text) => `<div class="ne-gesund ${gut === false ? "schlecht" : gut ? "gut" : ""}"><span class="punkt">${gut === false ? "!" : gut ? "✓" : "·"}</span><div><strong>${esc(name)}</strong><small class="leise">${esc(text)}</small></div><b>${esc(wert)}</b></div>`;
+    const h = n.heiz;
+    const mittel = (l) => (l.length ? l.reduce((s, x) => s + x.s, 0) / l.length : null);
+    const heizKarte = (titel, l, normal) => {
+      if (!l || !l.length) return `<div class="ne-heiz"><strong>${titel}</strong><small class="leise">Keine Aufheizvorgänge im Zeitraum gefunden.</small></div>`;
+      const m = mittel(l), alt = mittel(l.slice(0, Math.ceil(l.length / 2))), neu = mittel(l.slice(Math.floor(l.length / 2)));
+      const trend = l.length >= 4 && neu > alt * 1.2;
+      const maxS = Math.max(...l.map((x) => x.s));
+      return `<div class="ne-heiz"><strong>${titel}</strong><span class="ne-heiz-wert ${m > normal * 1.5 ? "amber" : ""}">${zahl(m)} s</span>
+        <div class="ne-mini-saeulen">${l.slice(-20).map((x) => `<span title="${new Date(x.am).toLocaleString("de-DE")}: ${zahl(x.s)} s auf ${zahl(x.soll)} °C" style="height:${Math.max(8, (x.s / maxS) * 100)}%"></span>`).join("")}</div>
+        <small class="leise">${l.length} Vorgänge · normal etwa ${normal} s${trend ? " · <b class='amber'>wird langsamer</b>" : ""}</small></div>`;
+    };
+    return `<div class="ws-zwei">
+      <div class="dr-karte"><h3 class="dr-titel">Zustand jetzt</h3>
+        ${zeile("Verbindung", w("online") === "on" ? "online" : w("online") === "off" ? "offline" : "–", w("online") === "on" ? true : w("online") === "off" ? null : null, "Drucker meldet sich bei Home Assistant")}
+        ${zeile("WLAN", wlan != null ? `${wlan} dBm` : "–", wlan == null ? null : wlan > -70, "Besser als −70 dBm ist gut, unter −80 dBm brechen Verbindungen ab")}
+        ${zeile("HMS-Meldungen", w("hms") === "on" ? "aktiv" : w("hms") === "off" ? "keine" : "–", w("hms") === "on" ? false : w("hms") === "off" ? true : null, "Fehlercodes des Druckers selbst")}
+        ${zeile("Firmware", w("firmware") === "on" ? "Update da" : w("firmware") === "off" ? "aktuell" : "–", w("firmware") === "on" ? false : w("firmware") === "off" ? true : null, "Updates bringen oft bessere Kalibrierung")}
+        ${zeile("Betriebsstunden", z("stunden") != null ? `${zahl(z("stunden"))} h` : "–", null, "Grundlage für den Wartungsplan")}
+        ${zeile("Wartung fällig", `${this._wsWartung().filter((x) => x.faellig).length}`, this._wsWartung().some((x) => x.faellig) ? false : true, "Siehe Werkstatt › Wartung")}</div>
+      <div class="dr-karte"><h3 class="dr-titel">Aufheizzeiten</h3>
+        <p class="leise klein">Wird das Aufheizen mit der Zeit langsamer, kann das auf ein schwächelndes Heizelement, einen losen Thermistor oder eine fehlende Silikonsocke hindeuten.</p>
+        ${!h ? `<button class="knopf breit" data-aktion="ne-heiz">Letzte 4 Tage auswerten</button>` : h.laedt ? `<div class="mod-laden-klein"><span class="dreher klein"></span> Lese Verlauf aus Home Assistant …</div>`
+          : h.fehler ? `<div class="hinweis amber">${esc(h.fehler)}</div><button class="knopf leise breit" data-aktion="ne-heiz">Nochmal versuchen</button>`
+          : `${heizKarte("Düse", h.duese, 90)}${heizKarte("Druckbett", h.bett, 120)}<button class="knopf leise breit oben-abstand" data-aktion="ne-heiz">Neu auswerten</button>`}</div></div>`;
+  },
+  async _neHeizLaden() {
+    const n = this._ne;
+    n.heiz = { laedt: true };
+    this._zeichnen();
+    const ids = ["duese", "duese_ziel", "bett", "bett_ziel"].map((k) => this._drId(k));
+    if (ids.some((x) => !x)) { n.heiz = { fehler: "Temperatursensoren des Druckers nicht gefunden." }; this._zeichnen(); return; }
+    try {
+      const start = new Date(Date.now() - 4 * 86400000).toISOString();
+      const r = await Promise.race([
+        this._hass.callWS({ type: "history/history_during_period", start_time: start, entity_ids: ids, minimal_response: true, no_attributes: true }),
+        new Promise((_, nein) => setTimeout(() => nein(new Error("Home Assistant hat nicht rechtzeitig geantwortet.")), 30000)),
+      ]);
+      const l = (id) => (r && r[id]) || [];
+      n.heiz = { duese: aufheizZeiten(l(ids[1]), l(ids[0]), 150), bett: aufheizZeiten(l(ids[3]), l(ids[2]), 40) };
+    } catch (e) {
+      n.heiz = { fehler: `Verlauf konnte nicht gelesen werden: ${e.message || e}` };
+    }
+    if (this._ansicht === "nerd") this._zeichnen();
+  },
+
+  // ---- Ereignisse ----
+  _neKlick(a, el) {
+    const n = this._neZustand();
+    switch (a) {
+      case "ne-tab": n.tab = el.dataset.id; break;
+      case "ne-schritt": {
+        const i = this.shadowRoot.querySelector('[data-ne="brutto"]');
+        if (!i) return;
+        i.value = Number(i.value) + Number(el.dataset.d);
+        this._neEingabe(i);
+        return;
+      }
+      case "ne-abgleich": this._neAbgleichen(); break;
+      case "ne-korr-weg": this._daten.einstellungen.korrektur = {}; this._speichern(); this._toast("Korrekturfaktoren zurückgesetzt."); return;
+      case "ne-heiz": this._neHeizLaden(); return;
+      default: return;
+    }
+    this._zeichnen();
+  },
+  _neEingabe(t) {
+    const k = t.dataset && t.dataset.ne;
+    if (!k) return false;
+    if (k === "brutto") {
+      const n = this._ne;
+      n.abWert = Number(t.value);
+      const r = this._neRolle();
+      if (!r) return true;
+      const s = this.shadowRoot.getElementById("ne-brutto"); if (s) s.textContent = `${zahl(n.abWert)} g`;
+      const seit = this._neGebuchtSeit(r), netto = n.abWert - this._neSpuleG(r), echt = r.rest_g + seit.g - netto;
+      const box = this.shadowRoot.getElementById("ne-ergebnis");
+      if (box) box.innerHTML = this._neAbgleichErgebnis(r, seit, netto, echt, seit.druck_g > 0 ? (echt - seit.fix_g) / seit.druck_g : null);
+    }
+    return true;
+  },
+  _neAenderung(t) {
+    const k = t.dataset && t.dataset.ne;
+    if (!k) return false;
+    if (k === "rolle") { this._ne.abRolle = t.value; this._ne.abWert = null; this._zeichnen(); }
+    return true;
+  },
+};
+// ---------------------------------------------------------------------------
+// Querschnitt: globale Suche mit Querverweisen, Sicherung (wöchentliche
+// Erinnerung, Herunterladen, Einspielen), Bambu-Studio-Profil, „Mehr“-Menü am Handy
+// ---------------------------------------------------------------------------
+
+const SICHERUNG_TAGE = 7;
+const IMPORT_MAX_BYTES = 20 * 1048576;
+
+// Filament-Profil für Bambu Studio (Datei › Importieren › Konfiguration importieren)
+function bambuProfil(r) {
+  const w = (k) => wert(r, k).v;
+  const s = (v) => [v == null ? "" : String(v)];
+  const platte = String(w("platte") || PLATTE_STANDARD);
+  const bett = w("bett");
+  const p = {
+    type: "filament", name: `${r.hersteller} ${r.name} (Werkstatt)`, from: "User", instantiation: "true",
+    inherits: `Generic ${["PLA", "PETG", "ABS", "ASA", "TPU", "PC"].includes(r.material) ? r.material : "PLA"} @BBL X1C`,
+    filament_settings_id: [`${r.hersteller} ${r.name} (Werkstatt)`],
+    filament_type: [r.material], filament_vendor: [r.hersteller],
+    default_filament_colour: [r.hex || ""],
+    filament_density: s(materialInfo(r.material).dichte),
+    nozzle_temperature_initial_layer: s(w("duese_erste")), nozzle_temperature: s(w("duese")),
+    fan_min_speed: s(w("luefter_min")), fan_max_speed: s(w("luefter_max")),
+    filament_flow_ratio: s(w("flow")), filament_max_volumetric_speed: s(w("max_vol")),
+    compatible_printers: ["Bambu Lab P1S 0.4 nozzle"],
+  };
+  if (w("k") != null) { p.pressure_advance = s(w("k")); p.enable_pressure_advance = ["1"]; }
+  if (r.preis_kg) p.filament_cost = s(r.preis_kg);
+  // Betttemperatur für die gewählte Platte (die anderen bleiben vom Basisprofil)
+  const plattenKey = /textured|pei/i.test(platte) ? "textured_plate_temp" : /engineer/i.test(platte) ? "eng_plate_temp" : /cool/i.test(platte) ? "cool_plate_temp" : "hot_plate_temp";
+  if (bett != null) { p[plattenKey] = s(bett); p[`${plattenKey}_initial_layer`] = s(bett); }
+  for (const k of Object.keys(p)) if (Array.isArray(p[k]) && p[k].length === 1 && p[k][0] === "") delete p[k];
+  return p;
+}
+
+// Prüft eine eingespielte Sicherung, bevor sie die Daten ersetzt
+function sicherungPruefen(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new Error("Die Datei enthält keine Werkstatt-Daten.");
+  if (!Array.isArray(obj.rollen)) throw new Error("In der Datei fehlen die Filament-Rollen.");
+  if (obj.rollen.length > 2000) throw new Error("Zu viele Rollen, die Datei sieht nicht nach einer Sicherung aus.");
+  const kaputt = obj.rollen.findIndex((r) => !r || typeof r.id !== "string" || typeof r.name !== "string");
+  if (kaputt >= 0) throw new Error(`Rolle Nr. ${kaputt + 1} ist unvollständig (Name oder Kennung fehlt).`);
+  if (new Set(obj.rollen.map((r) => r.id)).size !== obj.rollen.length) throw new Error("Rollen-Kennungen sind doppelt.");
+  if (obj.inventar != null && !Array.isArray(obj.inventar)) throw new Error("Das Inventar in der Datei ist beschädigt.");
+  if (obj.spulen != null && !Array.isArray(obj.spulen)) throw new Error("Die Spulenliste in der Datei ist beschädigt.");
+  if ((obj.version || 1) > DATEN_VERSION) throw new Error("Die Sicherung stammt aus einer neueren Version. Bitte erst die Seite aktualisieren.");
+  return obj;
+}
+
+const ExtrasAnsicht = {
+  // ---- Globale Suche ----
+  _suchTreffer(q) {
+    if (!q || !q.trim()) return [];
+    const d = this._daten, l = [];
+    const add = (gruppe, punkte, x) => { if (punkte > 0) l.push({ gruppe, punkte, ...x }); };
+    for (const r of d.rollen) {
+      add("Filament", suchPunkte(q, `${r.name} ${r.hersteller} ${r.material} ${r.art || ""} ${r.farbe} ${farbfamilie(r)} ${r.farbcode || ""}`),
+        { icon: "🧵", titel: r.name, sub: `${r.hersteller} · ${r.rest_g != null ? `${zahl(r.rest_g)} g` : "nicht gewogen"}${r.achtung ? " · ❗" : ""}`, aktion: "oeffnen-filament", id: r.id, hex: r.hex });
+    }
+    for (const t of d.inventar) {
+      const p = suchPunkte(q, teilText(t).text);
+      add("Inventar", p, { icon: kategorie(t.kat).icon, titel: teilName(t), sub: `${kategorie(t.kat).einzahl} · ${t.menge ?? "?"} Stk${t.fach ? ` · Fach ${t.fach}` : ""}`, aktion: "such-teil", id: t.id,
+        passend: p > 0 ? passendeTeile(t, d.inventar).slice(0, 4) : [] });
+    }
+    if (this._drVerlauf) for (const m of this._wsModelle()) {
+      add("Drucke", suchPunkte(q, m.name), { icon: "🖨️", titel: m.name, sub: `${m.drucke.length}× gedruckt · zuletzt ${m.drucke[0].zeit || "–"}`, aktion: "zum-druck", uid: m.drucke[0].uid });
+    }
+    for (const f of FEHLERBILDER) add("Hilfe", suchPunkte(q, `${f.name} ${f.kurz} ${f.ursachen.join(" ")} fehler`) * 0.9, { icon: "🩺", titel: f.name, sub: f.kurz, aktion: "such-hilfe", tab: "fehler", id: f.id });
+    for (const b of P1S_BEREICHE) add("Hilfe", suchPunkte(q, `${b.name} ${b.text} p1s drucker`) * 0.8, { icon: "🖨️", titel: b.name, sub: "P1S-Zeichnung", aktion: "such-hilfe", tab: "drucker", id: b.id });
+    for (const k of KALIBRIERUNGEN) add("Hilfe", suchPunkte(q, `${k.name} ${k.wozu} kalibrieren kalibrierung`) * 0.85, { icon: k.icon, titel: k.name, sub: "Kalibrierung", aktion: "such-hilfe", tab: "kalibrierung", id: k.id });
+    for (const t of TROCKNEN_TABELLE) add("Hilfe", suchPunkte(q, `${t.m} trocknen trockner feucht`) * 0.8, { icon: "♨️", titel: `${t.m} trocknen`, sub: `${t.temp} °C · ${t.h} h`, aktion: "such-hilfe", tab: "trockner" });
+    for (const a of WARTUNG_AUFGABEN) add("Werkstatt", suchPunkte(q, `${a.name} ${a.text} wartung`) * 0.8, { icon: "🔧", titel: a.name, sub: "Wartung", aktion: "such-werkstatt", tab: "wartung" });
+    for (const n of NAVIGATION) add("Bereiche", suchPunkte(q, n.name) * 1.1, { icon: n.icon, titel: n.name, sub: "Bereich öffnen", aktion: "ansicht", id: n.id });
+    return l.sort((a, b) => b.punkte - a.punkte).slice(0, 40);
+  },
+  _suchErgebnisHtml() {
+    const q = this._sucheQ || "";
+    if (!q.trim()) return `<div class="such-leer leise">Suche nach Filament, Schrauben (z. B. „m3 10“), Drucken, Fehlerbildern oder Wartung. Tippfehler sind okay.</div>`;
+    const l = this._suchTreffer(q);
+    if (!l.length) return `<div class="such-leer leise">Nichts gefunden für „${esc(q)}“.</div>`;
+    const gruppen = [...new Set(l.map((x) => x.gruppe))];
+    let nr = 0;
+    return gruppen.map((g) => `<div class="such-gruppe"><h4>${esc(g)}</h4>${l.filter((x) => x.gruppe === g).slice(0, 8).map((x) => `
+      <button class="such-treffer ${nr++ === 0 ? "erst" : ""}" data-aktion="${x.aktion}" data-id="${esc(x.id || "")}" data-uid="${esc(x.uid || "")}" data-tab="${esc(x.tab || "")}">
+        ${x.hex ? `<span class="farbtupfer" style="background:${esc(x.hex)}"></span>` : `<span class="such-icon">${x.icon}</span>`}
+        <span><strong>${esc(x.titel)}</strong><small class="leise">${esc(x.sub)}</small></span></button>
+      ${x.passend && x.passend.length ? `<div class="such-passend"><span class="leise klein">passt dazu:</span>${x.passend.map((p) => `<button class="chip" data-aktion="such-teil" data-id="${esc(p.id)}">${kategorie(p.kat).icon} ${esc(teilName(p))} · ${p.menge ?? "?"} Stk</button>`).join("")}</div>` : ""}`).join("")}</div>`).join("");
+  },
+  _sucheHtml() {
+    if (!this._sucheOffen) return "";
+    return `<div class="schleier oben such-schleier" data-aktion="such-zu" data-einmal="such-schleier"></div>
+      <div class="such-box" role="dialog" aria-label="Suche" data-einmal="such-box">
+        <div class="such-kopf"><span>🔍</span><input id="global-suche" value="${esc(this._sucheQ || "")}" placeholder="Alles durchsuchen …" autocomplete="off" enterkeyhint="search"><button class="icon-knopf" data-aktion="such-zu" aria-label="Suche schließen">✕</button></div>
+        <div id="such-ergebnisse" class="such-ergebnisse">${this._suchErgebnisHtml()}</div></div>`;
+  },
+  _sucheOeffnen() {
+    this._sucheOffen = true; this._mehrOffen = false;
+    this._zeichnen();
+    const i = this.shadowRoot.getElementById("global-suche");
+    if (i) { i.focus(); i.select(); }
+  },
+
+  // ---- Sicherung ----
+  _sicherungFaellig() {
+    const e = this._daten && this._daten.einstellungen;
+    if (!e || this._ansicht === "system") return false;
+    const seit = tageSeit(e.sicherung_am || e.sicherung_start), spaeter = tageSeit(e.sicherung_spaeter);
+    return (seit == null || seit >= SICHERUNG_TAGE) && (spaeter == null || spaeter >= 2);
+  },
+  _sicherungBalkenHtml() {
+    if (!this._sicherungFaellig() || (this._drVerlauf && this._buOffene().length)) return "";
+    const am = this._daten.einstellungen.sicherung_am;
+    return `<div class="bu-balken blau" data-einmal="sicherung-balken">
+      <span class="bu-text">💾 ${am ? `Die letzte Sicherung ist ${zahl(tageSeit(am))} Tage alt.` : "Es gibt noch keine Sicherung auf deinem Gerät."} Jetzt herunterladen?</span>
+      <span class="bu-knoepfe"><button class="knopf klein-knopf" data-aktion="sich-laden">Herunterladen</button><button class="knopf leise klein-knopf" data-aktion="sich-spaeter">Später</button></span></div>`;
+  },
+  _sicherungLaden() {
+    const datum = new Date().toISOString().slice(0, 10);
+    const ok = this._dateiGeben(`filament-werkstatt-${datum}.json`, JSON.stringify(this._daten, null, 1), "application/json");
+    if (!ok) return;
+    this._daten.einstellungen.sicherung_am = new Date().toISOString();
+    this._speichern();
+    this._toast("Sicherung heruntergeladen. Bewahre sie z. B. in der Cloud auf.");
+  },
+  _dateiGeben(name, text, typ) {
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: typ }));
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      this.shadowRoot.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return true;
+    } catch (e) {
+      this._toast(`Herunterladen geht hier nicht (${e.message || e}). Öffne die Seite im Browser.`);
+      return false;
+    }
+  },
+  async _sicherungEinlesen(datei) {
+    try {
+      if (!datei) return;
+      if (datei.size > IMPORT_MAX_BYTES) throw new Error("Die Datei ist zu groß für eine Sicherung.");
+      let obj;
+      try { obj = JSON.parse(await datei.text()); } catch (e) { throw new Error("Die Datei ist kein gültiges JSON."); }
+      this._import = { daten: sicherungPruefen(obj), name: datei.name };
+      this._dialog = "sich-import";
+    } catch (e) {
+      this._toast(e.message || String(e));
+      return;
+    }
+    this._zeichnen();
+  },
+  _importDialogHtml() {
+    const d = this._import.daten;
+    return `<h2>Sicherung einspielen?</h2>
+      <p class="leise">${esc(this._import.name)}${d.geaendert ? `, Stand ${new Date(d.geaendert).toLocaleString("de-DE")}` : ""}</p>
+      <div class="info-liste"><div class="info-zeile"><span>Rollen</span><strong>${d.rollen.length}</strong></div>
+        <div class="info-zeile"><span>Inventar-Teile</span><strong>${(d.inventar || []).length}</strong></div>
+        <div class="info-zeile"><span>Drucke mit Buchung</span><strong>${Object.values(d.drucke || {}).filter((x) => x.gebucht).length}</strong></div></div>
+      <div class="hinweis amber oben-abstand">Alle aktuellen Daten werden ersetzt. Der jetzige Stand wird vorher in Home Assistant zwischengespeichert.</div>
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf amber" data-aktion="sich-import-ok">Ersetzen</button></div>`;
+  },
+  async _importAusfuehren() {
+    const neu = this._import && this._import.daten;
+    if (!neu) return;
+    try {
+      await this._hass.callWS({ type: "frontend/set_user_data", key: SICHERUNG_KEY, value: this._daten });
+    } catch (e) {
+      this._toast("Zwischenspeichern fehlgeschlagen, Einspielen abgebrochen.");
+      return;
+    }
+    this._daten = migrieren(JSON.parse(JSON.stringify(neu)));
+    this._import = null; this._dialog = null; this._modus = null;
+    await this._speichernJetzt(true);
+    this._toast(`Sicherung eingespielt: ${this._daten.rollen.length} Rollen.`);
+  },
+  _sicherungKarteHtml() {
+    const e = this._daten ? this._daten.einstellungen : null;
+    return `<div class="karte system oben-abstand"><h2>Sicherung</h2>
+      <p class="leise">Die Daten liegen in Home Assistant und sind damit in dessen Backups. Zusätzlich kannst du eine Datei herunterladen und später wieder einspielen.</p>
+      ${e ? `<p class="klein">Letzte Sicherung: ${e.sicherung_am ? new Date(e.sicherung_am).toLocaleString("de-DE") : "noch keine"}</p>` : ""}
+      <div class="knopf-reihe"><button class="knopf" data-aktion="sich-laden" ${e ? "" : "disabled"}>💾 Herunterladen</button>
+        <label class="knopf leise datei-knopf">📂 Einspielen<input type="file" accept=".json,application/json" data-sys="import" hidden></label></div></div>`;
+  },
+
+  // ---- Hilfen ----
+  _toastMitKnopf(text, knopf, aktion) {
+    this._toastKnopf = { knopf, aktion };
+    this._toastText = text;
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => this._toastWeg(), 5000);
+    this._zeichnen();
+  },
+  async _kopieren(text, meldung) {
+    try {
+      await navigator.clipboard.writeText(text);
+      this._toast(meldung);
+    } catch (e) {
+      // Ohne Zwischenablage-Recht (z. B. http): Text zum Markieren anzeigen
+      this._kopierText = text;
+      this._dialog = "kopieren";
+      this._zeichnen();
+    }
+  },
+
+  _mehrHtml() {
+    if (!this._mehrOffen) return "";
+    return `<div class="schleier mehr-schleier" data-aktion="mehr-zu" data-einmal="mehr-schleier"></div>
+      <div class="mehr-sheet" data-einmal="mehr-sheet"><div class="griff"></div>
+        <button class="mehr-punkt suche-punkt" data-aktion="such-auf"><span>🔍</span><strong>Suchen</strong></button>
+        ${NAVIGATION.filter((n) => !NAV_UNTEN.includes(n.id)).map((n) => `<button class="mehr-punkt ${this._ansicht === n.id ? "aktiv" : ""}" data-aktion="ansicht" data-id="${n.id}"><span>${n.icon}</span><strong>${n.name}</strong>${n.id === "werkstatt" && this._daten && this._wsWartung().some((x) => x.faellig) ? `<span class="zahl-punkt amber-punkt">!</span>` : ""}</button>`).join("")}</div>`;
+  },
+
+  _exKlick(a, el) {
+    switch (a) {
+      case "such-auf": this._sucheOeffnen(); return true;
+      case "such-zu": this._sucheOffen = false; break;
+      case "such-teil": this._sucheOffen = false; this._mehrOffen = false; this._modus = null; this._ansicht = "inventar"; this._invKlick("inv-oeffnen", el); return true;
+      case "such-hilfe": {
+        this._sucheOffen = false; this._ansicht = "hilfe";
+        const h = this._hiZustand(); h.tab = el.dataset.tab;
+        if (el.dataset.id) { if (h.tab === "fehler") h.fehler = el.dataset.id; else if (h.tab === "drucker") h.p1s = el.dataset.id; else if (h.tab === "kalibrierung") h.kal = el.dataset.id; }
+        break;
+      }
+      case "such-werkstatt": this._sucheOffen = false; this._ansicht = "werkstatt"; this._wsZustand().tab = el.dataset.tab; break;
+      case "mehr": this._mehrOffen = !this._mehrOffen; break;
+      case "mehr-zu": this._mehrOffen = false; break;
+      case "sich-laden": this._sicherungLaden(); return true;
+      case "sich-spaeter": this._daten.einstellungen.sicherung_spaeter = new Date().toISOString(); this._speichern(); break;
+      case "sich-import-ok": this._importAusfuehren(); return true;
+      case "profil-export": {
+        const r = this._rolle();
+        if (!r) return true;
+        const name = `${r.hersteller}-${r.name}`.replace(/[^a-z0-9äöüß]+/gi, "_");
+        if (this._dateiGeben(`${name}.json`, JSON.stringify(bambuProfil(r), null, 2), "application/json")) this._toast("Profil gespeichert. In Bambu Studio: Datei › Importieren › Konfiguration importieren.");
+        return true;
+      }
+      case "kon-laden": this._konflikt = null; this._dialog = null; this._laden(); return true;
+      case "kon-behalten": this._konflikt = null; this._dialog = null; this._speichernJetzt(true); break;
+      case "toast-knopf": { const k = this._toastKnopf; this._toastKnopf = null; if (k && k.aktion.startsWith("ws-")) this._wsKlick(k.aktion, { dataset: {} }); return true; }
+      default: return false;
+    }
+    this._zeichnen();
+    return true;
+  },
+};
+// ---------------------------------------------------------------------------
 // 3D-Modelle: STL lesen, Maße/Volumen, Schnitte, Löcher, Schichten, G-Code
 // (alles ohne fremde Bibliotheken, läuft offline auf dem Pi)
 // ---------------------------------------------------------------------------
@@ -2765,6 +4124,7 @@ function stlLesen(puffer) {
   if (puffer.byteLength >= 84) {
     const n = dv.getUint32(80, true);
     if (84 + n * 50 === puffer.byteLength) {
+      if (typeof MOD_MAX_DREIECKE !== "undefined" && n > MOD_MAX_DREIECKE) throw new Error(`Das Modell hat ${n.toLocaleString("de-DE")} Dreiecke, das schafft der Browser nicht flüssig. Bitte im Slicer vereinfachen.`);
       const v = new Float32Array(n * 9);
       for (let i = 0; i < n; i++) {
         const o = 84 + i * 50 + 12;
@@ -3604,6 +4964,9 @@ const STUETZEN = [
 ];
 const SCHICHT_BEREICH = { 0.2: [0.06, 0.14, 0.1], 0.4: [0.08, 0.28, 0.2], 0.6: [0.18, 0.42, 0.3], 0.8: [0.24, 0.56, 0.4] };
 
+const MOD_MAX_BYTES = 200 * 1048576;      // größere Dateien bringen Handys zum Absturz
+const MOD_MAX_DREIECKE = 3000000;
+
 const ModellAnsicht = {
   _modHtml() {
     this._modEinrichten();
@@ -3691,7 +5054,8 @@ const ModellAnsicht = {
         <div class="info-zeile"><span>Volumen</span><strong>${zahl(m.kenn.volumen / 1000, 1)} cm³</strong></div>
         <div class="info-zeile"><span>Oberfläche</span><strong>${zahl(m.kenn.flaeche / 100, 0)} cm²</strong></div>
         <div class="info-zeile"><span>Dreiecke</span><strong>${zahl(m.kenn.dreiecke)}</strong></div>
-      </div>`;
+      </div>
+      <button class="knopf breit oben-abstand" data-aktion="ws-aus-modell">＋ In die Warteschlange</button>`;
   },
 
   _modGewichtHtml(gew, rest, rolle) {
@@ -3730,7 +5094,7 @@ const ModellAnsicht = {
         <strong>${i.gramm ? `${zahl(i.gramm, 1)} g` : "Gewicht unbekannt"}</strong>
         ${rest == null ? `<span class="klein leise">${i.gramm ? "Rolle nicht gewogen, Rest unbekannt." : "Im G-Code steht kein Gewicht."}</span>` : rest >= 0 ? `<span class="klein">✓ Reicht. Danach bleiben etwa ${zahl(rest)} g übrig.</span>` : `<span class="klein">✕ Reicht nicht, es fehlen etwa ${zahl(-rest)} g.</span>`}
       </div>
-      <button class="knopf leise breit oben-abstand" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button>`;
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button><button class="knopf" data-aktion="ws-aus-modell">＋ Warteschlange</button></div>`;
   },
 
   // ---- Löcher ----
@@ -3895,8 +5259,13 @@ const ModellAnsicht = {
   _modRolle() { const m = this._mod; return this._daten.rollen.find((r) => r.id === (m && m.rolleId)) || null; },
 
   async _modDatei(datei, name) {
-    const puffer = datei instanceof ArrayBuffer ? datei : await datei.arrayBuffer();
     name = name || datei.name;
+    const groesse = datei instanceof ArrayBuffer ? datei.byteLength : datei.size;
+    if (groesse > MOD_MAX_BYTES) { this._toast(`Die Datei ist mit ${zahl(groesse / 1048576)} MB zu groß (höchstens ${MOD_MAX_BYTES / 1048576} MB).`); return; }
+    if (!groesse) { this._toast("Die Datei ist leer."); return; }
+    let puffer;
+    try { puffer = datei instanceof ArrayBuffer ? datei : await datei.arrayBuffer(); }
+    catch (e) { this._toast("Die Datei konnte nicht gelesen werden."); return; }
     this._mod = { ...this._modStandard(), name, laedt: "Lese Datei …" };
     this._zeichnen();
     await new Promise((r) => setTimeout(r, 30));
@@ -3921,7 +5290,11 @@ const ModellAnsicht = {
   },
 
   async _modStl(puffer, name) {
-    const v = aufsBett(stlLesen(puffer));
+    const roh = stlLesen(puffer);
+    if (!roh.length) throw new Error("In der STL wurden keine Dreiecke gefunden.");
+    if (roh.length / 9 > MOD_MAX_DREIECKE) throw new Error(`Das Modell hat ${zahl(roh.length / 9)} Dreiecke, mehr als ${zahl(MOD_MAX_DREIECKE)} schafft der Browser nicht flüssig. Bitte im Slicer vereinfachen.`);
+    if (roh.some((x) => !Number.isFinite(x))) throw new Error("Die STL enthält ungültige Koordinaten (beschädigte Datei).");
+    const v = aufsBett(roh);
     const m = this._mod;
     Object.assign(m, { art: "stl", v, laedt: null });
     this._modGeometrieNeu();
@@ -4393,7 +5766,7 @@ const ModellAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -4407,10 +5780,14 @@ const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
   { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️" },
-  { id: "modelle", name: "3D-Modelle", icon: "🧊" },
-  { id: "hilfe", name: "Hilfe", icon: "💡", bald: true },
+  { id: "modelle", name: "3D-Modelle", kurz: "3D", icon: "🧊" },
+  { id: "werkstatt", name: "Werkstatt", icon: "🧰" },
+  { id: "hilfe", name: "Hilfe", icon: "💡" },
+  { id: "nerd", name: "Nerd", icon: "🤓" },
   { id: "system", name: "System", icon: "⚙️" },
 ];
+// Handy: diese Bereiche unten, der Rest im „Mehr“-Menü
+const NAV_UNTEN = ["filament", "inventar", "drucker", "modelle"];
 
 const STATUS = [
   { id: "offen", name: "Nicht probiert" },
@@ -4530,17 +5907,44 @@ class FilamentWerkstattPanel extends HTMLElement {
         const mobil = e[0].contentRect.width < 720;
         if (mobil !== this._mobil) { this._mobil = mobil; this._zeichnen(); }
       });
-      this.shadowRoot.addEventListener("click", (e) => this._klick(e));
-      this.shadowRoot.addEventListener("input", (e) => this._eingabe(e));
-      this.shadowRoot.addEventListener("change", (e) => this._aenderung(e));
+      this.shadowRoot.addEventListener("click", (e) => this._sicher(() => this._klick(e)));
+      this.shadowRoot.addEventListener("input", (e) => this._sicher(() => this._eingabe(e)));
+      this.shadowRoot.addEventListener("change", (e) => this._sicher(() => this._aenderung(e)));
       this.shadowRoot.addEventListener("scroll", (e) => { this._ddBeimScrollen(e.target); }, true);
-      this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._ddZu(); });
+      this.shadowRoot.addEventListener("keydown", (e) => this._sicher(() => this._taste(e)));
+      this._tasteGlobal = (e) => { if ((e.key === "k" && (e.ctrlKey || e.metaKey)) && this.isConnected && this._daten) { e.preventDefault(); this._sucheOeffnen(); } };
+      window.addEventListener("keydown", this._tasteGlobal);
+      // Zurück im Tab/App: neuere Daten von einem anderen Gerät holen
+      this._sichtbar = () => { if (document.visibilityState === "visible") this._fremdeAenderungPruefen(); };
+      document.addEventListener("visibilitychange", this._sichtbar);
       this._wischenEinrichten();
     }
     this._ro.observe(this);
     this._zeichnen();
   }
   disconnectedCallback() { this._ro && this._ro.disconnect(); }
+
+  // Fehler in einem Klick soll nicht die ganze Seite lahmlegen
+  _sicher(f) {
+    try { f(); } catch (e) {
+      console.error("Filament-Werkstatt:", e);
+      this._dialog = null;
+      this._toast(`Da ist etwas schiefgelaufen: ${e.message || e}`);
+    }
+  }
+
+  _taste(e) {
+    if (e.key === "Escape") {
+      this._ddZu();
+      if (this._sucheOffen || this._mehrOffen) { this._sucheOffen = false; this._mehrOffen = false; this._zeichnen(); }
+      else if (this._dialog && !["bu", "sich-import", "konflikt"].includes(this._dialog)) { this._dialog = null; this._zeichnen(); }
+      return;
+    }
+    if (e.key === "Enter" && e.target.id === "global-suche") {
+      const erst = this.shadowRoot.querySelector(".such-treffer");
+      if (erst) erst.click();
+    }
+  }
 
   // ---- Laden und Speichern ------------------------------------------------
   async _laden() {
@@ -4551,11 +5955,12 @@ class FilamentWerkstattPanel extends HTMLElement {
         // Sicherung des letzten Stands, bevor in dieser Sitzung etwas geändert wird
         this._hass.callWS({ type: "frontend/set_user_data", key: SICHERUNG_KEY, value: r.value }).catch(() => {});
         const alt = r.value.version;
+        this._standGeladen = r.value.geaendert || null;
         this._daten = migrieren(JSON.parse(JSON.stringify(r.value)));
-        if (alt !== this._daten.version) await this._speichernJetzt();
+        if (alt !== this._daten.version) await this._speichernJetzt(true);
       } else {
         this._daten = standardDaten();
-        await this._speichernJetzt();
+        await this._speichernJetzt(true);
       }
       this._drVerlaufLaden();
     } catch (e) {
@@ -4566,20 +5971,54 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _speichern() {
     this._speicherStatus = "speichert";
+    this._ungespeichert = true;
     this._statusZeigen();
     clearTimeout(this._speicherTimer);
+    clearTimeout(this._wiederholTimer);
     this._speicherTimer = setTimeout(() => this._speichernJetzt(), 500);
   }
 
-  async _speichernJetzt() {
+  // Vor dem Schreiben prüfen, ob ein anderes Gerät inzwischen gespeichert hat.
+  // Schlägt das Speichern fehl, nach 3 s, 10 s und 30 s nochmal versuchen.
+  async _speichernJetzt(erzwingen = false) {
+    if (!this._daten || this._konflikt) return;
     try {
+      if (!erzwingen && this._standGeladen) {
+        const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
+        const fremd = r && r.value && r.value.geaendert;
+        if (fremd && fremd > this._standGeladen) {
+          this._konflikt = { am: fremd };
+          this._dialog = "konflikt";
+          this._speicherStatus = "fehler";
+          this._zeichnen();
+          return;
+        }
+      }
       this._daten.geaendert = new Date().toISOString();
       await this._hass.callWS({ type: "frontend/set_user_data", key: SPEICHER_KEY, value: this._daten });
+      this._standGeladen = this._daten.geaendert;
       this._speicherStatus = "gespeichert";
+      this._ungespeichert = false;
+      this._versuche = 0;
     } catch (e) {
       this._speicherStatus = "fehler";
+      this._versuche = (this._versuche || 0) + 1;
+      if (this._versuche <= 3) this._wiederholTimer = setTimeout(() => this._speichernJetzt(erzwingen), [3000, 10000, 30000][this._versuche - 1]);
     }
     this._statusZeigen();
+  }
+
+  async _fremdeAenderungPruefen() {
+    if (!this._hass || !this._daten || this._ungespeichert || this._modus || this._dialog || this._konflikt) return;
+    try {
+      const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
+      const v = r && r.value;
+      if (v && v.geaendert && this._standGeladen && v.geaendert > this._standGeladen && Array.isArray(v.rollen) && !this._ungespeichert && !this._modus && !this._dialog) {
+        this._daten = migrieren(JSON.parse(JSON.stringify(v)));
+        this._standGeladen = v.geaendert;
+        this._toast("Neuere Daten von einem anderen Gerät geladen.");
+      }
+    } catch (e) { /* offline: beim nächsten Mal */ }
   }
 
   _statusZeigen() {
@@ -4589,7 +6028,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _speicherHtml() {
     const s = this._speicherStatus;
-    const text = s === "speichert" ? "Speichert …" : s === "gespeichert" ? "Gespeichert" : s === "fehler" ? "Speichern fehlgeschlagen" : "";
+    const text = s === "speichert" ? "Speichert …" : s === "gespeichert" ? "Gespeichert" : s === "fehler" ? (this._konflikt ? "Nicht gespeichert" : this._versuche && this._versuche <= 3 ? "Speichern fehlgeschlagen, neuer Versuch …" : "Speichern fehlgeschlagen") : "";
     return `<span id="speicher" class="speicher ${s}">${text}</span>`;
   }
 
@@ -4603,6 +6042,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   // Nur die Meldung entfernen, nicht neu zeichnen (sonst gehen Eingaben verloren)
   _toastWeg() {
     this._toastText = null;
+    this._toastKnopf = null;
     const t = this.shadowRoot.querySelector(".toast");
     if (t) t.remove();
   }
@@ -4720,6 +6160,10 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("dr-")) { this._drKlick(a, el); return; }
     if (a.startsWith("mod-")) { this._modKlick(a, el); return; }
     if (a.startsWith("bu-")) { this._buKlick(a, el); return; }
+    if (a.startsWith("hi-")) { this._hiKlick(a, el); return; }
+    if (a.startsWith("ws-")) { this._wsKlick(a, el); return; }
+    if (a.startsWith("ne-")) { this._neKlick(a, el); return; }
+    if (this._exKlick(a, el)) return;
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
       const k = el.dataset.k;
@@ -4732,9 +6176,11 @@ class FilamentWerkstattPanel extends HTMLElement {
         this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
         return;
       case "ansicht":
-        if (el.dataset.bald) { this._toast("Kommt in einem der nächsten Schritte."); return; }
+        if (!this._schliessen()) return;
         this._ansicht = el.dataset.id;
         this._filterAuf = false;
+        this._sucheOffen = false; this._mehrOffen = false;
+        if (this._ansicht === "werkstatt" && ["bibliothek", "fehl"].includes(this._wsZustand().tab)) this._wsFotos();
         if (this._ansicht === "system") this._systemcheck();
         break;
       case "alle":
@@ -4742,6 +6188,11 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._suche = "";
         break;
       case "status": this._f = { sorte: "", hersteller: "", farbe: "", status: el.dataset.id }; break;
+      case "oeffnen-filament":
+        if (!this._daten.rollen.some((x) => x.id === el.dataset.id)) return;
+        if (this._modus && !this._schliessen()) return;
+        this._ansicht = "filament"; this._sucheOffen = false; this._mehrOffen = false;
+        // fall through
       case "oeffnen":
         this._modus = "detail";
         this._offen = el.dataset.id;
@@ -4972,6 +6423,13 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._invEingabe(t)) return;
     if (this._modEingabe(t)) return;
     if (this._buEingabe(t)) return;
+    if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (t.id === "global-suche") {
+      this._sucheQ = t.value;
+      clearTimeout(this._suchTimer);
+      this._suchTimer = setTimeout(() => { const box = this.shadowRoot.getElementById("such-ergebnisse"); if (box) box.innerHTML = this._suchErgebnisHtml(); }, 80);
+      return;
+    }
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -5000,6 +6458,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._invAenderung(t)) return;
     if (this._modAenderung(t)) return;
     if (this._buAenderung(t)) return;
+    if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
+    if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -5098,24 +6558,44 @@ class FilamentWerkstattPanel extends HTMLElement {
     const sheet = root.querySelector(".sheet-inhalt");
     const scrollHaupt = haupt ? haupt.scrollTop : 0;
     if (sheet) this._sheetScroll = sheet.scrollTop;
-    const fokusId = root.activeElement && ["suche", "inv-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
+    const fokusId = root.activeElement && ["suche", "inv-suche", "global-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
     const schonDa = new Set([...root.querySelectorAll("[data-einmal]")].map((x) => x.dataset.einmal));
     this._ddOffen = null;
 
-    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}
+    let html;
+    try {
+      html = this._appHtml();
+    } catch (e) {
+      // Fehler beim Aufbau: Notansicht statt leerer Seite
+      console.error("Filament-Werkstatt:", e);
+      this._modus = null; this._dialog = null; this._sucheOffen = false; this._mehrOffen = false;
+      html = `<div class="app ${this._mobil ? "mobil" : ""}">${this._kopfHtml()}<main class="haupt"><div class="karte fehlerkarte"><h2>Diese Ansicht konnte nicht angezeigt werden</h2>
+        <p>${esc(e.message || e)}</p><p class="leise klein">Deine Daten sind nicht betroffen.</p><button class="knopf" data-aktion="ansicht" data-id="filament">Zur Filament-Übersicht</button></div></main></div>`;
+    }
+    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}${html}`;
+    this._nachZeichnen(root, scrollHaupt, fokusId, schonDa);
+  }
+
+  _appHtml() {
+    return `
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
         ${this._daten && this._drVerlauf ? this._buBalkenHtml() : ""}
-        <main class="haupt">${this._inhaltHtml()}</main>
-        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
+        ${this._daten ? this._sicherungBalkenHtml() : ""}
+        <main class="haupt"><div class="ansicht-rein ${this._ansicht === "modelle" ? "voll" : ""}" data-einmal="ansicht-${this._ansicht}">${this._inhaltHtml()}</div></main>
+        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus && !this._mehrOffen && !this._sucheOffen ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
         ${this._mobil ? this._navHtml("unten") : ""}
         ${this._modus === "detail" ? this._sheetHtml() : ""}
         ${this._modus === "neu" ? this._neuSheetHtml() : ""}
         ${this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : ""}
+        ${this._mobil ? this._mehrHtml() : ""}
+        ${this._sucheHtml()}
         ${this._dialogHtml()}
-        ${this._toastText ? `<div class="toast" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}</div>` : ""}
+        ${this._toastText ? `<div class="toast ${this._toastKnopf ? "mit-knopf" : ""}" role="status" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}${this._toastKnopf ? ` <button class="mini mint-rand" data-aktion="toast-knopf">${esc(this._toastKnopf.knopf)}</button>` : ""}</div>` : ""}
       </div>`;
+  }
 
+  _nachZeichnen(root, scrollHaupt, fokusId, schonDa) {
     const h = root.querySelector(".haupt");
     if (h) h.scrollTop = scrollHaupt;
     const s = root.querySelector(".sheet-inhalt");
@@ -5127,8 +6607,11 @@ class FilamentWerkstattPanel extends HTMLElement {
     }
     // Einblend-Animationen nur beim ersten Erscheinen, nicht bei jedem Neuzeichnen
     root.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });
-    this._auswahlenBauen();
-    if (this._ansicht === "modelle") this._modNachZeichnen();
+    try {
+      this._auswahlenBauen();
+      if (this._ansicht === "modelle") this._modNachZeichnen();
+      if (this._ansicht === "hilfe") this._hiNachZeichnen();
+    } catch (e) { console.error("Filament-Werkstatt:", e); }
     if (this._klappNeu) {
       const k = root.querySelector(`[data-klapp="${this._klappNeu}"]`);
       this._klappNeu = null;
@@ -5329,14 +6812,18 @@ class FilamentWerkstattPanel extends HTMLElement {
       <div class="marke"><span class="punkt-leucht"></span>Filament-Werkstatt</div>
       ${this._mobil ? "" : this._navHtml("oben")}
       ${this._speicherHtml()}
+      ${this._daten ? `<button class="icon-knopf such-knopf" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)">🔍</button>` : ""}
     </header>`;
   }
 
   _navHtml(lage) {
-    return `<nav class="nav nav-${lage}">${NAVIGATION.map((n) => `
-      <button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""} ${n.bald ? "bald" : ""}" data-aktion="ansicht" data-id="${n.id}" ${n.bald ? 'data-bald="1"' : ""}>
-        <span class="nav-icon">${n.icon}</span><span>${n.name}</span>${n.bald ? '<small>bald</small>' : ""}
-      </button>`).join("")}</nav>`;
+    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}">
+        <span class="nav-icon">${n.icon}</span><span class="nav-name">${lage === "unten" && n.kurz ? n.kurz : n.name}</span></button>`;
+    if (lage === "oben") return `<nav class="nav nav-oben">${NAVIGATION.map(punkt).join("")}</nav>`;
+    const mehrAktiv = !NAV_UNTEN.includes(this._ansicht);
+    const mehrIcon = mehrAktiv ? (NAVIGATION.find((n) => n.id === this._ansicht) || {}).icon || "☰" : "☰";
+    return `<nav class="nav nav-unten">${NAVIGATION.filter((n) => NAV_UNTEN.includes(n.id)).map(punkt).join("")}
+      <button class="nav-punkt ${mehrAktiv || this._mehrOffen ? "aktiv" : ""}" data-aktion="mehr" aria-label="Weitere Bereiche"><span class="nav-icon">${mehrIcon}</span><span class="nav-name">Mehr</span></button></nav>`;
   }
 
   _inhaltHtml() {
@@ -5349,6 +6836,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._ansicht === "inventar") return this._invHtml();
     if (this._ansicht === "drucker") return this._drHtml();
     if (this._ansicht === "modelle") return this._modHtml();
+    if (this._ansicht === "hilfe") return this._hiHtml();
+    if (this._ansicht === "werkstatt") return this._wsHtml();
+    if (this._ansicht === "nerd") return this._neHtml();
     return this._filamentHtml();
   }
 
@@ -5641,7 +7131,10 @@ class FilamentWerkstattPanel extends HTMLElement {
         <input type="range" min="0" max="80" step="0.5" value="${r.preis_kg || 0}" data-info="preis_kg">
       </div>
       <h3>Notizen</h3>
-      <textarea id="notiz" rows="4" placeholder="z. B. Schichthöhe, Besonderheiten …">${esc(r.notiz)}</textarea>`;
+      <textarea id="notiz" rows="4" maxlength="2000" placeholder="z. B. Schichthöhe, Besonderheiten …">${esc(r.notiz)}</textarea>
+      <h3>Bambu Studio</h3>
+      <p class="leise klein">Filament-Profil mit deinen Werten (Temperaturen, Lüfter, Flow, K-Faktor, Volumenstrom) als Datei. In Bambu Studio über Datei › Importieren › Konfiguration importieren laden.</p>
+      <button class="knopf leise breit" data-aktion="profil-export">⬇ Profil für Bambu Studio</button>`;
   }
 
   // ---- Filament hinzufügen ------------------------------------------------
@@ -5714,6 +7207,14 @@ class FilamentWerkstattPanel extends HTMLElement {
   _dialogHtml() {
     if (!this._dialog) return "";
     if (this._dialog === "bu" || this._dialog === "bu-hand") return `<div class="schleier oben" data-einmal="schleier-bu"></div><div class="dialog breit-dialog bu-dialog" role="dialog" data-einmal="dialog-${this._dialog}"><button class="icon-knopf dialog-x" data-aktion="${this._dialog === "bu" ? "bu-fertig" : "dialog-zu"}" aria-label="Schließen">✕</button>${this._dialog === "bu" ? this._buDialogHtml() : this._buHandHtml()}</div>`;
+    if (this._dialog === "ws-auftrag") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-ws"></div><div class="dialog" role="dialog" data-einmal="dialog-ws">${this._wsAuftragDialogHtml()}</div>`;
+    if (this._dialog === "sich-import") return `<div class="schleier oben" data-einmal="schleier-imp"></div><div class="dialog" role="dialog" data-einmal="dialog-imp">${this._importDialogHtml()}</div>`;
+    if (this._dialog === "kopieren") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-kop"></div><div class="dialog" role="dialog" data-einmal="dialog-kop"><h2>Zum Kopieren markieren</h2>
+      <p class="leise klein">Die Zwischenablage ist hier gesperrt. Text markieren und kopieren:</p><textarea rows="10" readonly>${esc(this._kopierText || "")}</textarea><button class="knopf breit oben-abstand" data-aktion="dialog-zu">Fertig</button></div>`;
+    if (this._dialog === "konflikt") return `<div class="schleier oben" data-einmal="schleier-kon"></div><div class="dialog" role="alertdialog" data-einmal="dialog-kon"><h2>Auf einem anderen Gerät geändert</h2>
+      <p class="leise">Seit du die Seite geöffnet hast, wurde auf einem anderen Gerät gespeichert (${this._konflikt ? new Date(this._konflikt.am).toLocaleString("de-DE") : ""}). Welcher Stand soll gelten?</p>
+      <button class="wahl" data-aktion="kon-laden"><span>↻</span><div><strong>Neu laden</strong><small>Stand vom anderen Gerät übernehmen, meine letzte Änderung verwerfen</small></div></button>
+      <button class="wahl" data-aktion="kon-behalten"><span>✓</span><div><strong>Meinen Stand speichern</strong><small>Überschreibt die Änderungen vom anderen Gerät</small></div></button></div>`;
     if (this._dialog === "mod-laden") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod"></div><div class="dialog" role="dialog" data-einmal="dialog-mod">${this._modLadenDialogHtml()}</div>`;
     if (this._dialog === "mod-stuetzen") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod-s"></div><div class="dialog breit-dialog" role="dialog" data-einmal="dialog-mod-s">${this._modStuetzenHilfeHtml()}</div>`;
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
@@ -5772,11 +7273,11 @@ class FilamentWerkstattPanel extends HTMLElement {
       <p class="leise">Prüft, ob die Seite alles in Home Assistant erreicht. Version ${VERSION}.</p>
       <ul class="check">${liste}</ul>
       <button class="knopf" data-aktion="pruefen" ${c && c.laeuft ? "disabled" : ""}>${c && c.laeuft ? "Prüft …" : "Neu prüfen"}</button>
-    </div>`;
+    </div>${this._sicherungKarteHtml()}`;
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);

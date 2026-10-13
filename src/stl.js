@@ -14,6 +14,7 @@ function stlLesen(puffer) {
   if (puffer.byteLength >= 84) {
     const n = dv.getUint32(80, true);
     if (84 + n * 50 === puffer.byteLength) {
+      if (typeof MOD_MAX_DREIECKE !== "undefined" && n > MOD_MAX_DREIECKE) throw new Error(`Das Modell hat ${n.toLocaleString("de-DE")} Dreiecke, das schafft der Browser nicht flüssig. Bitte im Slicer vereinfachen.`);
       const v = new Float32Array(n * 9);
       for (let i = 0; i < n; i++) {
         const o = 84 + i * 50 + 12;

@@ -380,6 +380,9 @@ const STUETZEN = [
 ];
 const SCHICHT_BEREICH = { 0.2: [0.06, 0.14, 0.1], 0.4: [0.08, 0.28, 0.2], 0.6: [0.18, 0.42, 0.3], 0.8: [0.24, 0.56, 0.4] };
 
+const MOD_MAX_BYTES = 200 * 1048576;      // größere Dateien bringen Handys zum Absturz
+const MOD_MAX_DREIECKE = 3000000;
+
 const ModellAnsicht = {
   _modHtml() {
     this._modEinrichten();
@@ -467,7 +470,8 @@ const ModellAnsicht = {
         <div class="info-zeile"><span>Volumen</span><strong>${zahl(m.kenn.volumen / 1000, 1)} cm³</strong></div>
         <div class="info-zeile"><span>Oberfläche</span><strong>${zahl(m.kenn.flaeche / 100, 0)} cm²</strong></div>
         <div class="info-zeile"><span>Dreiecke</span><strong>${zahl(m.kenn.dreiecke)}</strong></div>
-      </div>`;
+      </div>
+      <button class="knopf breit oben-abstand" data-aktion="ws-aus-modell">＋ In die Warteschlange</button>`;
   },
 
   _modGewichtHtml(gew, rest, rolle) {
@@ -506,7 +510,7 @@ const ModellAnsicht = {
         <strong>${i.gramm ? `${zahl(i.gramm, 1)} g` : "Gewicht unbekannt"}</strong>
         ${rest == null ? `<span class="klein leise">${i.gramm ? "Rolle nicht gewogen, Rest unbekannt." : "Im G-Code steht kein Gewicht."}</span>` : rest >= 0 ? `<span class="klein">✓ Reicht. Danach bleiben etwa ${zahl(rest)} g übrig.</span>` : `<span class="klein">✕ Reicht nicht, es fehlen etwa ${zahl(-rest)} g.</span>`}
       </div>
-      <button class="knopf leise breit oben-abstand" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button>`;
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button><button class="knopf" data-aktion="ws-aus-modell">＋ Warteschlange</button></div>`;
   },
 
   // ---- Löcher ----
@@ -671,8 +675,13 @@ const ModellAnsicht = {
   _modRolle() { const m = this._mod; return this._daten.rollen.find((r) => r.id === (m && m.rolleId)) || null; },
 
   async _modDatei(datei, name) {
-    const puffer = datei instanceof ArrayBuffer ? datei : await datei.arrayBuffer();
     name = name || datei.name;
+    const groesse = datei instanceof ArrayBuffer ? datei.byteLength : datei.size;
+    if (groesse > MOD_MAX_BYTES) { this._toast(`Die Datei ist mit ${zahl(groesse / 1048576)} MB zu groß (höchstens ${MOD_MAX_BYTES / 1048576} MB).`); return; }
+    if (!groesse) { this._toast("Die Datei ist leer."); return; }
+    let puffer;
+    try { puffer = datei instanceof ArrayBuffer ? datei : await datei.arrayBuffer(); }
+    catch (e) { this._toast("Die Datei konnte nicht gelesen werden."); return; }
     this._mod = { ...this._modStandard(), name, laedt: "Lese Datei …" };
     this._zeichnen();
     await new Promise((r) => setTimeout(r, 30));
@@ -697,7 +706,11 @@ const ModellAnsicht = {
   },
 
   async _modStl(puffer, name) {
-    const v = aufsBett(stlLesen(puffer));
+    const roh = stlLesen(puffer);
+    if (!roh.length) throw new Error("In der STL wurden keine Dreiecke gefunden.");
+    if (roh.length / 9 > MOD_MAX_DREIECKE) throw new Error(`Das Modell hat ${zahl(roh.length / 9)} Dreiecke, mehr als ${zahl(MOD_MAX_DREIECKE)} schafft der Browser nicht flüssig. Bitte im Slicer vereinfachen.`);
+    if (roh.some((x) => !Number.isFinite(x))) throw new Error("Die STL enthält ungültige Koordinaten (beschädigte Datei).");
+    const v = aufsBett(roh);
     const m = this._mod;
     Object.assign(m, { art: "stl", v, laedt: null });
     this._modGeometrieNeu();

@@ -226,10 +226,11 @@ const EINSTELLUNGEN_STANDARD = {
   korrektur: {},         // Faktor je Material aus dem Abgleich beim Wiegen
   sicherung_am: null,
   sicherung_spaeter: null,
+  sicherung_start: null, // erste Erinnerung eine Woche nach dem ersten Start
 };
 function werkstattStandard() {
   return {
-    einstellungen: JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)),
+    einstellungen: { ...JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)), sicherung_start: new Date().toISOString() },
     drucke: {},
     letzte_rolle: null,
     buchen_ab: new Date().toISOString(),   // ältere Drucke nicht nachfragen
@@ -252,6 +253,7 @@ function migrieren(d) {
   const w = werkstattStandard();
   for (const k of Object.keys(w)) if (d[k] == null) d[k] = w[k];
   d.einstellungen = { ...EINSTELLUNGEN_STANDARD, ...d.einstellungen };
+  if (!d.einstellungen.sicherung_start) d.einstellungen.sicherung_start = new Date().toISOString();
   d.version = DATEN_VERSION;
   return d;
 }

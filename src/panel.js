@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.7.0";
+const VERSION = "0.8.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -17,10 +17,14 @@ const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
   { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️" },
-  { id: "modelle", name: "3D-Modelle", icon: "🧊" },
-  { id: "hilfe", name: "Hilfe", icon: "💡", bald: true },
+  { id: "modelle", name: "3D-Modelle", kurz: "3D", icon: "🧊" },
+  { id: "werkstatt", name: "Werkstatt", icon: "🧰" },
+  { id: "hilfe", name: "Hilfe", icon: "💡" },
+  { id: "nerd", name: "Nerd", icon: "🤓" },
   { id: "system", name: "System", icon: "⚙️" },
 ];
+// Handy: diese Bereiche unten, der Rest im „Mehr“-Menü
+const NAV_UNTEN = ["filament", "inventar", "drucker", "modelle"];
 
 const STATUS = [
   { id: "offen", name: "Nicht probiert" },
@@ -140,17 +144,44 @@ class FilamentWerkstattPanel extends HTMLElement {
         const mobil = e[0].contentRect.width < 720;
         if (mobil !== this._mobil) { this._mobil = mobil; this._zeichnen(); }
       });
-      this.shadowRoot.addEventListener("click", (e) => this._klick(e));
-      this.shadowRoot.addEventListener("input", (e) => this._eingabe(e));
-      this.shadowRoot.addEventListener("change", (e) => this._aenderung(e));
+      this.shadowRoot.addEventListener("click", (e) => this._sicher(() => this._klick(e)));
+      this.shadowRoot.addEventListener("input", (e) => this._sicher(() => this._eingabe(e)));
+      this.shadowRoot.addEventListener("change", (e) => this._sicher(() => this._aenderung(e)));
       this.shadowRoot.addEventListener("scroll", (e) => { this._ddBeimScrollen(e.target); }, true);
-      this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._ddZu(); });
+      this.shadowRoot.addEventListener("keydown", (e) => this._sicher(() => this._taste(e)));
+      this._tasteGlobal = (e) => { if ((e.key === "k" && (e.ctrlKey || e.metaKey)) && this.isConnected && this._daten) { e.preventDefault(); this._sucheOeffnen(); } };
+      window.addEventListener("keydown", this._tasteGlobal);
+      // Zurück im Tab/App: neuere Daten von einem anderen Gerät holen
+      this._sichtbar = () => { if (document.visibilityState === "visible") this._fremdeAenderungPruefen(); };
+      document.addEventListener("visibilitychange", this._sichtbar);
       this._wischenEinrichten();
     }
     this._ro.observe(this);
     this._zeichnen();
   }
   disconnectedCallback() { this._ro && this._ro.disconnect(); }
+
+  // Fehler in einem Klick soll nicht die ganze Seite lahmlegen
+  _sicher(f) {
+    try { f(); } catch (e) {
+      console.error("Filament-Werkstatt:", e);
+      this._dialog = null;
+      this._toast(`Da ist etwas schiefgelaufen: ${e.message || e}`);
+    }
+  }
+
+  _taste(e) {
+    if (e.key === "Escape") {
+      this._ddZu();
+      if (this._sucheOffen || this._mehrOffen) { this._sucheOffen = false; this._mehrOffen = false; this._zeichnen(); }
+      else if (this._dialog && !["bu", "sich-import", "konflikt"].includes(this._dialog)) { this._dialog = null; this._zeichnen(); }
+      return;
+    }
+    if (e.key === "Enter" && e.target.id === "global-suche") {
+      const erst = this.shadowRoot.querySelector(".such-treffer");
+      if (erst) erst.click();
+    }
+  }
 
   // ---- Laden und Speichern ------------------------------------------------
   async _laden() {
@@ -161,11 +192,12 @@ class FilamentWerkstattPanel extends HTMLElement {
         // Sicherung des letzten Stands, bevor in dieser Sitzung etwas geändert wird
         this._hass.callWS({ type: "frontend/set_user_data", key: SICHERUNG_KEY, value: r.value }).catch(() => {});
         const alt = r.value.version;
+        this._standGeladen = r.value.geaendert || null;
         this._daten = migrieren(JSON.parse(JSON.stringify(r.value)));
-        if (alt !== this._daten.version) await this._speichernJetzt();
+        if (alt !== this._daten.version) await this._speichernJetzt(true);
       } else {
         this._daten = standardDaten();
-        await this._speichernJetzt();
+        await this._speichernJetzt(true);
       }
       this._drVerlaufLaden();
     } catch (e) {
@@ -176,20 +208,54 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _speichern() {
     this._speicherStatus = "speichert";
+    this._ungespeichert = true;
     this._statusZeigen();
     clearTimeout(this._speicherTimer);
+    clearTimeout(this._wiederholTimer);
     this._speicherTimer = setTimeout(() => this._speichernJetzt(), 500);
   }
 
-  async _speichernJetzt() {
+  // Vor dem Schreiben prüfen, ob ein anderes Gerät inzwischen gespeichert hat.
+  // Schlägt das Speichern fehl, nach 3 s, 10 s und 30 s nochmal versuchen.
+  async _speichernJetzt(erzwingen = false) {
+    if (!this._daten || this._konflikt) return;
     try {
+      if (!erzwingen && this._standGeladen) {
+        const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
+        const fremd = r && r.value && r.value.geaendert;
+        if (fremd && fremd > this._standGeladen) {
+          this._konflikt = { am: fremd };
+          this._dialog = "konflikt";
+          this._speicherStatus = "fehler";
+          this._zeichnen();
+          return;
+        }
+      }
       this._daten.geaendert = new Date().toISOString();
       await this._hass.callWS({ type: "frontend/set_user_data", key: SPEICHER_KEY, value: this._daten });
+      this._standGeladen = this._daten.geaendert;
       this._speicherStatus = "gespeichert";
+      this._ungespeichert = false;
+      this._versuche = 0;
     } catch (e) {
       this._speicherStatus = "fehler";
+      this._versuche = (this._versuche || 0) + 1;
+      if (this._versuche <= 3) this._wiederholTimer = setTimeout(() => this._speichernJetzt(erzwingen), [3000, 10000, 30000][this._versuche - 1]);
     }
     this._statusZeigen();
+  }
+
+  async _fremdeAenderungPruefen() {
+    if (!this._hass || !this._daten || this._ungespeichert || this._modus || this._dialog || this._konflikt) return;
+    try {
+      const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
+      const v = r && r.value;
+      if (v && v.geaendert && this._standGeladen && v.geaendert > this._standGeladen && Array.isArray(v.rollen) && !this._ungespeichert && !this._modus && !this._dialog) {
+        this._daten = migrieren(JSON.parse(JSON.stringify(v)));
+        this._standGeladen = v.geaendert;
+        this._toast("Neuere Daten von einem anderen Gerät geladen.");
+      }
+    } catch (e) { /* offline: beim nächsten Mal */ }
   }
 
   _statusZeigen() {
@@ -199,7 +265,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _speicherHtml() {
     const s = this._speicherStatus;
-    const text = s === "speichert" ? "Speichert …" : s === "gespeichert" ? "Gespeichert" : s === "fehler" ? "Speichern fehlgeschlagen" : "";
+    const text = s === "speichert" ? "Speichert …" : s === "gespeichert" ? "Gespeichert" : s === "fehler" ? (this._konflikt ? "Nicht gespeichert" : this._versuche && this._versuche <= 3 ? "Speichern fehlgeschlagen, neuer Versuch …" : "Speichern fehlgeschlagen") : "";
     return `<span id="speicher" class="speicher ${s}">${text}</span>`;
   }
 
@@ -213,6 +279,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   // Nur die Meldung entfernen, nicht neu zeichnen (sonst gehen Eingaben verloren)
   _toastWeg() {
     this._toastText = null;
+    this._toastKnopf = null;
     const t = this.shadowRoot.querySelector(".toast");
     if (t) t.remove();
   }
@@ -330,6 +397,10 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("dr-")) { this._drKlick(a, el); return; }
     if (a.startsWith("mod-")) { this._modKlick(a, el); return; }
     if (a.startsWith("bu-")) { this._buKlick(a, el); return; }
+    if (a.startsWith("hi-")) { this._hiKlick(a, el); return; }
+    if (a.startsWith("ws-")) { this._wsKlick(a, el); return; }
+    if (a.startsWith("ne-")) { this._neKlick(a, el); return; }
+    if (this._exKlick(a, el)) return;
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
       const k = el.dataset.k;
@@ -342,9 +413,11 @@ class FilamentWerkstattPanel extends HTMLElement {
         this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
         return;
       case "ansicht":
-        if (el.dataset.bald) { this._toast("Kommt in einem der nächsten Schritte."); return; }
+        if (!this._schliessen()) return;
         this._ansicht = el.dataset.id;
         this._filterAuf = false;
+        this._sucheOffen = false; this._mehrOffen = false;
+        if (this._ansicht === "werkstatt" && ["bibliothek", "fehl"].includes(this._wsZustand().tab)) this._wsFotos();
         if (this._ansicht === "system") this._systemcheck();
         break;
       case "alle":
@@ -352,6 +425,11 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._suche = "";
         break;
       case "status": this._f = { sorte: "", hersteller: "", farbe: "", status: el.dataset.id }; break;
+      case "oeffnen-filament":
+        if (!this._daten.rollen.some((x) => x.id === el.dataset.id)) return;
+        if (this._modus && !this._schliessen()) return;
+        this._ansicht = "filament"; this._sucheOffen = false; this._mehrOffen = false;
+        // fall through
       case "oeffnen":
         this._modus = "detail";
         this._offen = el.dataset.id;
@@ -582,6 +660,13 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._invEingabe(t)) return;
     if (this._modEingabe(t)) return;
     if (this._buEingabe(t)) return;
+    if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (t.id === "global-suche") {
+      this._sucheQ = t.value;
+      clearTimeout(this._suchTimer);
+      this._suchTimer = setTimeout(() => { const box = this.shadowRoot.getElementById("such-ergebnisse"); if (box) box.innerHTML = this._suchErgebnisHtml(); }, 80);
+      return;
+    }
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -610,6 +695,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._invAenderung(t)) return;
     if (this._modAenderung(t)) return;
     if (this._buAenderung(t)) return;
+    if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
+    if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -708,24 +795,44 @@ class FilamentWerkstattPanel extends HTMLElement {
     const sheet = root.querySelector(".sheet-inhalt");
     const scrollHaupt = haupt ? haupt.scrollTop : 0;
     if (sheet) this._sheetScroll = sheet.scrollTop;
-    const fokusId = root.activeElement && ["suche", "inv-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
+    const fokusId = root.activeElement && ["suche", "inv-suche", "global-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
     const schonDa = new Set([...root.querySelectorAll("[data-einmal]")].map((x) => x.dataset.einmal));
     this._ddOffen = null;
 
-    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}
+    let html;
+    try {
+      html = this._appHtml();
+    } catch (e) {
+      // Fehler beim Aufbau: Notansicht statt leerer Seite
+      console.error("Filament-Werkstatt:", e);
+      this._modus = null; this._dialog = null; this._sucheOffen = false; this._mehrOffen = false;
+      html = `<div class="app ${this._mobil ? "mobil" : ""}">${this._kopfHtml()}<main class="haupt"><div class="karte fehlerkarte"><h2>Diese Ansicht konnte nicht angezeigt werden</h2>
+        <p>${esc(e.message || e)}</p><p class="leise klein">Deine Daten sind nicht betroffen.</p><button class="knopf" data-aktion="ansicht" data-id="filament">Zur Filament-Übersicht</button></div></main></div>`;
+    }
+    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}${html}`;
+    this._nachZeichnen(root, scrollHaupt, fokusId, schonDa);
+  }
+
+  _appHtml() {
+    return `
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
         ${this._daten && this._drVerlauf ? this._buBalkenHtml() : ""}
-        <main class="haupt">${this._inhaltHtml()}</main>
-        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
+        ${this._daten ? this._sicherungBalkenHtml() : ""}
+        <main class="haupt"><div class="ansicht-rein ${this._ansicht === "modelle" ? "voll" : ""}" data-einmal="ansicht-${this._ansicht}">${this._inhaltHtml()}</div></main>
+        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus && !this._mehrOffen && !this._sucheOffen ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
         ${this._mobil ? this._navHtml("unten") : ""}
         ${this._modus === "detail" ? this._sheetHtml() : ""}
         ${this._modus === "neu" ? this._neuSheetHtml() : ""}
         ${this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : ""}
+        ${this._mobil ? this._mehrHtml() : ""}
+        ${this._sucheHtml()}
         ${this._dialogHtml()}
-        ${this._toastText ? `<div class="toast" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}</div>` : ""}
+        ${this._toastText ? `<div class="toast ${this._toastKnopf ? "mit-knopf" : ""}" role="status" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}${this._toastKnopf ? ` <button class="mini mint-rand" data-aktion="toast-knopf">${esc(this._toastKnopf.knopf)}</button>` : ""}</div>` : ""}
       </div>`;
+  }
 
+  _nachZeichnen(root, scrollHaupt, fokusId, schonDa) {
     const h = root.querySelector(".haupt");
     if (h) h.scrollTop = scrollHaupt;
     const s = root.querySelector(".sheet-inhalt");
@@ -737,8 +844,11 @@ class FilamentWerkstattPanel extends HTMLElement {
     }
     // Einblend-Animationen nur beim ersten Erscheinen, nicht bei jedem Neuzeichnen
     root.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });
-    this._auswahlenBauen();
-    if (this._ansicht === "modelle") this._modNachZeichnen();
+    try {
+      this._auswahlenBauen();
+      if (this._ansicht === "modelle") this._modNachZeichnen();
+      if (this._ansicht === "hilfe") this._hiNachZeichnen();
+    } catch (e) { console.error("Filament-Werkstatt:", e); }
     if (this._klappNeu) {
       const k = root.querySelector(`[data-klapp="${this._klappNeu}"]`);
       this._klappNeu = null;
@@ -939,14 +1049,18 @@ class FilamentWerkstattPanel extends HTMLElement {
       <div class="marke"><span class="punkt-leucht"></span>Filament-Werkstatt</div>
       ${this._mobil ? "" : this._navHtml("oben")}
       ${this._speicherHtml()}
+      ${this._daten ? `<button class="icon-knopf such-knopf" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)">🔍</button>` : ""}
     </header>`;
   }
 
   _navHtml(lage) {
-    return `<nav class="nav nav-${lage}">${NAVIGATION.map((n) => `
-      <button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""} ${n.bald ? "bald" : ""}" data-aktion="ansicht" data-id="${n.id}" ${n.bald ? 'data-bald="1"' : ""}>
-        <span class="nav-icon">${n.icon}</span><span>${n.name}</span>${n.bald ? '<small>bald</small>' : ""}
-      </button>`).join("")}</nav>`;
+    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}">
+        <span class="nav-icon">${n.icon}</span><span class="nav-name">${lage === "unten" && n.kurz ? n.kurz : n.name}</span></button>`;
+    if (lage === "oben") return `<nav class="nav nav-oben">${NAVIGATION.map(punkt).join("")}</nav>`;
+    const mehrAktiv = !NAV_UNTEN.includes(this._ansicht);
+    const mehrIcon = mehrAktiv ? (NAVIGATION.find((n) => n.id === this._ansicht) || {}).icon || "☰" : "☰";
+    return `<nav class="nav nav-unten">${NAVIGATION.filter((n) => NAV_UNTEN.includes(n.id)).map(punkt).join("")}
+      <button class="nav-punkt ${mehrAktiv || this._mehrOffen ? "aktiv" : ""}" data-aktion="mehr" aria-label="Weitere Bereiche"><span class="nav-icon">${mehrIcon}</span><span class="nav-name">Mehr</span></button></nav>`;
   }
 
   _inhaltHtml() {
@@ -959,6 +1073,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._ansicht === "inventar") return this._invHtml();
     if (this._ansicht === "drucker") return this._drHtml();
     if (this._ansicht === "modelle") return this._modHtml();
+    if (this._ansicht === "hilfe") return this._hiHtml();
+    if (this._ansicht === "werkstatt") return this._wsHtml();
+    if (this._ansicht === "nerd") return this._neHtml();
     return this._filamentHtml();
   }
 
@@ -1251,7 +1368,10 @@ class FilamentWerkstattPanel extends HTMLElement {
         <input type="range" min="0" max="80" step="0.5" value="${r.preis_kg || 0}" data-info="preis_kg">
       </div>
       <h3>Notizen</h3>
-      <textarea id="notiz" rows="4" placeholder="z. B. Schichthöhe, Besonderheiten …">${esc(r.notiz)}</textarea>`;
+      <textarea id="notiz" rows="4" maxlength="2000" placeholder="z. B. Schichthöhe, Besonderheiten …">${esc(r.notiz)}</textarea>
+      <h3>Bambu Studio</h3>
+      <p class="leise klein">Filament-Profil mit deinen Werten (Temperaturen, Lüfter, Flow, K-Faktor, Volumenstrom) als Datei. In Bambu Studio über Datei › Importieren › Konfiguration importieren laden.</p>
+      <button class="knopf leise breit" data-aktion="profil-export">⬇ Profil für Bambu Studio</button>`;
   }
 
   // ---- Filament hinzufügen ------------------------------------------------
@@ -1324,6 +1444,14 @@ class FilamentWerkstattPanel extends HTMLElement {
   _dialogHtml() {
     if (!this._dialog) return "";
     if (this._dialog === "bu" || this._dialog === "bu-hand") return `<div class="schleier oben" data-einmal="schleier-bu"></div><div class="dialog breit-dialog bu-dialog" role="dialog" data-einmal="dialog-${this._dialog}"><button class="icon-knopf dialog-x" data-aktion="${this._dialog === "bu" ? "bu-fertig" : "dialog-zu"}" aria-label="Schließen">✕</button>${this._dialog === "bu" ? this._buDialogHtml() : this._buHandHtml()}</div>`;
+    if (this._dialog === "ws-auftrag") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-ws"></div><div class="dialog" role="dialog" data-einmal="dialog-ws">${this._wsAuftragDialogHtml()}</div>`;
+    if (this._dialog === "sich-import") return `<div class="schleier oben" data-einmal="schleier-imp"></div><div class="dialog" role="dialog" data-einmal="dialog-imp">${this._importDialogHtml()}</div>`;
+    if (this._dialog === "kopieren") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-kop"></div><div class="dialog" role="dialog" data-einmal="dialog-kop"><h2>Zum Kopieren markieren</h2>
+      <p class="leise klein">Die Zwischenablage ist hier gesperrt. Text markieren und kopieren:</p><textarea rows="10" readonly>${esc(this._kopierText || "")}</textarea><button class="knopf breit oben-abstand" data-aktion="dialog-zu">Fertig</button></div>`;
+    if (this._dialog === "konflikt") return `<div class="schleier oben" data-einmal="schleier-kon"></div><div class="dialog" role="alertdialog" data-einmal="dialog-kon"><h2>Auf einem anderen Gerät geändert</h2>
+      <p class="leise">Seit du die Seite geöffnet hast, wurde auf einem anderen Gerät gespeichert (${this._konflikt ? new Date(this._konflikt.am).toLocaleString("de-DE") : ""}). Welcher Stand soll gelten?</p>
+      <button class="wahl" data-aktion="kon-laden"><span>↻</span><div><strong>Neu laden</strong><small>Stand vom anderen Gerät übernehmen, meine letzte Änderung verwerfen</small></div></button>
+      <button class="wahl" data-aktion="kon-behalten"><span>✓</span><div><strong>Meinen Stand speichern</strong><small>Überschreibt die Änderungen vom anderen Gerät</small></div></button></div>`;
     if (this._dialog === "mod-laden") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod"></div><div class="dialog" role="dialog" data-einmal="dialog-mod">${this._modLadenDialogHtml()}</div>`;
     if (this._dialog === "mod-stuetzen") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod-s"></div><div class="dialog breit-dialog" role="dialog" data-einmal="dialog-mod-s">${this._modStuetzenHilfeHtml()}</div>`;
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
@@ -1382,11 +1510,11 @@ class FilamentWerkstattPanel extends HTMLElement {
       <p class="leise">Prüft, ob die Seite alles in Home Assistant erreicht. Version ${VERSION}.</p>
       <ul class="check">${liste}</ul>
       <button class="knopf" data-aktion="pruefen" ${c && c.laeuft ? "disabled" : ""}>${c && c.laeuft ? "Prüft …" : "Neu prüfen"}</button>
-    </div>`;
+    </div>${this._sicherungKarteHtml()}`;
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);
