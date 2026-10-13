@@ -819,6 +819,102 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .suche-punkt { grid-column: 1 / -1; }
 .mobil .nav-unten { z-index: 6; }
 
+/* ==== 3D-Modelle: Orbit, Ausrichtungswürfel, Füllmuster, eigene Winkel, Warteschlange (v0.11) ==== */
+.mod-ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mod-ico .voll { fill: currentColor; stroke: none; }
+.mod-orbit { position: relative; }
+.mod-leiste .mod-orbit-knopf { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 8px; }
+.mod-orbit-knopf .mod-pfeil { font-size: 10px; opacity: .7; transition: transform .2s; }
+.mod-orbit-knopf.an .mod-pfeil { transform: rotate(180deg); }
+.mod-orbit-menue { position: absolute; z-index: 6; top: calc(100% + 8px); right: 0; width: 290px; padding: 6px; border-radius: 16px;
+  background: rgba(14,22,19,.96); border: 1px solid var(--rand); backdrop-filter: blur(16px); box-shadow: 0 18px 40px rgba(0,0,0,.5);
+  animation: dd-rein .18s cubic-bezier(.2,.8,.2,1); transform-origin: top right; }
+.mod-orbit-punkt { width: 100%; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; border-radius: 12px; }
+.mod-orbit-punkt:hover { background: var(--flaeche-hover); }
+.mod-orbit-punkt.an { background: var(--mint-weich); color: var(--mint); }
+.mod-orbit-punkt .mod-ico { width: 24px; height: 24px; }
+.mod-orbit-punkt > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.mod-orbit-punkt strong { font-size: 13px; }
+.mod-orbit-punkt small { font-size: 11px; color: var(--leise); }
+.mod-orbit-trenner { height: 1px; margin: 4px 8px; background: var(--rand); }
+.mod-orbit-tipp { margin: 4px 10px 6px; }
+.mod-schalter { position: relative; width: 30px; height: 18px; flex: none; border-radius: 9px; background: rgba(255,255,255,.14); transition: background .2s; }
+.mod-schalter::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #cfe0d8; transition: transform .2s cubic-bezier(.2,.8,.2,1); }
+.mod-schalter.an { background: var(--mint); }
+.mod-schalter.an::after { transform: translateX(12px); background: #062018; }
+.mobil .mod-orbit-name { display: none; }
+.mobil .mod-orbit { position: static; }
+.mobil .mod-orbit-menue { left: 0; right: 0; width: auto; transform-origin: top center; }
+
+/* Ausrichtungswürfel */
+.mod-wuerfel-ecke { position: absolute; z-index: 2; top: 58px; right: 14px; width: calc(var(--w) * 1.7); height: calc(var(--w) * 1.7); pointer-events: none; }
+.mobil .mod-wuerfel-ecke { top: 104px; right: 4px; }
+.mod-wuerfel { position: absolute; inset: 0; pointer-events: none; touch-action: none; }
+.mod-w-koerper { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; }
+.mod-w-flaeche { position: absolute; left: calc(var(--w) / -2); top: calc(var(--w) / -2); width: var(--w); height: var(--w); display: grid;
+  grid-template-columns: 20% 60% 20%; grid-template-rows: 20% 60% 20%; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: linear-gradient(145deg, rgba(36,56,49,.95), rgba(16,26,23,.95)); border: 1px solid rgba(62,230,168,.38); border-radius: 4px; pointer-events: auto; }
+.mod-w-flaeche.w-oben { background: linear-gradient(145deg, rgba(46,72,62,.96), rgba(22,36,31,.96)); }
+.mod-w-flaeche.w-unten { background: linear-gradient(145deg, rgba(22,30,28,.96), rgba(12,18,16,.96)); }
+.mod-w-zone { padding: 0; border-radius: 2px; display: grid; place-items: center; transition: background .12s; cursor: pointer; }
+.mod-w-zone:hover { background: rgba(62,230,168,.45); }
+.mod-w-zone.flaeche:hover { background: rgba(62,230,168,.22); }
+.mod-w-zone span { font-size: calc(var(--w) * .145); font-weight: 800; letter-spacing: .6px; color: #d7efe5; pointer-events: none; user-select: none; }
+.ziehbar .mod-w-zone { cursor: grab; }
+.mod-wuerfel.zieht .mod-w-zone { cursor: grabbing; }
+.mod-heim { position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; pointer-events: auto;
+  color: var(--leise); background: rgba(8,12,11,.7); border: 1px solid var(--rand); backdrop-filter: blur(8px); transition: color .15s, transform .15s; }
+.mod-heim:hover { color: var(--mint); transform: scale(1.08); }
+.mod-heim .mod-ico { width: 16px; height: 16px; }
+.mod-achsen { position: absolute; left: -14px; bottom: -16px; width: 54px; height: 54px; overflow: visible; pointer-events: none; }
+.mod-achsen line { stroke-width: 2.2; stroke-linecap: round; transition: opacity .2s; }
+.mod-achsen text { font-size: 9px; font-weight: 800; text-anchor: middle; stroke: none; transition: opacity .2s; }
+.mod-achsen .a-x { stroke: #ff6b6b; fill: #ff6b6b; }
+.mod-achsen .a-y { stroke: #4fe08a; fill: #4fe08a; }
+.mod-achsen .a-z { stroke: #5cc8ff; fill: #5cc8ff; }
+.mod-achsen text.a-x, .mod-achsen text.a-y, .mod-achsen text.a-z { stroke: none; }
+
+/* Drehpunkt beim Orbit */
+.mod-drehpunkt { position: absolute; left: -7px; top: -7px; width: 14px; height: 14px; border-radius: 50%; pointer-events: none; z-index: 1; opacity: 0;
+  background: var(--mint); box-shadow: 0 0 0 4px rgba(62,230,168,.25), 0 0 14px rgba(62,230,168,.8); transition: opacity .15s; }
+.mod-drehpunkt.an { opacity: 1; }
+.mod-drehpunkt.mitte { background: var(--amber); box-shadow: 0 0 0 4px rgba(255,181,71,.25), 0 0 14px rgba(255,181,71,.7); }
+.mod-marker.versteckt { display: none; }
+
+/* Warteschlange: immer sichtbar unten in der Seitenleiste */
+.mod-inhalt { padding-bottom: 20px; }
+.mod-fuss { flex: none; padding: 12px 18px 16px; border-top: 1px solid var(--rand); background: linear-gradient(180deg, rgba(8,12,11,.2), rgba(8,12,11,.55)); }
+.mod-ws { box-shadow: 0 6px 20px rgba(62,230,168,.18); }
+.mobil .mod-seite { overflow: visible; }
+.mobil .mod-fuss { position: sticky; z-index: 2; bottom: calc(76px + env(safe-area-inset-bottom)); margin: 0 10px 10px; padding: 8px; border: 1px solid var(--rand); border-radius: 16px;
+  background: rgba(14,22,19,.9); backdrop-filter: blur(14px); box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+
+/* Füllmuster */
+.mod-muster { display: flex; gap: 12px; align-items: flex-start; margin: 6px 0 10px; }
+.mod-muster-vorschau { width: 64px; height: 64px; flex: none; margin-top: 4px; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,.25); border: 1px solid var(--rand); }
+.mod-muster-bild { width: 100%; height: 100%; display: block; animation: blende .25s ease; }
+.mod-muster-bild rect { fill: none; stroke: rgba(255,170,90,.55); stroke-width: .9; }
+.mod-muster-bild path { fill: none; stroke: #d94d59; stroke-width: .75; stroke-linecap: round; }
+.mod-muster-text { flex: 1; min-width: 0; }
+.mod-muster-text p { margin: 6px 0 0; }
+.mod-muster-text .pille { font-size: 10px; padding: 1px 7px; margin-left: 4px; vertical-align: 1px; }
+
+/* Eigene Drehwinkel */
+.mod-dreh-eigen { margin: 8px 0 14px; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.2); border: 1px solid rgba(62,230,168,.25); animation: ansicht-rein .22s ease; }
+.mod-dreh-felder { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mod-dreh-feld { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid var(--rand); transition: border-color .15s, box-shadow .15s; }
+.mod-dreh-feld.aktiv { border-color: rgba(62,230,168,.55); box-shadow: 0 0 0 3px rgba(62,230,168,.1); }
+.mod-dreh-feld span { font-weight: 800; font-size: 13px; }
+.mod-dreh-feld.a-x span { color: #ff6b6b; }
+.mod-dreh-feld.a-y span { color: #4fe08a; }
+.mod-dreh-feld.a-z span { color: #5cc8ff; }
+.mod-dreh-feld input { flex: 1; min-width: 0; width: 100%; padding: 8px 2px; border: none; background: none; color: var(--text); font: inherit; font-size: 16px; text-align: right; font-variant-numeric: tabular-nums; outline: none; -moz-appearance: textfield; }
+.mod-dreh-feld input::-webkit-inner-spin-button { opacity: .4; }
+.mod-dreh-feld small { color: var(--leise); }
+.mod-dreh-schnell { margin: 10px 0 4px; }
+.mod-dreh-schnell .chip { padding: 5px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mod-dreh-eigen .knopf-reihe { margin-top: 8px; }
+
 /* ---- Sicherungs-Balken ---- */
 .bu-balken.blau { background: linear-gradient(90deg, rgba(92,200,255,.18), rgba(92,200,255,.05)); border-bottom-color: rgba(92,200,255,.4); }
 `;
