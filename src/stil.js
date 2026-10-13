@@ -695,19 +695,50 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .tr-rolle small { color: var(--leise); font-size: 12px; }
 .fb-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: start; }
 .mobil .fb-raster { grid-template-columns: 1fr; }
-.fb-karte { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); overflow: hidden; transition: border-color .2s; }
-.fb-karte.auf { border-color: rgba(255,181,71,.45); }
+.fb-karte { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); overflow: hidden; transition: border-color .2s, background .2s; }
+.fb-karte:hover { border-color: rgba(255,181,71,.45); background: var(--flaeche-hover); }
 .fb-kopf { width: 100%; display: flex; gap: 12px; align-items: center; padding: 10px; text-align: left; }
 .fb-kopf .fb-bild { width: 84px; flex: none; }
 .fb-kopf > span { display: grid; gap: 2px; }
 .fb-kopf small { font-size: 12px; }
-.fb-details { padding: 0 14px 14px; }
 .kal-wahl { margin-bottom: 14px; }
 .kal-kopf { display: flex; gap: 14px; align-items: center; }
 .kal-bild { width: 120px; height: auto; flex: none; border-radius: 12px; background: rgba(0,0,0,.3); }
 .mobil .kal-bild { width: 92px; }
 .kal-liste { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; }
 .kal-liste.fehler li::marker { color: var(--rot); }
+
+/* ---- Hilfe: Beispielrolle, Trockner-Zeichnung, Fehlerbild-Fenster ---- */
+.hi-rollenwahl { margin-top: 16px; }
+.hi-tr-info + .hi-rollenwahl, .hi-bild-karte .hi-rollenwahl { margin-top: 0; }
+.hi-werte { margin-top: 8px; }
+.hi-fb-wahl { max-width: 420px; margin: 0 0 14px; }
+.hi-fb-wahl .hi-rollenwahl { margin-top: 0; }
+.tr-wert { pointer-events: none; }
+.hi-fb-ebene { position: absolute; inset: 0; z-index: 26; display: grid; place-items: center; padding: 20px; }
+.hi-fb-schleier { position: absolute; inset: 0; background: rgba(0,0,0,.6); backdrop-filter: blur(3px); animation: hi-fb-blende .22s ease both; }
+.hi-fb-popup { position: relative; width: min(620px, 100%); max-height: 100%; overflow-y: auto; overscroll-behavior: contain; outline: none;
+  padding: 24px; border-radius: 22px; background: rgba(16,22,20,.98); border: 1px solid rgba(255,181,71,.35); box-shadow: 0 30px 80px rgba(0,0,0,.6);
+  animation: hi-fb-auf .24s cubic-bezier(.2,.8,.2,1) both; }
+.hi-fb-ebene.zu { pointer-events: none; }
+.hi-fb-ebene.zu .hi-fb-schleier { animation: hi-fb-blende-zu .18s ease forwards; }
+.hi-fb-ebene.zu .hi-fb-popup { animation: hi-fb-zu .18s ease forwards; }
+@keyframes hi-fb-blende { from { opacity: 0; } }
+@keyframes hi-fb-blende-zu { to { opacity: 0; } }
+@keyframes hi-fb-auf { from { opacity: 0; transform: translateY(14px) scale(.96); } }
+@keyframes hi-fb-zu { to { opacity: 0; transform: translateY(10px) scale(.97); } }
+.hi-fb-x { position: absolute; top: 12px; right: 12px; background: var(--flaeche-hover); border: 1px solid var(--rand); }
+.hi-fb-x:hover { border-color: rgba(255,181,71,.5); }
+.hi-fb-kopf { display: flex; gap: 16px; align-items: center; padding-right: 40px; }
+.hi-fb-kopf .fb-bild { width: 180px; max-width: 40%; flex: none; }
+.hi-fb-kopf p { margin: 4px 0 0; }
+.hi-fb-ursachen { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; }
+.hi-fb-ursachen li::marker { color: var(--amber); }
+.mobil .hi-fb-ebene { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+.mobil .hi-fb-popup { padding: 18px 16px; border-radius: 18px; }
+.mobil .hi-fb-kopf { flex-direction: column; align-items: flex-start; gap: 10px; padding-right: 36px; }
+.mobil .hi-fb-kopf .fb-bild { width: 150px; max-width: 100%; }
+@media (prefers-reduced-motion: reduce) { .hi-fb-schleier, .hi-fb-popup, .hi-fb-ebene.zu .hi-fb-schleier, .hi-fb-ebene.zu .hi-fb-popup { animation-duration: .01s; } }
 
 /* ---- Werkstatt ---- */
 .ws-kopfzeile { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
