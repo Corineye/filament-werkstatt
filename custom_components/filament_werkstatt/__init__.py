@@ -23,6 +23,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
 
 from .const import ALTE_AUTOMATION, CONF_DRUCKER, CONF_LISTE, CONF_PROTOKOLL, DOMAIN, PANEL_PFAD, URL_BASIS
+from .modelle import ModellDatei, ModelleListe
 from .geraete import drucker_entitaeten, einstellungen, vorschlaege
 from .protokoll import DruckProtokoll
 
@@ -55,6 +56,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             [StaticPathConfig(URL_BASIS, str(ORDNER), False)]
         )
         websocket_api.async_register_command(hass, ws_einstellungen)
+        hass.http.register_view(ModelleListe())
+        hass.http.register_view(ModellDatei())
         daten["dateien"] = True
 
     # Einrichtung aus Version 0.9 (ohne Fragen): einmal mit den Vorschlägen ergänzen,
