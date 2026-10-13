@@ -89,7 +89,7 @@ window.hass = { states, callService: async (domain, dienst, data) => {
 window.speicher = speicher;
 </script>
 <script type="module">
-await import("../filament-werkstatt.js");
+await import("../custom_components/filament_werkstatt/frontend/filament-werkstatt.js");
 const el = document.createElement("filament-werkstatt-panel");
 
 document.body.appendChild(el);

@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Filament-Werkstatt",
+        "description": "Adds the \"Filament\" page to the sidebar. No further settings are needed."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Filament-Werkstatt is already set up."
+    }
+  }
+}
