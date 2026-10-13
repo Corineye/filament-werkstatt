@@ -11,13 +11,14 @@ async function seite(breite, hoehe, mobil = false, erwarteteFehler = false) {
   const p = await ctx.newPage();
   p.on("pageerror", (e) => fehler.push(e.message));
   p.on("console", (m) => m.type() === "error" && !m.text().includes("404") && !(erwarteteFehler && m.text().includes("Filament-Werkstatt")) && fehler.push(m.text()));
-  await p.goto("http://localhost:8765/test/test.html?drucker=bereit");
+  await p.goto(`http://localhost:${process.env.TEST_PORT || 8765}/test/test.html?drucker=bereit`);
   await p.waitForTimeout(800);
   // Fertige Testdrucke als verbucht markieren, damit kein Pop-up stört
   await p.evaluate(() => { const x = window.el; x._dialog = null; x._bu = null; x._daten.buchen_ab = "2099-01-01"; x._zeichnen(); });
   return p;
 }
 const el = (p) => p.locator("filament-werkstatt-panel");
+const FEHLER_ANZAHL = 14;
 const nav = async (p, id) => { await el(p).locator(`.nav-oben [data-id="${id}"]`).click(); await p.waitForTimeout(350); };
 
 // ---------------- Desktop ----------------
@@ -25,6 +26,8 @@ let p = await seite(1400, 900);
 pruefe((await el(p).locator(".nav-oben .nav-punkt").count()) === 8, "8 Bereiche oben in der Navigation");
 
 // Hilfe
+// Geladene Rolle (vom Drucker-Bereich gesetzt) ist die Standard-Beispielrolle
+const geladen = await p.evaluate(() => { const x = window.el, r = x._daten.rollen.find((y) => y.material === "PETG") || x._daten.rollen[1]; x._daten.geladen = r.id; return { id: r.id, name: r.name }; });
 await nav(p, "hilfe");
 pruefe((await el(p).locator(".p1s-punkt").count()) === 12, "P1S-Zeichnung mit 12 Bereichen");
 await el(p).locator('.p1s-punkt[data-id="bett"]').hover();
@@ -32,27 +35,92 @@ await p.waitForTimeout(250);
 let t = await el(p).locator("#hi-info").textContent();
 pruefe(t.includes("Druckbett") && t.includes("Druckplatte"), "Maus über dem Bett zeigt Bett-Einstellungen mit Rollenwerten");
 await p.screenshot({ path: `${out}/h1-p1s.png` });
+// Display (11) oben am Drucker, gleiche x-Position wie vorher
+const disp = await el(p).locator('.p1s-punkt[data-id="display"] .p1s-ring').evaluate((c) => ({ x: +c.getAttribute("cx"), y: +c.getAttribute("cy") }));
+pruefe(disp.x === 110 && disp.y < 60, `P1S: Display (11) oben am Gehäuse (y ${disp.y})`);
+// Extruder: Auswahl der Beispielrolle, Standard = geladene Rolle
+await el(p).locator('.p1s-punkt[data-id="extruder"]').hover();
+await p.waitForTimeout(250);
+const wahlWert = () => el(p).locator('select[data-hi="rolle"]').first().evaluate((s) => s.value);
+pruefe((await el(p).locator('#hi-info select[data-hi="rolle"]').count()) === 1, "Extruder: Rollenauswahl für die Beispielwerte");
+pruefe((await wahlWert()) === geladen.id, `Standard ist die geladene Rolle (${geladen.name})`);
+const andere = await p.evaluate((g) => { const r = window.el._daten.rollen.find((y) => y.id !== g && y.material !== "PETG" && y.vorschlag && y.vorschlag.tr_temp && y.vorschlag.k); return { id: r.id, name: r.name, material: r.material, tr: (r.eigen && r.eigen.tr_temp) ?? r.vorschlag.tr_temp, k: (r.eigen && r.eigen.k) ?? r.vorschlag.k }; }, geladen.id);
+await el(p).locator("#hi-info .hi-rollenwahl .dd-knopf").click();
+await p.waitForTimeout(150);
+await el(p).locator(`.dd-option[data-wert="${andere.id}"]`).click();
+await p.waitForTimeout(300);
+t = await el(p).locator("#hi-info").textContent();
+pruefe((await wahlWert()) === andere.id && t.includes(String(andere.k).replace(".", ",")), `Extruder zeigt Werte von ${andere.name} (K ${andere.k})`);
+await p.screenshot({ path: `${out}/h1b-extruder-rolle.png` });
+// Trockner übernimmt dieselbe Auswahl
 await el(p).locator('[data-aktion="hi-tab"][data-id="trockner"]').click();
 await p.waitForTimeout(300);
 await el(p).locator('.p1s-punkt[data-id="feuchte"]').hover();
 await p.waitForTimeout(200);
 pruefe((await el(p).locator("#hi-tr-info").textContent()).includes("Luftfeuchte"), "Trockner: Feld Luftfeuchte erklärt");
 pruefe((await el(p).locator(".tr-rolle").count()) > 10, "Trockner: eigene Rollen mit Trocknungswerten");
+const anzeige = await el(p).locator(".tr-wert").evaluateAll((l) => Object.fromEntries(l.map((x) => [x.dataset.wert, x.textContent])));
+pruefe(anzeige.material === andere.material.slice(0, 6) && anzeige.soll === `${andere.tr}°` && (await wahlWert()) === andere.id, `Trockner-Display zeigt ${anzeige.material} ${anzeige.soll} (gleiche Rolle wie beim Extruder)`);
+// Geometrie: Hover-Felder mittig hinter den Werten, Nummer darunter ohne Überlappung
+const geo = await el(p).locator(".trockner-bild").evaluate((svg) => {
+  const g = (id) => svg.querySelector(`.p1s-punkt[data-id="${id}"]`);
+  const box = (id) => { const r = g(id).querySelector(".p1s-flaeche"); return { x: +r.getAttribute("x"), y: +r.getAttribute("y"), w: +r.getAttribute("width"), h: +r.getAttribute("height") }; };
+  const ring = (id) => { const c = g(id).querySelector(".p1s-ring"); return { x: +c.getAttribute("cx"), y: +c.getAttribute("cy"), r: +c.getAttribute("r") }; };
+  const chips = [...svg.querySelectorAll(".tr-wert")].map((t) => { const b = box(t.dataset.wert), c = ring(t.dataset.wert), tb = t.getBBox();
+    return { mx: Math.abs(b.x + b.w / 2 - (tb.x + tb.width / 2)), my: Math.abs(b.y + b.h / 2 - (tb.y + tb.height / 2)), luecke: c.y - c.r - (b.y + b.h), drin: tb.x >= b.x && tb.x + tb.width <= b.x + b.w }; });
+  return { chips, spulen: box("spulen"), auslass: ring("auslass") };
+});
+pruefe(geo.chips.length === 5 && geo.chips.every((c) => c.mx < 1.5 && c.my < 3 && c.drin), "Trockner: grüne Felder mittig hinter den Werten");
+pruefe(geo.chips.every((c) => c.luecke >= 2), "Trockner: Nummern liegen unter den Feldern, ohne Überlappung");
+pruefe(geo.spulen.x === 34 && geo.spulen.y === 32 && geo.spulen.w === 372 && geo.spulen.h === 160, "Trockner: Feld 6 füllt den ganzen Innenraum");
+pruefe(geo.auslass.x === 220 && geo.auslass.y < 60, "Trockner: Auslass 7 oben in der Mitte");
 await p.screenshot({ path: `${out}/h2-trockner.png` });
+await el(p).locator('.p1s-punkt[data-id="spulen"] .p1s-ring').hover();
+await p.waitForTimeout(250);
+pruefe((await el(p).locator("#hi-tr-info").textContent()).includes("Spulenplätze"), "Trockner: Hover über Feld 6");
+await el(p).locator(".trockner-bild").screenshot({ path: `${out}/h2b-trockner-innenraum.png` });
+await el(p).locator('.p1s-punkt[data-id="material"] .p1s-ring').hover();
+await p.waitForTimeout(250);
+await el(p).locator(".trockner-bild").screenshot({ path: `${out}/h2c-trockner-material.png` });
+// Fehlerbilder: großes Fenster mittig, schließen per X, Klick daneben und Escape
 await el(p).locator('[data-aktion="hi-tab"][data-id="fehler"]').click();
 await p.waitForTimeout(300);
-await el(p).locator('[data-aktion="hi-fehler"]').first().click();
-await p.waitForTimeout(500);
-pruefe((await el(p).locator(".fb-details").count()) === 1, "Fehlerbild klappt mit Lösungen auf");
+pruefe((await wahlWert()) === andere.id, "Fehlerbilder: gleiche Beispielrolle");
+await el(p).locator('[data-aktion="hi-fehler"][data-id="haftung"]').click();
+await p.waitForTimeout(350);
+const popup = el(p).locator(".hi-fb-popup");
+pruefe((await popup.count()) === 1 && (await popup.textContent()).includes("Betttemperatur"), "Fehlerbild öffnet Fenster mit Lösungen");
+const pb = await popup.boundingBox();
+pruefe(Math.abs(pb.x + pb.width / 2 - 700) < 4 && Math.abs(pb.y + pb.height / 2 - 450) < 40 && pb.width > 500, `Fenster groß und mittig (${Math.round(pb.width)} px breit)`);
+pruefe(await el(p).locator(".hi-fb-ebene").evaluate((e) => e.parentElement.classList.contains("app")), "Fenster liegt über der ganzen Seite");
 await p.screenshot({ path: `${out}/h3-fehlerbilder.png` });
+await el(p).locator(".hi-fb-x").click();
+await p.waitForTimeout(60);
+pruefe((await el(p).locator(".fb-karte").count()) === FEHLER_ANZAHL && (await el(p).locator(".hi-fb-ebene.zu").count()) === 1, "Schließen: Karten bleiben stehen, Fenster blendet aus");
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".hi-fb-ebene").count()) === 0 && (await el(p).locator(".fb-karte").count()) === FEHLER_ANZAHL, "X schließt das Fenster ohne Flackern");
+await el(p).locator('[data-aktion="hi-fehler"][data-id="naht"]').click();
+await p.waitForTimeout(350);
+t = await popup.textContent();
+pruefe(t.includes("Druckaufbau in der Düse") && !t.includes("Druckdruck"), "Sichtbare Naht: Ursache verständlich formuliert");
+await p.mouse.click(30, 450);
+await p.waitForTimeout(350);
+pruefe((await el(p).locator(".hi-fb-ebene").count()) === 0, "Klick neben das Fenster schließt");
+await el(p).locator('[data-aktion="hi-fehler"][data-id="warping"]').click();
+await p.waitForTimeout(350);
+await p.keyboard.press("Escape");
+await p.waitForTimeout(350);
+pruefe((await el(p).locator(".hi-fb-ebene").count()) === 0, "Escape schließt");
 await el(p).locator('[data-aktion="hi-tab"][data-id="kalibrierung"]').click();
 await p.waitForTimeout(300);
+pruefe((await wahlWert()) === andere.id, "Kalibrierung: gleiche Beispielrolle");
+pruefe((await el(p).locator(".kal-liste").first().textContent()).includes(`bei ${andere.material}`), "Temperaturturm: Beispiel passend zum Material");
 await el(p).locator('[data-aktion="hi-kal"][data-id="flow"]').click();
 await p.waitForTimeout(300);
 await el(p).locator('[data-aktion="hi-kal-schritt"][data-d="1"]').click();
 await el(p).locator('[data-aktion="hi-kal-speichern"]').click();
 await p.waitForTimeout(300);
-pruefe(await p.evaluate(() => window.el._daten.rollen.some((r) => r.kalibriert && r.kalibriert.flow)), "Kalibrierergebnis Flow in der Rolle gespeichert");
+pruefe(await p.evaluate((id) => { const r = window.el._daten.rollen.find((x) => x.id === id); return !!(r.kalibriert && r.kalibriert.flow); }, andere.id), "Kalibrierergebnis Flow in der gewählten Rolle gespeichert");
 await p.screenshot({ path: `${out}/h4-kalibrierung.png` });
 
 // Werkstatt: Warteschlange
@@ -168,6 +236,11 @@ await p.waitForTimeout(300);
 await p.keyboard.press("Enter");
 await p.waitForTimeout(400);
 pruefe(await p.evaluate(() => window.el._ansicht === "hilfe"), "Enter öffnet den ersten Treffer (Hilfe)");
+if (await el(p).locator(".hi-fb-ebene").count()) {
+  pruefe((await el(p).locator(".hi-fb-popup").textContent()).includes("Löst sich"), "Treffer öffnet das Fehlerbild-Fenster");
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(350);
+}
 
 // Profil-Export
 await nav(p, "filament");
@@ -242,6 +315,24 @@ await p.waitForTimeout(400);
 await el(p).locator('.p1s-punkt[data-id="duese"]').tap();
 await p.waitForTimeout(400);
 await p.screenshot({ path: `${out}/m3-hilfe.png` });
+await el(p).locator('.p1s-punkt[data-id="extruder"]').tap();
+await p.waitForTimeout(500);
+await p.screenshot({ path: `${out}/m3b-hilfe-extruder.png` });
+await el(p).locator('[data-aktion="hi-tab"][data-id="trockner"]').tap();
+await p.waitForTimeout(400);
+await el(p).locator('.p1s-punkt[data-id="auslass"] .p1s-ring').tap();
+await p.waitForTimeout(300);
+await p.screenshot({ path: `${out}/m3c-trockner.png` });
+await el(p).locator('[data-aktion="hi-tab"][data-id="fehler"]').tap();
+await p.waitForTimeout(400);
+await el(p).locator('[data-aktion="hi-fehler"][data-id="naht"]').tap();
+await p.waitForTimeout(400);
+const mb = await el(p).locator(".hi-fb-popup").boundingBox();
+pruefe(mb && mb.x >= 0 && mb.x + mb.width <= 390 && mb.y >= 0 && mb.y + mb.height <= 844 && mb.width > 340, "Handy: Fehlerbild-Fenster passt auf den Bildschirm");
+await p.screenshot({ path: `${out}/m3d-fehler-fenster.png` });
+await el(p).locator(".hi-fb-x").tap();
+await p.waitForTimeout(350);
+pruefe((await el(p).locator(".hi-fb-ebene").count()) === 0, "Handy: X schließt das Fenster");
 await el(p).locator('.nav-unten [data-aktion="mehr"]').click();
 await el(p).locator('.mehr-punkt[data-id="nerd"]').click();
 await p.waitForTimeout(400);

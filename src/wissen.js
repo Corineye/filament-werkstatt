@@ -117,7 +117,7 @@ const FEHLERBILDER = [
       { text: "Vibrations-Kalibrierung am Drucker neu laufen lassen." },
     ] },
   { id: "naht", name: "Sichtbare Naht", kurz: "Senkrechte Linie, wo jede Schicht beginnt",
-    ursachen: ["Druckdruck beim Start und Ende der Wand (K-Faktor)"],
+    ursachen: ["Druckaufbau in der Düse am Anfang und Ende der Wand (Pressure Advance / K-Faktor)", "Ungünstige Nahtposition (z. B. „Nächste“ auf glatten Flächen)"],
     loesungen: [
       { text: "Flussdynamik (K-Faktor) kalibrieren (Hilfe › Kalibrierung)." },
       { text: "Naht in eine Ecke legen: Nahtposition „Ausgerichtet“." },
@@ -156,14 +156,22 @@ const FEHL_FRAGEN = {
 // Aus Fortschritt (%) eine Antwort für „Wann?“ vorschlagen
 const wannAusFortschritt = (p) => (p == null ? null : p < 3 ? "erste" : p < 33 ? "frueh" : p < 80 ? "mitte" : "spaet");
 
+// Temperaturturm: unterste (heißeste) Stufe passend zur Düsentemperatur der Rolle
+const kalTempOben = (r) => { const d = r && wert(r, "duese").v; return d ? Math.round((d + 15) / 5) * 5 : 230; };
+// Platzhalter in Kalibrier-Texten mit Werten der Beispielrolle füllen
+function kalText(s, r) {
+  const oben = kalTempOben(r);
+  return s.replace(/\{t_hoch\}/g, oben).replace(/\{t_tief\}/g, oben - 25).replace(/\{material\}/g, (r && r.material) || "PLA");
+}
+
 // Kalibrierungen (Bambu Studio › Kalibrierung)
 const KALIBRIERUNGEN = [
   { id: "temp", name: "Temperaturturm", feld: "duese", icon: "🌡️",
     wozu: "Findet die beste Düsentemperatur für eine Rolle: sauber, ohne Fäden, mit fester Schichthaftung.",
-    so: ["Bambu Studio › Kalibrierung › Temperatur.", "Material wählen, Bereich vorgeben (z. B. 230 → 190 °C bei PLA).", "Drucken. Jede Stufe hat eine andere Temperatur."],
+    so: ["Bambu Studio › Kalibrierung › Temperatur.", "Material wählen, Bereich vorgeben (z. B. {t_hoch} → {t_tief} °C bei {material}).", "Drucken. Jede Stufe hat eine andere Temperatur."],
     achten: ["Unten heiß, oben kalt: die Stufe mit sauberen Brücken, wenig Fäden und ohne Lücken wählen.", "Turm oben abbrechen: wenn er leicht bricht, ist es zu kalt."],
     fehler: ["Fäden an den heißen Stufen (zu heiß oder feucht)", "Brücken hängen durch", "Turm bricht bei kalten Stufen"],
-    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="38" y="${70 - i * 13}" width="44" height="12" fill="hsl(${10 + i * 28} 70% 55%)"/><text x="88" y="${79 - i * 13}" font-size="7" fill="#8da49a">${230 - i * 5}°</text>`).join("")}</svg>` },
+    bild: (r) => { const oben = kalTempOben(r); return `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="38" y="${70 - i * 13}" width="44" height="12" fill="hsl(${10 + i * 28} 70% 55%)"/><text x="88" y="${79 - i * 13}" font-size="7" fill="#8da49a">${oben - i * 5}°</text>`).join("")}</svg>`; } },
   { id: "flow", name: "Flow Rate", feld: "flow", icon: "💧",
     wozu: "Stimmt, wie viel Material gefördert wird. Zu viel macht Pickel und raue Deckflächen, zu wenig Lücken.",
     so: ["Bambu Studio › Kalibrierung › Flow-Rate › Durchgang 1.", "Die glatteste Fläche wählen und die Zahl eintragen.", "Optional Durchgang 2 für die Feinabstimmung."],
@@ -201,7 +209,7 @@ const P1S_BEREICHE = [
     einst: [["Geschwindigkeiten", "Außenwand langsamer für schöne Oberflächen, Füllung schnell."], ["Beschleunigung", "Höher = schneller, aber mehr Schwingungen."], ["Geschwindigkeitsprofil am Drucker", "Leise, Standard, Sport, Wahnsinn."]] },
   { id: "bett", n: 5, x: 210, y: 300, name: "Druckbett", live: "bett", einheit: "°C",
     text: "Heizbett mit wechselbarer Platte. Platte und Temperatur entscheiden über Haftung und Elefantenfuß.",
-    einst: [["Druckbetttyp", "Textured PEI für fast alles, Cool Plate für PLA, Engineering für Kleber."], ["Betttemperatur", "PLA 55 °C, PETG 70 °C, ASA 100 °C."], ["Erste Schicht", "Höhe und Tempo der ersten Schicht."]] },
+    einst: [["Druckbetttyp", "Textured PEI für fast alles, Cool Plate für PLA, Engineering Plate mit Klebestift."], ["Betttemperatur", "PLA 55 °C, PETG 70 °C, ASA 100 °C."], ["Erste Schicht", "Höhe und Tempo der ersten Schicht."]] },
   { id: "z", n: 6, x: 76, y: 262, name: "Z-Achse (Spindeln)", live: null,
     text: "Senkt das Bett Schicht für Schicht ab. Hier wirken Schichthöhe und Z-Hop.",
     einst: [["Schichthöhe", "0,2 mm Standard, 0,12 fein, 0,28 schnell (bei 0,4-mm-Düse)."], ["Z-Hop", "Hebt beim Verfahren an, verhindert Anstoßen."]] },
@@ -217,7 +225,7 @@ const P1S_BEREICHE = [
   { id: "kamera", n: 10, x: 58, y: 54, name: "Kamera", live: null,
     text: "Zeigt den Druck live und macht das Endfoto. Die Fehlererkennung (Spaghetti) läuft darüber.",
     einst: [["Druckfehlererkennung", "Am Drucker unter Einstellungen einschalten."]] },
-  { id: "display", n: 11, x: 110, y: 404, name: "Display", live: "schritt",
+  { id: "display", n: 11, x: 110, y: 32, name: "Display", live: "schritt",
     text: "Bedienung am Gerät: Filament laden, Extruder fahren, Geschwindigkeitsprofil, Kalibrierung.",
     einst: [["Extruder fahren", "Vor dem Druck 3× fördern (wird beim Verbuchen eingerechnet)."]] },
   { id: "schneider", n: 12, x: 180, y: 158, name: "Filament-Schneider", live: null,
@@ -260,44 +268,56 @@ function p1sSvg(aktiv) {
     <rect x="58" y="306" width="304" height="8" fill="rgba(62,230,168,.25)"/>
     <!-- kleines Druckteil -->
     <rect x="196" y="268" width="36" height="22" rx="2" fill="#3ee6a8" opacity=".7"/>
-    <!-- Display + Tür -->
-    <rect x="70" y="390" width="80" height="26" rx="4" stroke="#8da49a" stroke-width="1.4" fill="rgba(62,230,168,.06)"/>
-    <path d="M78 403 H110" stroke="#3ee6a8" stroke-width="2"/>
-    <path d="M34 370 H376" ${linie}/>
+    <!-- Display oben an der Front -->
+    <rect x="72" y="26" width="76" height="12" rx="3" stroke="#8da49a" stroke-width="1.4" fill="rgba(62,230,168,.10)" class="p1s-display"/>
+    <!-- Tür unten -->
+    <path d="M34 370 H376" ${linie}/><path d="M186 397 H234" stroke="#5d726a" stroke-width="3" stroke-linecap="round"/>
     ${P1S_BEREICHE.map((b) => `<g class="p1s-punkt ${aktiv === b.id ? "an" : ""}" data-aktion="hi-p1s" data-id="${b.id}" tabindex="0">
       <circle cx="${b.x}" cy="${b.y}" r="16" class="p1s-flaeche"/>
       <circle cx="${b.x}" cy="${b.y}" r="10" class="p1s-ring"/><text x="${b.x}" y="${b.y + 3.5}" text-anchor="middle">${b.n}</text></g>`).join("")}
   </svg>`;
 }
 
-// ---- Sovol-Trockner: Bereiche des Displays ----
+// ---- Sovol-Trockner: Bereiche der Zeichnung ----
+// f = Hover-Fläche [x, y, breite, höhe], b = Nummernpunkt [x, y] (viewBox 440 × 290).
+// Die Display-Werte stehen mittig in ihrer Fläche (y = 221), die Nummer darunter.
+const TR_TEXT_Y = 221;
+const trFeld = (x) => ({ f: [x - 29, TR_TEXT_Y - 12, 58, 24], b: [x, 247], x });
 const TROCKNER_BEREICHE = [
-  { id: "material", name: "Material", x: 92, y: 236, text: "Voreinstellung für das Material. Setzt Temperatur und Zeit. Für eigene Werte „Custom“ wählen und anpassen." },
-  { id: "feuchte", name: "Luftfeuchte", x: 162, y: 236, text: "Relative Feuchte im Trockner. Ziel: unter 15 % für PLA/PETG, unter 10 % für ASA, TPU, PA. Sinkt sie nicht mehr, ist die Rolle trocken." },
-  { id: "soll", name: "Soll-Temperatur", x: 232, y: 236, text: "Die eingestellte Temperatur. Nie über die Erweichungstemperatur, sonst verkleben die Windungen (PLA max. 55 °C)." },
-  { id: "ist", name: "Ist-Temperatur", x: 296, y: 236, text: "Aktuelle Temperatur im Inneren. Sie erreicht den Sollwert nach etwa 20–30 Minuten, die Zeit zählt aber sofort." },
-  { id: "zeit", name: "Restzeit", x: 360, y: 236, text: "Verbleibende Trocknungszeit. Danach Rolle warm luftdicht einpacken oder direkt aus dem Trockner drucken." },
-  { id: "spulen", name: "Zwei Spulenplätze", x: 200, y: 110, text: "Zwei Rollen gleichzeitig. Nur Materialien mit ähnlicher Temperatur zusammen trocknen, sonst nach dem empfindlicheren richten." },
-  { id: "auslass", name: "Filament-Auslass", x: 386, y: 96, text: "Durch die Öffnung kann direkt aus dem Trockner gedruckt werden. Gut für TPU und PETG bei langen Drucken." },
+  { id: "material", name: "Material", ...trFeld(92), text: "Voreinstellung für das Material. Setzt Temperatur und Zeit. Für eigene Werte „Custom“ wählen und anpassen." },
+  { id: "feuchte", name: "Luftfeuchte", ...trFeld(162), text: "Relative Feuchte im Trockner. Ziel: unter 15 % für PLA/PETG, unter 10 % für ASA, TPU, PA. Sinkt sie nicht mehr, ist die Rolle trocken." },
+  { id: "soll", name: "Soll-Temperatur", ...trFeld(232), text: "Die eingestellte Temperatur. Nie über die Erweichungstemperatur, sonst verkleben die Windungen (PLA max. 55 °C)." },
+  { id: "ist", name: "Ist-Temperatur", ...trFeld(296), text: "Aktuelle Temperatur im Inneren. Sie erreicht den Sollwert nach etwa 20–30 Minuten, die Zeit zählt aber sofort." },
+  { id: "zeit", name: "Restzeit", ...trFeld(360), text: "Verbleibende Trocknungszeit. Danach Rolle warm luftdicht einpacken oder direkt aus dem Trockner drucken." },
+  { id: "spulen", name: "Zwei Spulenplätze", f: [34, 32, 372, 160], b: [220, 110], text: "Zwei Rollen gleichzeitig. Nur Materialien mit ähnlicher Temperatur zusammen trocknen, sonst nach dem empfindlicheren richten." },
+  { id: "auslass", name: "Filament-Auslass", f: [192, 2, 56, 58], b: [220, 46], text: "Durch die Öffnung oben in der Mitte kann direkt aus dem Trockner gedruckt werden. Gut für TPU und PETG bei langen Drucken." },
 ];
-function trocknerSvg(aktiv) {
+// Werte im Display passend zur Rolle (r), sonst PETG als Beispiel
+function trocknerWerte(r) {
+  const t = r ? wert(r, "tr_temp").v : null, d = r ? wert(r, "tr_dauer").v : null, f = r ? wert(r, "tr_feuchte").v : null;
+  const soll = t != null ? t : 65, std = d != null ? d : 6, ziel = f != null ? f : 15;
+  const rest = Math.max(0, Math.round(std * 60) - 20);
+  const mat = r && r.material ? String(r.material) : "PETG";
+  return { material: mat.length > 6 ? mat.slice(0, 6) : mat, feuchte: `${Math.max(1, ziel - 3)} %`, soll: `${soll}°`, ist: `${Math.max(20, soll - 2)}°`,
+    zeit: `${String(Math.floor(rest / 60)).padStart(2, "0")}:${String(rest % 60).padStart(2, "0")}` };
+}
+function trocknerSvg(aktiv, r) {
   const l = 'stroke="#8da49a" stroke-width="1.5" fill="none"';
+  const w = trocknerWerte(r);
   const spule = (cx) => `<circle cx="${cx}" cy="110" r="54" stroke="#ffb547" stroke-width="2" fill="rgba(255,181,71,.08)"/>
     <circle cx="${cx}" cy="110" r="40" stroke="#ffb547" stroke-opacity=".5" fill="none"/><circle cx="${cx}" cy="110" r="10" fill="#ffb547" opacity=".6"/>`;
   return `<svg viewBox="0 0 440 290" class="trockner-bild" role="img" aria-label="Zeichnung Sovol Filament-Trockner">
     <rect x="20" y="20" width="400" height="250" rx="22" ${l}/>
     <rect x="34" y="32" width="372" height="160" rx="14" stroke="#5cc8ff" stroke-opacity=".4" stroke-width="1.4" fill="rgba(92,200,255,.05)"/>
     ${spule(130)}${spule(310)}
-    <path d="M386 84 h20" stroke="#ffb547" stroke-width="2"/><circle cx="406" cy="84" r="4" fill="none" stroke="#8da49a"/>
+    <!-- Auslass oben in der Mitte, Filament von der rechten Rolle -->
+    <path d="M310 56 Q300 30 220 28 V6" stroke="#ffb547" stroke-width="2" fill="none"/>
+    <rect x="210" y="8" width="20" height="14" rx="4" stroke="#8da49a" stroke-width="1.5" fill="#0b1210" class="tr-auslass"/><circle cx="220" cy="15" r="3" fill="#ffb547"/>
     <rect x="60" y="206" width="330" height="54" rx="10" fill="rgba(0,0,0,.35)" stroke="#3ee6a8" stroke-opacity=".5"/>
-    <text x="92" y="228" class="tr-wert" text-anchor="middle">PETG</text>
-    <text x="162" y="228" class="tr-wert" text-anchor="middle">12 %</text>
-    <text x="232" y="228" class="tr-wert" text-anchor="middle">65°</text>
-    <text x="296" y="228" class="tr-wert" text-anchor="middle">63°</text>
-    <text x="360" y="228" class="tr-wert" text-anchor="middle">05:40</text>
     ${TROCKNER_BEREICHE.map((b) => `<g class="p1s-punkt ${aktiv === b.id ? "an" : ""}" data-aktion="hi-tr" data-id="${b.id}" tabindex="0">
-      <rect x="${b.x - 30}" y="${b.y - (b.id === "spulen" ? 60 : 12)}" width="60" height="${b.id === "spulen" ? 120 : 24}" rx="8" class="p1s-flaeche"/>
-      <circle cx="${b.x}" cy="${b.y + (b.id === "spulen" ? 70 : 14)}" r="9" class="p1s-ring"/><text x="${b.x}" y="${b.y + (b.id === "spulen" ? 73.5 : 17.5)}" text-anchor="middle">${TROCKNER_BEREICHE.indexOf(b) + 1}</text></g>`).join("")}
+      <rect x="${b.f[0]}" y="${b.f[1]}" width="${b.f[2]}" height="${b.f[3]}" rx="${b.id === "spulen" ? 14 : 8}" class="p1s-flaeche"/>
+      <circle cx="${b.b[0]}" cy="${b.b[1]}" r="9" class="p1s-ring"/><text x="${b.b[0]}" y="${b.b[1]}" text-anchor="middle" dominant-baseline="central">${TROCKNER_BEREICHE.indexOf(b) + 1}</text></g>`).join("")}
+    ${TROCKNER_BEREICHE.filter((b) => b.x).map((b) => `<text x="${b.x}" y="${TR_TEXT_Y}" class="tr-wert" data-wert="${b.id}" text-anchor="middle" dominant-baseline="central">${esc(w[b.id])}</text>`).join("")}
   </svg>`;
 }
 
