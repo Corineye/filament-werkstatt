@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.6.0";
+const VERSION = "0.7.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -17,6 +17,7 @@ const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
   { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️" },
+  { id: "modelle", name: "3D-Modelle", icon: "🧊" },
   { id: "hilfe", name: "Hilfe", icon: "💡", bald: true },
   { id: "system", name: "System", icon: "⚙️" },
 ];
@@ -144,6 +145,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       this.shadowRoot.addEventListener("change", (e) => this._aenderung(e));
       this.shadowRoot.addEventListener("scroll", (e) => { this._ddBeimScrollen(e.target); }, true);
       this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._ddZu(); });
+      this._wischenEinrichten();
     }
     this._ro.observe(this);
     this._zeichnen();
@@ -325,6 +327,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a === "dd-wahl") { this._ddWaehlen(el); return; }
     if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
     if (a.startsWith("dr-")) { this._drKlick(a, el); return; }
+    if (a.startsWith("mod-")) { this._modKlick(a, el); return; }
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
       const k = el.dataset.k;
@@ -356,7 +359,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._rechner = null;
         this._sheetScroll = 0;
         break;
-      case "neu": this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
+      case "neu": this._ansicht === "modelle" ? (this._dialog = "mod-laden") : this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
       case "tab":
         if (this._tab === "rest" && this._rechnerGeaendert()) this._toast(this._restSpeichern(false));
@@ -571,6 +574,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   _eingabe(e) {
     const t = e.target;
     if (this._invEingabe(t)) return;
+    if (this._modEingabe(t)) return;
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -597,6 +601,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   _aenderung(e) {
     const t = e.target;
     if (this._invAenderung(t)) return;
+    if (this._modAenderung(t)) return;
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -724,11 +729,63 @@ class FilamentWerkstattPanel extends HTMLElement {
     // Einblend-Animationen nur beim ersten Erscheinen, nicht bei jedem Neuzeichnen
     root.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });
     this._auswahlenBauen();
+    if (this._ansicht === "modelle") this._modNachZeichnen();
     if (this._klappNeu) {
       const k = root.querySelector(`[data-klapp="${this._klappNeu}"]`);
       this._klappNeu = null;
       if (k) this._klappAnimieren(k, true);
     }
+  }
+
+  // ---- Handy: Detailansicht nach unten wegwischen ------------------------
+  // Greift am Griff/Kopf immer, im Inhalt nur, wenn dieser ganz oben steht.
+  _wischenEinrichten() {
+    const root = this.shadowRoot;
+    let w = null;
+    root.addEventListener("touchstart", (e) => {
+      w = null;
+      if (!this._mobil || e.touches.length !== 1) return;
+      const sheet = e.target.closest(".sheet");
+      if (!sheet || e.target.closest('input[type="range"], .dd-liste, textarea')) return;
+      const inhalt = sheet.querySelector(".sheet-inhalt");
+      const imInhalt = !!e.target.closest(".sheet-inhalt");
+      if (imInhalt && inhalt.scrollTop > 0) return;
+      w = { sheet, inhalt, imInhalt, y0: e.touches[0].clientY, t0: performance.now(), dy: 0, aktiv: false };
+    }, { passive: true });
+    root.addEventListener("touchmove", (e) => {
+      if (!w) return;
+      const dy = e.touches[0].clientY - w.y0;
+      if (!w.aktiv) {
+        if (dy < -4 || (w.imInhalt && w.inhalt.scrollTop > 0)) { w = null; return; }
+        if (dy < 8) return;
+        w.aktiv = true;
+        w.sheet.style.transition = "none";
+        w.sheet.style.animation = "none";
+        w.schleier = root.querySelector(".schleier:not(.oben)");
+      }
+      e.preventDefault();
+      w.dy = Math.max(0, dy - 8);
+      w.sheet.style.transform = `translateY(${w.dy}px)`;
+      if (w.schleier) w.schleier.style.opacity = String(Math.max(0.2, 1 - w.dy / w.sheet.offsetHeight));
+    }, { passive: false });
+    const ende = () => {
+      if (!w || !w.aktiv) { w = null; return; }
+      const { sheet, schleier, dy } = w;
+      const tempo = dy / Math.max(1, performance.now() - w.t0);
+      w = null;
+      if (dy > 120 || (dy > 40 && tempo > 0.6)) {
+        sheet.style.transition = "transform .18s ease-in";
+        sheet.style.transform = "translateY(100%)";
+        if (schleier) { schleier.style.transition = "opacity .18s"; schleier.style.opacity = "0"; }
+        setTimeout(() => { const s = root.querySelector(".schleier:not(.oben)"); if (s && s.dataset.aktion) s.click(); }, 170);
+      } else {
+        sheet.style.transition = "transform .22s cubic-bezier(.2,.9,.3,1.2)";
+        sheet.style.transform = "";
+        if (schleier) { schleier.style.transition = "opacity .2s"; schleier.style.opacity = ""; }
+      }
+    };
+    root.addEventListener("touchend", ende);
+    root.addEventListener("touchcancel", ende);
   }
 
   // ---- Aufklappen mit Animation (nach unten fahren) -----------------------
@@ -892,6 +949,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (!this._daten) return `<div class="laden">Lade Daten aus Home Assistant …</div>`;
     if (this._ansicht === "inventar") return this._invHtml();
     if (this._ansicht === "drucker") return this._drHtml();
+    if (this._ansicht === "modelle") return this._modHtml();
     return this._filamentHtml();
   }
 
@@ -1248,6 +1306,8 @@ class FilamentWerkstattPanel extends HTMLElement {
   // ---- Dialoge ------------------------------------------------------------
   _dialogHtml() {
     if (!this._dialog) return "";
+    if (this._dialog === "mod-laden") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod"></div><div class="dialog" role="dialog" data-einmal="dialog-mod">${this._modLadenDialogHtml()}</div>`;
+    if (this._dialog === "mod-stuetzen") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod-s"></div><div class="dialog breit-dialog" role="dialog" data-einmal="dialog-mod-s">${this._modStuetzenHilfeHtml()}</div>`;
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
     if (this._dialog === "dr-druck") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr"></div><div class="dialog" role="dialog" data-einmal="dialog-dr">${this._drDialogHtml()}</div>`;
     const r = this._rolle();
@@ -1308,7 +1368,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);
