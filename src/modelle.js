@@ -29,6 +29,48 @@ const M4 = {
   },
   verschieben(x, y, z) { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1]; },
   eins() { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; },
+  // Drehung (3×3 zeilenweise) um einen Punkt als 4×4
+  drehungUm(R, c) {
+    const t = [0, 1, 2].map((i) => c[i] - (R[i * 3] * c[0] + R[i * 3 + 1] * c[1] + R[i * 3 + 2] * c[2]));
+    return [R[0], R[3], R[6], 0, R[1], R[4], R[7], 0, R[2], R[5], R[8], 0, t[0], t[1], t[2], 1];
+  },
+};
+
+// ---- Vektoren und Quaternionen für die Kamera -----------------------------
+const V3 = {
+  plus: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
+  minus: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  mal: (a, s) => [a[0] * s, a[1] * s, a[2] * s],
+  punkt: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  kreuz: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
+  // Rodrigues: v um die (normierte) Achse k drehen
+  drehen(v, k, w) {
+    const c = Math.cos(w), s = Math.sin(w), kv = V3.kreuz(k, v), d = V3.punkt(k, v) * (1 - c);
+    return [v[0] * c + kv[0] * s + k[0] * d, v[1] * c + kv[1] * s + k[1] * d, v[2] * c + kv[2] * s + k[2] * d];
+  },
+};
+const QU = {
+  // aus Kamera-Basis (Spalten rechts, oben, rück)
+  ausBasis(r, u, b) {
+    const m00 = r[0], m11 = u[1], m22 = b[2], spur = m00 + m11 + m22;
+    let q;
+    if (spur > 0) { const s = Math.sqrt(spur + 1) * 2; q = [(u[2] - b[1]) / s, (b[0] - r[2]) / s, (r[1] - u[0]) / s, s / 4]; }
+    else if (m00 > m11 && m00 > m22) { const s = Math.sqrt(1 + m00 - m11 - m22) * 2; q = [s / 4, (u[0] + r[1]) / s, (b[0] + r[2]) / s, (u[2] - b[1]) / s]; }
+    else if (m11 > m22) { const s = Math.sqrt(1 + m11 - m00 - m22) * 2; q = [(u[0] + r[1]) / s, s / 4, (b[1] + u[2]) / s, (b[0] - r[2]) / s]; }
+    else { const s = Math.sqrt(1 + m22 - m00 - m11) * 2; q = [(b[0] + r[2]) / s, (b[1] + u[2]) / s, s / 4, (r[1] - u[0]) / s]; }
+    return q;
+  },
+  zuBasis([x, y, z, w]) {
+    return { r: [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)], u: [2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)] };
+  },
+  slerp(a, b, t) {
+    let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    if (d < 0) { b = b.map((x) => -x); d = -d; }
+    if (d > 0.9995) { const q = a.map((x, i) => x + (b[i] - x) * t); const l = Math.hypot(...q); return q.map((x) => x / l); }
+    const th = Math.acos(d), s = Math.sin(th), fa = Math.sin((1 - t) * th) / s, fb = Math.sin(t * th) / s;
+    return a.map((x, i) => x * fa + b[i] * fb);
+  },
 };
 
 const MESH_VS = `attribute vec3 p; attribute vec3 n; attribute vec3 c;
@@ -53,7 +95,8 @@ class Buehne {
     this.ok = !!gl;
     this.objekte = new Map();
     this.ziel = [BETT_MM / 2, BETT_MM / 2, 10];
-    this.abstand = 420; this.dreh = -0.9; this.neig = 0.65;
+    this.abstand = 420; this.orbitArt = "eingeschraenkt";
+    this._lage(this._richtung(-0.9, 0.65));
     this.zeiger = new Map();
     this.animationen = [];
     if (!gl) return;
@@ -134,28 +177,69 @@ class Buehne {
   }
 
   // ---- Kamera ----
-  _auge() {
-    const cp = Math.cos(this.neig);
-    return [this.ziel[0] + this.abstand * cp * Math.cos(this.dreh), this.ziel[1] + this.abstand * cp * Math.sin(this.dreh), this.ziel[2] + this.abstand * Math.sin(this.neig)];
-  }
+  // Lage als Basis: r (rechts), u (oben), Blick f = u × r. Ziel liegt im Abstand vor dem Auge.
+  _f() { return V3.kreuz(this.u, this.r); }
+  _auge() { return V3.minus(this.ziel, V3.mal(this._f(), this.abstand)); }
+  unterBett() { return this._auge()[2] < -0.01; }
   _matrix() {
     const w = this.canvas.width || 1, h = this.canvas.height || 1;
     const p = M4.perspektive(0.7, w / h, Math.max(0.5, this.abstand / 200), this.abstand * 8 + 1000);
-    const v = M4.blick(this._auge(), this.ziel, Math.abs(Math.cos(this.neig)) < 1e-3 ? [0, 1, 0] : [0, 0, 1]);
-    return M4.mal(p, v);
+    return M4.mal(p, M4.blick(this._auge(), this.ziel, this.u));
   }
-  ansicht(art, grenzen) {
+  // Basis aus Blickrichtung zum Auge (e zeigt vom Ziel zum Auge); senkrecht: vorne unten im Bild
+  _basisAus(e) {
+    e = V3.norm(e);
+    const f = V3.mal(e, -1);
+    if (Math.abs(e[2]) > 0.999) {
+      const u = e[2] > 0 ? [0, 1, 0] : [0, -1, 0];
+      return { r: V3.norm(V3.kreuz(f, u)), u };
+    }
+    const r = V3.norm(V3.kreuz(f, [0, 0, 1]));
+    return { r, u: V3.kreuz(r, f) };
+  }
+  _richtung(dreh, neig) { const c = Math.cos(neig); return [c * Math.cos(dreh), c * Math.sin(dreh), Math.sin(neig)]; }
+  _lage(e) { const b = this._basisAus(e); this.r = b.r; this.u = b.u; }
+  // Neigung über dem Bett in Grad (−90 = von unten, 90 = von oben)
+  neigung() { return (Math.asin(Math.max(-1, Math.min(1, -this._f()[2]))) * 180) / Math.PI; }
+
+  ansicht(art, grenzen, animiert = false) {
+    let ziel = this.ziel, abstand = this.abstand;
     if (grenzen) {
       const g = grenzen;
-      this.ziel = [(g.min[0] + g.max[0]) / 2, (g.min[1] + g.max[1]) / 2, (g.min[2] + g.max[2]) / 2];
+      ziel = [(g.min[0] + g.max[0]) / 2, (g.min[1] + g.max[1]) / 2, (g.min[2] + g.max[2]) / 2];
+      this.mitte = ziel.slice();
       const r = Math.max(20, Math.hypot(...g.groesse) / 2);
-      this.abstand = Math.min(900, r / Math.sin(0.35) * 1.15);
+      abstand = Math.min(900, r / Math.sin(0.35) * 1.15);
     }
-    if (art === "oben") { this.neig = 1.5707; this.dreh = -Math.PI / 2; }
-    else if (art === "vorne") { this.neig = 0.05; this.dreh = -Math.PI / 2; }
-    else if (art === "bett") { this.ziel = [BETT_MM / 2, BETT_MM / 2, 0]; this.abstand = 520; this.neig = 0.75; this.dreh = -1.1; }
-    else { this.neig = 0.6; this.dreh = -1.05; }
-    this.neu();
+    let e;
+    if (art === "oben") e = [0, 0, 1];
+    else if (art === "unten") e = [0, 0, -1];
+    else if (art === "vorne") e = this._richtung(-Math.PI / 2, 0.05);
+    else if (art === "bett") { ziel = [BETT_MM / 2, BETT_MM / 2, 0]; abstand = 520; e = this._richtung(-1.1, 0.75); }
+    else e = this._richtung(-1.05, 0.6);
+    this.fliegen(e, ziel, abstand, animiert);
+  }
+
+  // Kamera zu einer Blickrichtung (vom Ziel zum Auge) bringen, wahlweise sanft
+  fliegen(e, ziel = this.ziel, abstand = this.abstand, animiert = true) {
+    const b = this._basisAus(e);
+    if (!animiert || !this.r) {
+      this.r = b.r; this.u = b.u; this.ziel = ziel.slice(); this.abstand = abstand; this.neu();
+      return;
+    }
+    const q0 = QU.ausBasis(this.r, this.u, V3.mal(this._f(), -1)), q1 = QU.ausBasis(b.r, b.u, V3.norm(e));
+    const z0 = this.ziel.slice(), a0 = this.abstand, start = performance.now(), dauer = 520;
+    const nr = (this._flugNr = (this._flugNr || 0) + 1);
+    this.animieren((t) => {
+      if (this._flugNr !== nr) return false;
+      const x = Math.min(1, (t - start) / dauer), k = 1 - Math.pow(1 - x, 3);
+      const q = QU.zuBasis(QU.slerp(q0, q1, k));
+      this.r = V3.norm(q.r); this.u = V3.norm(q.u);
+      this.ziel = z0.map((v, i) => v + (ziel[i] - v) * k);
+      this.abstand = a0 + (abstand - a0) * k;
+      if (x >= 1) { this.r = b.r; this.u = b.u; }
+      return x < 1;
+    });
   }
 
   // Weltpunkt → Bildschirm (CSS-Pixel)
@@ -171,25 +255,66 @@ class Buehne {
   // Bildschirmpunkt (CSS-Pixel) → Strahl {von, richtung} in Weltkoordinaten
   strahl(px, py) {
     const r = this.canvas.getBoundingClientRect();
-    const auge = this._auge();
-    const norm = (v) => { const l = Math.hypot(...v) || 1; return v.map((x) => x / l); };
-    const kreuz = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-    const f = norm([this.ziel[0] - auge[0], this.ziel[1] - auge[1], this.ziel[2] - auge[2]]);
-    const oben = Math.abs(Math.cos(this.neig)) < 1e-3 ? [0, 1, 0] : [0, 0, 1];
-    const re = norm(kreuz(f, oben)), ob = kreuz(re, f);
+    const f = this._f(), re = this.r, ob = this.u;
     const t = Math.tan(0.35), x = (px / r.width) * 2 - 1, y = 1 - (py / r.height) * 2;
     const seiten = r.width / Math.max(1, r.height);
-    return { von: auge, richtung: norm([0, 1, 2].map((i) => f[i] + re[i] * x * t * seiten + ob[i] * y * t)) };
+    return { von: this._auge(), richtung: V3.norm([0, 1, 2].map((i) => f[i] + re[i] * x * t * seiten + ob[i] * y * t)) };
   }
 
-  // ---- Bedienung: ziehen = drehen, rechts/zwei Finger = verschieben, Rad/zwei Finger = zoomen ----
+  // ---- Orbit wie in Fusion 360: frei (Trackball) oder eingeschränkt (Drehteller, Z bleibt oben) ----
+  // Gedreht wird um den Drehpunkt: die ganze Kamera (Ziel und Lage) wandert um ihn herum.
+  orbit(dx, dy, punkt) {
+    const p = punkt || this.drehpunkt || this.mitte || this.ziel;
+    const k = 0.008;
+    const umAchse = (achse, w) => {
+      if (!w) return;
+      this.r = V3.drehen(this.r, achse, w); this.u = V3.drehen(this.u, achse, w);
+      this.ziel = V3.plus(p, V3.drehen(V3.minus(this.ziel, p), achse, w));
+    };
+    if (this.orbitArt === "frei") {
+      umAchse(V3.norm(this.u), -dx * k);
+      umAchse(V3.norm(this.r), -dy * k);
+    } else {
+      umAchse([0, 0, 1], -dx * k);
+      // senkrecht nicht überschlagen (auch von unten bis knapp −90°)
+      const jetzt = this.neigung(), w = -dy * k, grenze = 89.5;
+      const neu = Math.max(-grenze, Math.min(grenze, jetzt - (w * 180) / Math.PI));
+      umAchse(V3.norm(this.r), (-(neu - jetzt) * Math.PI) / 180);
+    }
+    // Basis sauber halten
+    const f = V3.norm(this._f());
+    this.r = V3.norm(V3.kreuz(f, this.u)); this.u = V3.kreuz(this.r, f);
+    this.neu();
+  }
+  setzeOrbitArt(art) {
+    this.orbitArt = art === "frei" ? "frei" : "eingeschraenkt";
+    if (this.orbitArt === "eingeschraenkt") {
+      // wieder waagerecht ausrichten (Z zeigt im Bild nach oben)
+      const f = this._f();
+      if (Math.abs(f[2]) < 0.999) { this.r = V3.norm(V3.kreuz(f, [0, 0, 1])); this.u = V3.kreuz(this.r, f); }
+      else { this.r = V3.norm([this.r[0], this.r[1], 0]); this.u = V3.kreuz(this.r, f); }
+      this.neu();
+    }
+  }
+
+  // ---- Bedienung: ziehen = Orbit um den Punkt unter dem Zeiger, rechts/Shift/zwei Finger = verschieben, Rad/zwei Finger = zoomen ----
   _ereignisse() {
     const c = this.canvas;
     c.addEventListener("contextmenu", (e) => e.preventDefault());
     c.addEventListener("wheel", (e) => { e.preventDefault(); this.abstand = Math.min(1500, Math.max(8, this.abstand * Math.exp(e.deltaY * 0.0012))); this.neu(); }, { passive: false });
     c.addEventListener("pointerdown", (e) => {
       c.setPointerCapture(e.pointerId);
-      this.zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, schieben: e.button === 2 || e.shiftKey });
+      const schieben = e.button === 2 || e.button === 1 || e.shiftKey;
+      this.zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, schieben });
+      if (this.zeiger.size === 1 && !schieben) {
+        // Drehpunkt: Stelle des Modells unter dem Zeiger, sonst die Modellmitte
+        const r = c.getBoundingClientRect();
+        const s = this.strahl(e.clientX - r.left, e.clientY - r.top);
+        const t = this.treffen ? this.treffen(s) : null;
+        this.drehpunkt = t != null ? V3.plus(s.von, V3.mal(s.richtung, t)) : (this.mitte || this.ziel).slice();
+        this.drehpunktGetroffen = t != null;
+        this.drehpunktSichtbar = false;
+      } else this.drehpunktSichtbar = false;
     });
     const ende = (e) => {
       const z = this.zeiger.get(e.pointerId);
@@ -199,6 +324,7 @@ class Buehne {
         this.antippen(this.strahl(e.clientX - r.left, e.clientY - r.top));
       }
       this.zeiger.delete(e.pointerId); this._pinch = null;
+      if (!this.zeiger.size) { this.drehpunktSichtbar = false; this.neu(); }
     };
     c.addEventListener("pointerup", ende);
     c.addEventListener("pointercancel", ende);
@@ -215,22 +341,19 @@ class Buehne {
           this._schieben(mx - this._pinch.mx, my - this._pinch.my);
         }
         this._pinch = { d, mx, my };
+        this.drehpunktSichtbar = false;
         this.neu();
         return;
       }
       z.x = e.clientX; z.y = e.clientY;
       if (z.schieben) this._schieben(dx, dy);
-      else { this.dreh -= dx * 0.008; this.neig = Math.min(1.5707, Math.max(-0.2, this.neig + dy * 0.008)); }
+      else if (Math.hypot(e.clientX - z.x0, e.clientY - z.y0) >= 3) { this.drehpunktSichtbar = true; this.orbit(dx, dy, this.drehpunkt); }
       this.neu();
     });
   }
   _schieben(dx, dy) {
     const f = (this.abstand * 0.0016) * (800 / Math.max(300, this.canvas.clientHeight));
-    const rx = -Math.sin(this.dreh), ry = Math.cos(this.dreh);
-    const sn = Math.sin(this.neig);
-    this.ziel[0] -= (rx * dx) * f - (Math.cos(this.dreh) * sn * dy) * f;
-    this.ziel[1] -= (ry * dx) * f - (Math.sin(this.dreh) * sn * dy) * f;
-    this.ziel[2] += Math.cos(this.neig) * dy * f;
+    this.ziel = V3.plus(this.ziel, V3.plus(V3.mal(this.r, -dx * f), V3.mal(this.u, dy * f)));
   }
 
   neu() {
@@ -255,6 +378,10 @@ class Buehne {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     const vp = this._matrix();
     this._letzte = vp;
+    // Von unten: Druckplatte durchscheinend, damit das Teil zu sehen bleibt
+    const unten = this.unterBett(), bett = this.objekte.get("bett"), raster = this.objekte.get("bett-raster");
+    if (bett) bett.alpha = unten ? 0.28 : 1;
+    if (raster) raster.alpha = unten ? 0.4 : 1;
     const liste = [...this.objekte.values()].filter((o) => o.sichtbar).sort((a, b) => (a.alpha < 1) - (b.alpha < 1) || a.reihe - b.reihe);
     for (const o of liste) {
       const pr = o.art === "mesh" ? this.pMesh : this.pLinie;
@@ -378,6 +505,11 @@ const STUETZEN = [
   { id: "baum-stark", name: "Baum stark" },
   { id: "baum-hybrid", name: "Baum hybrid" },
 ];
+const MOD_ICON = {
+  orbit: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><ellipse cx="12" cy="12" rx="9.6" ry="4.3" transform="rotate(-28 12 12)"/><ellipse cx="12" cy="12" rx="4.3" ry="9.6" transform="rotate(-28 12 12)" opacity=".45"/><circle cx="12" cy="12" r="2.4" class="voll"/><path d="M17.6 4.3l2.9.6-.9 2.8"/></svg>`,
+  orbitEin: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><ellipse cx="12" cy="16" rx="9.4" ry="3.6"/><path d="M12 3v13" stroke-dasharray="2 2"/><circle cx="12" cy="16" r="2.2" class="voll"/><path d="M18.4 11.6l2.6 1.6-2.4 1.8"/></svg>`,
+  haus: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M4 11.5L12 4.5l8 7"/><path d="M6.5 10v9h11v-9"/><path d="M10.5 19v-5h3v5"/></svg>`,
+};
 const SCHICHT_BEREICH = { 0.2: [0.06, 0.14, 0.1], 0.4: [0.08, 0.28, 0.2], 0.6: [0.18, 0.42, 0.3], 0.8: [0.24, 0.56, 0.4] };
 
 const MOD_MAX_BYTES = 200 * 1048576;      // größere Dateien bringen Handys zum Absturz
@@ -404,8 +536,11 @@ const ModellAnsicht = {
           <button class="chip" data-aktion="mod-ansicht" data-id="oben">Oben</button>
           <button class="chip" data-aktion="mod-ansicht" data-id="vorne">Vorne</button>
           <button class="chip" data-aktion="mod-ansicht" data-id="bett">Bett</button>
+          ${this._modOrbitHtml()}
           <button class="chip mod-zu" data-aktion="mod-schliessen" aria-label="Modell schließen">✕</button>
         </div>
+        ${this._modWuerfelHtml()}
+        <div id="mod-drehpunkt" class="mod-drehpunkt" aria-hidden="true"></div>
         ${m.tab === "schichten" && m.schichtZahl ? `<div class="mod-schicht-leiste">
           <button class="rund" data-aktion="mod-schicht" data-d="-1" aria-label="Schicht tiefer">−</button>
           <input type="range" min="1" max="${m.schichtZahl}" step="1" value="${m.schichtNr}" data-mod="schicht">
@@ -413,12 +548,13 @@ const ModellAnsicht = {
           <span id="mod-schicht-text" class="mod-schicht-text">${this._modSchichtText()}</span>
         </div>` : ""}
         ${m.markieren ? `<div class="mod-markier-hinweis" data-einmal="mod-markier">🎯 Tippe auf die Stelle, an der das Loch beginnt <button class="mini" data-aktion="mod-markieren">Abbrechen</button></div>` : ""}
-        <p class="mod-hilfe leise">${this._mobil ? "Ein Finger drehen · zwei Finger zoomen und schieben" : "Ziehen dreht · Rechtsklick oder Shift schiebt · Mausrad zoomt"}</p>
+        <p class="mod-hilfe leise">${this._mobil ? "Ein Finger dreht um die berührte Stelle · zwei Finger zoomen und schieben" : "Ziehen dreht um die Stelle unter dem Zeiger · Rechtsklick oder Shift schiebt · Mausrad zoomt"}</p>
       </div>
       </div>
       <aside class="mod-seite dr-karte">
         <div class="tabs mod-tabs">${tabs.map(([id, n]) => `<button class="tab ${m.tab === id ? "an" : ""}" data-aktion="mod-tab" data-id="${id}">${n}</button>`).join("")}</div>
         <div class="mod-inhalt">${m.tab === "loecher" ? this._modLoecherHtml() : m.tab === "schichten" ? this._modSchichtenHtml() : this._modUebersichtHtml()}</div>
+        <div class="mod-fuss"><button class="knopf breit mod-ws" data-aktion="ws-aus-modell">＋ In die Warteschlange</button></div>
       </aside>
     </div>`;
   },
@@ -454,12 +590,14 @@ const ModellAnsicht = {
     return `
       <div class="mod-masse">${["X", "Y", "Z"].map((a, i) => `<div class="${zuGross[i] ? "rot" : ""}"><span>${a}</span><strong>${zahl(g[i], 1)}</strong><small>mm</small></div>`).join("")}</div>
       <div class="hinweis ${passt ? "mint" : "rot-hinweis"}">${passt ? "✓ Passt aufs Druckbett (256 × 256 × 256 mm)" : `✕ Zu groß für den P1S: ${["X", "Y", "Z"].filter((_, i) => zuGross[i]).join(", ")} über 256 mm. Drehen hilft nur, wenn eine andere Seite kürzer ist.`}</div>
-      <div class="r-kopf oben-abstand"><span>Drehen (90°)</span></div>
+      <div class="r-kopf oben-abstand"><span>Drehen</span><span class="leise klein">90° oder eigene Winkel</span></div>
       <div class="chips mod-dreh">
-        <button class="chip" data-aktion="mod-drehen" data-achse="0">↻ um X</button>
-        <button class="chip" data-aktion="mod-drehen" data-achse="1">↻ um Y</button>
-        <button class="chip" data-aktion="mod-drehen" data-achse="2">↻ um Z</button>
+        <button class="chip" data-aktion="mod-drehen" data-achse="0">↻ 90° um X</button>
+        <button class="chip" data-aktion="mod-drehen" data-achse="1">↻ 90° um Y</button>
+        <button class="chip" data-aktion="mod-drehen" data-achse="2">↻ 90° um Z</button>
+        <button class="chip ${m.drehEigen ? "an" : ""}" data-aktion="mod-dreh-eigen" aria-expanded="${m.drehEigen ? "true" : "false"}">✎ Benutzerdefiniert</button>
       </div>
+      ${m.drehEigen ? this._modDrehEigenHtml() : ""}
       <h3>⚖️ Gewicht und Rolle</h3>
       <label class="auswahl breit-auswahl"><span>Rolle</span><select data-mod="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${rolle && r.id === rolle.id ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : " · nicht gewogen"}</option>`).join("")}</select></label>
       ${this._modReglerHtml("fuellung", "Füllung", m.fuellung, 0, 100, 5, "%")}
@@ -470,8 +608,19 @@ const ModellAnsicht = {
         <div class="info-zeile"><span>Volumen</span><strong>${zahl(m.kenn.volumen / 1000, 1)} cm³</strong></div>
         <div class="info-zeile"><span>Oberfläche</span><strong>${zahl(m.kenn.flaeche / 100, 0)} cm²</strong></div>
         <div class="info-zeile"><span>Dreiecke</span><strong>${zahl(m.kenn.dreiecke)}</strong></div>
-      </div>
-      <button class="knopf breit oben-abstand" data-aktion="ws-aus-modell">＋ In die Warteschlange</button>`;
+      </div>`;
+  },
+
+  // Eigene Winkel je Achse; die Vorschau dreht das Modell schon mit, „Anwenden“ übernimmt es
+  _modDrehEigenHtml() {
+    const w = this._mod.drehWerte || [0, 0, 0];
+    return `<div class="mod-dreh-eigen" data-einmal="mod-dreh-eigen">
+      <div class="mod-dreh-felder">${["X", "Y", "Z"].map((a, i) => `<label class="mod-dreh-feld a-${a.toLowerCase()} ${i === (this._mod.drehFeld ?? 2) ? "aktiv" : ""}"><span>${a}</span>
+        <input type="number" inputmode="decimal" step="0.5" min="-360" max="360" value="${w[i]}" data-mod="dreh-grad" data-achse="${i}" id="mod-dreh-${i}" aria-label="Winkel um ${a} in Grad"><small>°</small></label>`).join("")}</div>
+      <div class="chips mod-dreh-schnell">${[-45, -15, -5, 5, 15, 45].map((g) => `<button class="chip" data-aktion="mod-dreh-plus" data-g="${g}">${g > 0 ? "+" : "−"}${Math.abs(g)}°</button>`).join("")}</div>
+      <p class="leise klein">Die Schnellknöpfe ändern das zuletzt gewählte Feld. Gedreht wird um die Modellmitte, erst X, dann Y, dann Z. Danach steht das Teil wieder auf dem Bett.</p>
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="mod-dreh-null">Zurücksetzen</button><button class="knopf" data-aktion="mod-dreh-anwenden">Anwenden</button></div>
+    </div>`;
   },
 
   _modGewichtHtml(gew, rest, rolle) {
@@ -510,7 +659,7 @@ const ModellAnsicht = {
         <strong>${i.gramm ? `${zahl(i.gramm, 1)} g` : "Gewicht unbekannt"}</strong>
         ${rest == null ? `<span class="klein leise">${i.gramm ? "Rolle nicht gewogen, Rest unbekannt." : "Im G-Code steht kein Gewicht."}</span>` : rest >= 0 ? `<span class="klein">✓ Reicht. Danach bleiben etwa ${zahl(rest)} g übrig.</span>` : `<span class="klein">✕ Reicht nicht, es fehlen etwa ${zahl(-rest)} g.</span>`}
       </div>
-      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button><button class="knopf" data-aktion="ws-aus-modell">＋ Warteschlange</button></div>`;
+      <button class="knopf leise breit oben-abstand" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button>`;
   },
 
   // ---- Löcher ----
@@ -579,11 +728,26 @@ const ModellAnsicht = {
       <p class="leise klein">Für ${zahl(m.duese, 1)} mm sind ${zahl(smin, 2)}–${zahl(smax, 2)} mm sinnvoll. Dünner sieht feiner aus und dauert länger.</p>
       ${this._modReglerHtml("waende", "Wände", m.waende, 1, 6, 1, "")}
       ${this._modReglerHtml("fuellung", "Füllung", m.fuellung, 0, 100, 5, "%")}
+      ${this._modMusterHtml()}
       <div class="r-kopf oben-abstand"><span>Stützen</span><button class="mini mint-rand" data-aktion="mod-stuetzen-hilfe">Was ist was?</button></div>
       <div class="chips">${STUETZEN.map((s) => `<button class="chip ${m.stuetzen === s.id ? "an" : ""}" data-aktion="mod-stuetzen" data-id="${s.id}">${s.name}</button>`).join("")}</div>
       <div id="mod-schicht-status">${this._modSchichtStatusHtml()}</div>
       ${this._modLegendeHtml(["aussen", "innen", "fuellung", ...(m.stuetzen !== "keine" ? ["stuetze"] : [])])}
       <p class="leise klein">Vereinfachte Vorschau, kein echter Slicer: Wände, Füllung und Stützen sind angenähert. Für die echten Wege den G-Code aus Bambu Studio laden.</p>`;
+  },
+
+  // Füllmuster wie in Bambu Studio, mit kleiner Vorschau
+  _modMusterHtml() {
+    const m = this._mod, mu = FUELLMUSTER.find((x) => x.id === m.muster) || FUELLMUSTER[0];
+    const gruppen = Object.entries(FUELLMUSTER_GRUPPEN).map(([g, name]) => `<optgroup label="${esc(name)}">${FUELLMUSTER.filter((x) => x.gruppe === g)
+      .map((x) => `<option value="${x.id}" ${x.id === mu.id ? "selected" : ""}>${esc(x.name)}${x.name !== x.bambu ? ` (${esc(x.bambu)})` : ""}</option>`).join("")}</optgroup>`).join("");
+    return `<div class="mod-muster" id="mod-muster">
+      <div class="mod-muster-vorschau" title="So sieht ${esc(mu.name)} in einer Schicht ungefähr aus">${musterVorschauSvg(mu.id)}</div>
+      <div class="mod-muster-text">
+        <label class="auswahl breit-auswahl"><span>Füllmuster</span><select data-mod="muster">${gruppen}</select></label>
+        <p class="leise klein">${esc(mu.text)}${mu.gruppe === "3d" ? " <span class=\"pille mint\">ändert sich je Schicht</span>" : ""}</p>
+      </div>
+    </div>`;
   },
 
   _modSchichtStatusHtml() {
@@ -635,6 +799,123 @@ const ModellAnsicht = {
       <button class="knopf leise breit" data-aktion="dialog-zu">Schließen</button>`;
   },
 
+  // ---- Orbit-Knopf mit kleinem Menü (wie in Fusion 360) ----
+  _modOrbitHtml() {
+    const frei = this._modOrbitArt === "frei", offen = !!this._modOrbitMenue;
+    return `<div class="mod-orbit">
+      <button class="chip mod-orbit-knopf ${offen ? "an" : ""}" data-aktion="mod-orbit-menue" aria-haspopup="menu" aria-expanded="${offen}" title="Orbit: ${frei ? "frei" : "eingeschränkt"}">
+        ${frei ? MOD_ICON.orbit : MOD_ICON.orbitEin}<span class="mod-orbit-name">${frei ? "Orbit" : "Eingeschr. Orbit"}</span><span class="mod-pfeil">▾</span></button>
+      ${offen ? `<div class="mod-orbit-menue" role="menu" data-einmal="mod-orbit-menue">
+        <button class="mod-orbit-punkt ${frei ? "an" : ""}" role="menuitemradio" aria-checked="${frei}" data-aktion="mod-orbit-art" data-id="frei">${MOD_ICON.orbit}
+          <span><strong>Orbit</strong><small>Frei in alle Richtungen, auch über Kopf</small></span></button>
+        <button class="mod-orbit-punkt ${frei ? "" : "an"}" role="menuitemradio" aria-checked="${!frei}" data-aktion="mod-orbit-art" data-id="eingeschraenkt">${MOD_ICON.orbitEin}
+          <span><strong>Eingeschränkter Orbit</strong><small>Wie ein Drehteller: oben bleibt oben</small></span></button>
+        <div class="mod-orbit-trenner"></div>
+        <button class="mod-orbit-punkt" role="menuitemcheckbox" aria-checked="${!!this._modWuerfelZiehen}" data-aktion="mod-wuerfel-ziehen">
+          <span class="mod-schalter ${this._modWuerfelZiehen ? "an" : ""}"></span>
+          <span><strong>Würfel ziehen dreht die Ansicht</strong><small>Aus: der Würfel reagiert nur auf Klicks</small></span></button>
+        <p class="mod-orbit-tipp leise klein">Gedreht wird um die Stelle des Modells, auf die du beim Ziehen zeigst. Daneben: um die Modellmitte.</p>
+      </div>` : ""}
+    </div>`;
+  },
+
+  // ---- Ausrichtungswürfel: Flächen, Kanten und Ecken anklickbar ----
+  _modWuerfelHtml() {
+    const S = this._mobil ? 48 : 64;
+    const FL = [
+      { n: [0, 0, 1], x: [1, 0, 0], y: [0, -1, 0], name: "OBEN" },
+      { n: [0, 0, -1], x: [1, 0, 0], y: [0, 1, 0], name: "UNTEN" },
+      { n: [0, -1, 0], x: [1, 0, 0], y: [0, 0, -1], name: "VORNE" },
+      { n: [0, 1, 0], x: [-1, 0, 0], y: [0, 0, -1], name: "HINTEN" },
+      { n: [1, 0, 0], x: [0, 1, 0], y: [0, 0, -1], name: "RECHTS" },
+      { n: [-1, 0, 0], x: [0, -1, 0], y: [0, 0, -1], name: "LINKS" },
+    ];
+    const wortFuer = (d) => [d[1] < 0 ? "vorne" : d[1] > 0 ? "hinten" : "", d[0] < 0 ? "links" : d[0] > 0 ? "rechts" : "", d[2] > 0 ? "oben" : d[2] < 0 ? "unten" : ""].filter(Boolean).join(" ");
+    const flaechen = FL.map((f) => {
+      const m = [...f.x, 0, ...f.y, 0, ...f.n, 0, ...f.n.map((v) => (v * S) / 2), 1];
+      let zonen = "";
+      for (const j of [-1, 0, 1]) for (const i of [-1, 0, 1]) {
+        const d = [0, 1, 2].map((k) => f.n[k] + i * f.x[k] + j * f.y[k]);
+        const art = i === 0 && j === 0 ? "flaeche" : i === 0 || j === 0 ? "kante" : "ecke";
+        const titel = wortFuer(d);
+        zonen += `<button class="mod-w-zone ${art}" ${art === "flaeche" ? "" : `tabindex="-1"`} data-aktion="mod-wuerfel" data-d="${d.join(",")}" title="Ansicht ${titel}" aria-label="Ansicht ${titel}">${art === "flaeche" ? `<span>${f.name}</span>` : ""}</button>`;
+      }
+      return `<div class="mod-w-flaeche w-${f.name.toLowerCase()}" style="transform: matrix3d(${m.map((v) => +v.toFixed(4)).join(",")})">${zonen}</div>`;
+    }).join("");
+    const achsen = [["x", "X"], ["y", "Y"], ["z", "Z"]].map(([k, n]) => `<line id="mod-achse-${k}" class="a-${k}" x1="0" y1="0" x2="0" y2="0"/><text id="mod-achse-${k}-t" class="a-${k}" x="0" y="0">${n}</text>`).join("");
+    return `<div class="mod-wuerfel-ecke ${this._modWuerfelZiehen ? "ziehbar" : ""}" id="mod-wuerfel-ecke" style="--w: ${S}px">
+      <button class="mod-heim" data-aktion="mod-ansicht" data-id="start" title="Startansicht" aria-label="Startansicht">${MOD_ICON.haus}</button>
+      <div class="mod-wuerfel" id="mod-wuerfel" role="group" aria-label="Ausrichtungswürfel">
+        <div class="mod-w-koerper" id="mod-w-koerper" style="transform: ${this._modWuerfelMatrix()}">${flaechen}</div>
+      </div>
+      <svg class="mod-achsen" id="mod-achsen" viewBox="-26 -26 52 52" aria-hidden="true">${achsen}</svg>
+    </div>`;
+  },
+  _modWuerfelMatrix() {
+    const b = this._buehne;
+    if (!b || !b.r) return "rotateX(-60deg) rotateZ(-38deg)";
+    const r = b.r, u = b.u, f = b._f();
+    // Welt → Bildschirm (CSS: y nach unten, z zum Betrachter)
+    return `matrix3d(${[r[0], -u[0], -f[0], 0, r[1], -u[1], -f[1], 0, r[2], -u[2], -f[2], 0, 0, 0, 0, 1].map((v) => +v.toFixed(5)).join(",")})`;
+  },
+  // Würfel, Achsen und Drehpunkt bei jedem Bild nachführen
+  _modWuerfelNachfuehren() {
+    const root = this.shadowRoot, b = this._buehne;
+    if (!b) return;
+    const k = root.getElementById("mod-w-koerper");
+    if (k) k.style.transform = this._modWuerfelMatrix();
+    const f = b._f();
+    for (const [i, a] of ["x", "y", "z"].entries()) {
+      const l = root.getElementById(`mod-achse-${a}`), t = root.getElementById(`mod-achse-${a}-t`);
+      if (!l) continue;
+      const e = [0, 0, 0]; e[i] = 1;
+      const x = V3.punkt(b.r, e) * 17, y = -V3.punkt(b.u, e) * 17, hinten = V3.punkt(f, e) > 0.2;
+      l.setAttribute("x2", x.toFixed(1)); l.setAttribute("y2", y.toFixed(1));
+      t.setAttribute("x", (x * 1.32).toFixed(1)); t.setAttribute("y", (y * 1.32 + 3).toFixed(1));
+      l.style.opacity = t.style.opacity = hinten ? 0.35 : 1;
+    }
+    const p = root.getElementById("mod-drehpunkt");
+    if (p) {
+      const s = b.drehpunktSichtbar && b.drehpunkt ? b.projizieren(b.drehpunkt) : null;
+      p.classList.toggle("an", !!s);
+      p.classList.toggle("mitte", !!s && !b.drehpunktGetroffen);
+      if (s) p.style.transform = `translate(${s[0]}px, ${s[1]}px)`;
+    }
+  },
+  // Würfel ziehen = Orbit um die Modellmitte (wenn eingeschaltet)
+  _modWuerfelZiehenEinrichten() {
+    const w = this.shadowRoot.getElementById("mod-wuerfel");
+    if (!w || w._fw) return;
+    w._fw = true;
+    let z = null;
+    w.addEventListener("pointerdown", (e) => {
+      if (!this._modWuerfelZiehen || !this._buehne) return;
+      z = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, gezogen: false };
+    });
+    w.addEventListener("pointermove", (e) => {
+      if (!z || e.pointerId !== z.id) return;
+      if (!z.gezogen && Math.hypot(e.clientX - z.x0, e.clientY - z.y0) < 4) return;
+      if (!z.gezogen) { z.gezogen = true; try { w.setPointerCapture(e.pointerId); } catch (x) { /* egal */ } w.classList.add("zieht"); }
+      const b = this._buehne;
+      b.orbit((e.clientX - z.x) * 1.5, (e.clientY - z.y) * 1.5, b.mitte || b.ziel);
+      z.x = e.clientX; z.y = e.clientY;
+    });
+    const ende = () => { if (z && z.gezogen) this._modWuerfelGezogen = performance.now(); z = null; w.classList.remove("zieht"); };
+    w.addEventListener("pointerup", ende);
+    w.addEventListener("pointercancel", ende);
+  },
+  _modMenueZu() {
+    if (!this._modOrbitMenue) return;
+    this._modOrbitMenue = false;
+    const root = this.shadowRoot, menue = root.querySelector(".mod-orbit-menue"), k = root.querySelector(".mod-orbit-knopf");
+    if (menue) menue.remove();
+    if (k) { k.classList.remove("an"); k.setAttribute("aria-expanded", "false"); }
+  },
+  _modEinstellung(k, wert) {
+    try { if (wert === undefined) return localStorage.getItem(`fw-mod-${k}`); localStorage.setItem(`fw-mod-${k}`, String(wert)); } catch (e) { /* privat: dann eben nicht merken */ }
+    return null;
+  },
+
   _modLadenDialogHtml() {
     return `<h2>Datei öffnen</h2>
       <label class="ablage klein-ablage" data-ablage="1">
@@ -649,8 +930,17 @@ const ModellAnsicht = {
   _modEinrichten() {
     if (this._modBereit) return;
     this._modBereit = true;
+    this._modOrbitArt = this._modEinstellung("orbit") === "frei" ? "frei" : "eingeschraenkt";
+    this._modWuerfelZiehen = this._modEinstellung("wuerfel-ziehen") !== "0";
     MOD_DB.alle().then((l) => { this._modZuletzt = l; if (this._ansicht === "modelle" && !this._mod) this._zeichnen(); });
     const root = this.shadowRoot;
+    // Eigene Winkel: das zuletzt angetippte Feld bekommt die Schnellknöpfe
+    root.addEventListener("focusin", (e) => {
+      const t = e.target;
+      if (!this._mod || !t.dataset || t.dataset.mod !== "dreh-grad") return;
+      this._mod.drehFeld = Number(t.dataset.achse);
+      root.querySelectorAll(".mod-dreh-feld").forEach((f, i) => f.classList.toggle("aktiv", i === this._mod.drehFeld));
+    });
     root.addEventListener("dragover", (e) => {
       if (this._ansicht !== "modelle") return;
       e.preventDefault();
@@ -670,7 +960,9 @@ const ModellAnsicht = {
 
   _modStandard() {
     const rolle = this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => b.rest_g - a.rest_g)[0];
-    return { tab: "uebersicht", fuellung: 15, waende: 2, duese: 0.4, schicht_h: 0.2, stuetzen: "keine", eingesetzt: {}, rolleId: this._modRolleId || (rolle && rolle.id) };
+    const muster = this._modMusterId || this._modEinstellung("muster");
+    return { tab: "uebersicht", fuellung: 15, waende: 2, duese: 0.4, schicht_h: 0.2, stuetzen: "keine", eingesetzt: {}, rolleId: this._modRolleId || (rolle && rolle.id),
+      muster: FUELLMUSTER.some((x) => x.id === muster) ? muster : "grid", drehEigen: false, drehWerte: [0, 0, 0], drehFeld: 2 };
   },
   _modRolle() { const m = this._mod; return this._daten.rollen.find((r) => r.id === (m && m.rolleId)) || null; },
 
@@ -760,12 +1052,18 @@ const ModellAnsicht = {
     if (!this._buehne) {
       this._buehne = new Buehne();
       if (!this._buehne.ok) { ort.innerHTML = `<div class="dr-kamera-leer">Dieser Browser kann kein WebGL.</div>`; return; }
-      this._buehne.nachZeichnen = () => this._modMarkerSetzen();
+      this._buehne.nachZeichnen = () => { this._modMarkerSetzen(); this._modWuerfelNachfuehren(); };
       this._buehne.antippen = (strahl) => this._modAntippen(strahl);
+      this._buehne.treffen = (strahl) => this._modTreffen(strahl);
+      this._buehne.setzeOrbitArt(this._modOrbitArt);
+      // Ein Tipp in die Ansicht schließt das Orbit-Menü (ohne Neuzeichnen, sonst ginge das Ziehen verloren)
+      this._buehne.canvas.addEventListener("pointerdown", () => this._modMenueZu());
       this._modSzene();
       this._buehne.ansicht("iso", this._mod && this._mod.grenzen);
     }
     ort.appendChild(this._buehne.canvas);
+    this._modWuerfelZiehenEinrichten();
+    this._modWuerfelNachfuehren();
     if (!this._modRo) {
       this._modRo = new ResizeObserver(() => this._buehne && this._buehne.neu());
     }
@@ -790,6 +1088,7 @@ const ModellAnsicht = {
       this._modGrundriss();
       Object.entries(m.eingesetzt).forEach(([nr, id]) => this._modTeilZeigen(Number(nr), id, false));
       if (m.tab === "schichten") this._modSchichtenStarten();
+      if (m.drehWerte && m.drehWerte.some((x) => Number(x))) setTimeout(() => this._modDrehVorschau(), 0);
     } else {
       this._modGcodeLinien();
     }
@@ -854,7 +1153,7 @@ const ModellAnsicht = {
   // ---- Schichten: vereinfachtes Slicen im Hintergrund ----
   _modSchichtenStarten() {
     const m = this._mod;
-    const schluessel = `${m.duese}|${m.schicht_h}|${m.waende}|${m.fuellung}|${m.stuetzen}|${m.id}`;
+    const schluessel = `${m.duese}|${m.schicht_h}|${m.waende}|${m.fuellung}|${m.muster}|${m.stuetzen}|${m.id}`;
     if (m.schichtSchluessel === schluessel && (m.schichtFortschritt === 1 || m.schichtLaeuft)) { this._modSchichtAnzeigen(); return; }
     m.schichtSchluessel = schluessel;
     m.schichtLaeuft = true;
@@ -873,7 +1172,7 @@ const ModellAnsicht = {
       const bis = Math.min(zs.length, i + 8);
       for (; i < bis; i++) {
         const z = zs[i], zz = z + m.schicht_h / 2;
-        const sch = schichtBerechnen(s, z, { duese: m.duese, waende: m.waende, fuellung: m.fuellung, nr: i, massiv: i < massivUnten || i >= zs.length - massivOben });
+        const sch = schichtBerechnen(s, z, { duese: m.duese, waende: m.waende, fuellung: m.fuellung, muster: m.muster, hoehe, nr: i, massiv: i < massivUnten || i >= zs.length - massivOben });
         const add = (a, b, f) => { linien.push(a[0], a[1], zz, b[0], b[1], zz); farben.push(...f, ...f); return Math.hypot(b[0] - a[0], b[1] - a[1]); };
         for (const [art, zuege] of [["aussen", sch.aussen], ["innen", sch.innen]]) {
           for (const zug of zuege) for (let k = 0; k < zug.length; k++) laenge += add(zug[k], zug[(k + 1) % zug.length], LINIEN_FARBEN[art]);
@@ -995,7 +1294,7 @@ const ModellAnsicht = {
     for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: !schichten });
     if (m.art === "stl" && schichten && m.schichtLinien && m.schichtFortschritt === 1) {
       if (!b.objekte.has("wege") || m.schichtWegeSchluessel !== m.schichtSchluessel) {
-        b.linien("wege", m.schichtLinien, m.schichtFarben, { dunkel: 0.55 });
+        b.linien("wege", m.schichtLinien, m.schichtFarben, { dunkel: 0.32 });   // tiefere Schichten deutlich dunkler, damit das Muster der aktuellen hervorsticht
         m.schichtWegeSchluessel = m.schichtSchluessel;
       }
     } else if (m.art === "stl" && !schichten) b.weg("wege");
@@ -1015,8 +1314,52 @@ const ModellAnsicht = {
   // ---- Ereignisse ----
   _modKlick(a, el) {
     const m = this._mod;
+    if (!["mod-orbit-menue", "mod-orbit-art", "mod-wuerfel-ziehen"].includes(a)) this._modMenueZu();
     switch (a) {
-      case "mod-ansicht": if (this._buehne) this._buehne.ansicht(el.dataset.id, m && m.grenzen); return;
+      case "mod-ansicht": if (this._buehne) this._buehne.ansicht(el.dataset.id, m && m.grenzen, true); return;
+      case "mod-orbit-menue": this._modOrbitMenue = !this._modOrbitMenue; break;
+      case "mod-orbit-art":
+        this._modOrbitArt = el.dataset.id === "frei" ? "frei" : "eingeschraenkt";
+        this._modEinstellung("orbit", this._modOrbitArt);
+        if (this._buehne) this._buehne.setzeOrbitArt(this._modOrbitArt);
+        this._modOrbitMenue = false;
+        this._toast(this._modOrbitArt === "frei" ? "Orbit: frei drehen" : "Eingeschränkter Orbit: oben bleibt oben");
+        break;
+      case "mod-wuerfel-ziehen":
+        this._modWuerfelZiehen = !this._modWuerfelZiehen;
+        this._modEinstellung("wuerfel-ziehen", this._modWuerfelZiehen ? "1" : "0");
+        break;
+      case "mod-wuerfel": {
+        if (performance.now() - (this._modWuerfelGezogen || -1e9) < 350 || !this._buehne) return;   // war Ziehen, kein Klick
+        const b = this._buehne;
+        b.fliegen(el.dataset.d.split(",").map(Number), b.mitte || b.ziel, b.abstand, true);
+        return;
+      }
+      case "mod-dreh-eigen": m.drehEigen = !m.drehEigen; if (!m.drehEigen) { m.drehWerte = [0, 0, 0]; this._modDrehVorschau(); } this._modSeiteNeu(); return;
+      case "mod-dreh-plus": {
+        const i = m.drehFeld ?? 2;
+        m.drehWerte[i] = Math.round(((Number(m.drehWerte[i]) || 0) + Number(el.dataset.g)) * 10) / 10;
+        if (m.drehWerte[i] > 360 || m.drehWerte[i] < -360) m.drehWerte[i] %= 360;
+        const f = this.shadowRoot.getElementById(`mod-dreh-${i}`);
+        if (f) f.value = m.drehWerte[i];
+        this._modDrehVorschau();
+        return;
+      }
+      case "mod-dreh-null":
+        m.drehWerte = [0, 0, 0];
+        [0, 1, 2].forEach((i) => { const f = this.shadowRoot.getElementById(`mod-dreh-${i}`); if (f) f.value = 0; });
+        this._modDrehVorschau();
+        return;
+      case "mod-dreh-anwenden": {
+        if (!m.drehWerte.some((x) => Number(x))) { this._toast("Erst einen Winkel eingeben."); return; }
+        const text = ["X", "Y", "Z"].map((n, i) => (Number(m.drehWerte[i]) ? `${n} ${zahl(Number(m.drehWerte[i]), 1)}°` : "")).filter(Boolean).join(", ");
+        drehenGrad(m.v, m.drehWerte);
+        m.drehWerte = [0, 0, 0];
+        this._modGeometrieNeu();
+        if (this._buehne) this._buehne.ansicht("iso", m.grenzen, true);
+        this._toast(`Gedreht um ${text}.`);
+        break;
+      }
       case "mod-schliessen": this._mod = null; if (this._buehne) for (const n of [...this._buehne.objekte.keys()]) if (!n.startsWith("bett")) this._buehne.weg(n); break;
       case "mod-tab":
         m.tab = el.dataset.id;
@@ -1025,6 +1368,7 @@ const ModellAnsicht = {
         return;
       case "mod-drehen":
         drehen90(m.v, Number(el.dataset.achse), 1);
+        m.drehWerte = [0, 0, 0];
         this._modGeometrieNeu();
         if (this._buehne) this._buehne.ansicht("iso", m.grenzen);
         break;
@@ -1087,22 +1431,10 @@ const ModellAnsicht = {
   _modAntippen(strahl) {
     const m = this._mod;
     if (!m || !m.markieren || m.art !== "stl") return;
-    const v = m.v, o = strahl.von, d = strahl.richtung;
-    let best = Infinity, n = null;
-    for (let i = 0; i < v.length; i += 9) {
-      const e1 = [v[i + 3] - v[i], v[i + 4] - v[i + 1], v[i + 5] - v[i + 2]], e2 = [v[i + 6] - v[i], v[i + 7] - v[i + 1], v[i + 8] - v[i + 2]];
-      const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
-      const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
-      if (Math.abs(det) < 1e-12) continue;
-      const inv = 1 / det, tv = [o[0] - v[i], o[1] - v[i + 1], o[2] - v[i + 2]];
-      const u = (tv[0] * p[0] + tv[1] * p[1] + tv[2] * p[2]) * inv;
-      if (u < 0 || u > 1) continue;
-      const q = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
-      const w = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
-      if (w < 0 || u + w > 1) continue;
-      const t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
-      if (t > 0 && t < best) { best = t; n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; }
-    }
+    const o = strahl.von, d = strahl.richtung;
+    const h = strahlTreffer(m.v, o, d);
+    const best = h ? h.t : Infinity;
+    let n = h ? h.n : null;
     if (!n) { this._toast("Da ist kein Modell. Tippe direkt auf die Oberfläche."); return; }
     const treffer = [0, 1, 2].map((i) => o[i] + d[i] * best);
     // Normale zur Kamera drehen = nach außen; Lochachse = größte Komponente
@@ -1115,6 +1447,26 @@ const ModellAnsicht = {
     m.markieren = false;
     m.lochAuswahl = nr;
     this._zeichnen();
+  },
+  // Drehpunkt für den Orbit: Abstand entlang des Strahls bis zum Modell oder null
+  _modTreffen(strahl) {
+    const m = this._mod;
+    if (!m || m.art !== "stl" || !m.v || m.laedt) return null;
+    const h = strahlTreffer(m.v, strahl.von, strahl.richtung);
+    return h ? h.t : null;
+  },
+  // Vorschau für eigene Winkel: das Modell wird nur in der Ansicht gedreht
+  _modDrehVorschau() {
+    const m = this._mod, b = this._buehne;
+    if (!m || !b || m.art !== "stl") return;
+    const aktiv = m.drehWerte && m.drehWerte.some((x) => Number(x));
+    const c = [0, 1, 2].map((i) => (m.grenzen.min[i] + m.grenzen.max[i]) / 2);
+    const mat = aktiv ? M4.drehungUm(drehMatrix(m.drehWerte), c) : M4.eins();
+    b.setze("modell", { m: mat });
+    b.setze("grundriss", { sichtbar: !aktiv });
+    for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: !aktiv && m.tab !== "schichten" });
+    const box = this.shadowRoot.getElementById("mod-marker");
+    if (box) box.classList.toggle("versteckt", !!aktiv);
   },
   _modLochGrenzen(l) {
     const ende = l.oeffnung - l.richtung * l.tiefe;
@@ -1136,6 +1488,13 @@ const ModellAnsicht = {
     if (!k || !this._mod) return false;
     const m = this._mod;
     if (k === "schicht") { this._modSchichtSetzen(Number(t.value)); return true; }
+    if (k === "dreh-grad") {
+      const i = Number(t.dataset.achse), w = Number(String(t.value).replace(",", "."));
+      m.drehFeld = i;
+      m.drehWerte[i] = Number.isFinite(w) ? Math.max(-360, Math.min(360, w)) : 0;
+      this._modDrehVorschau();
+      return true;
+    }
     if (k === "loch-d" || k === "loch-t") {
       const l = m.loecher && m.loecher.find((x) => x.nr === Number(t.dataset.nr));
       if (!l) return true;
@@ -1167,6 +1526,15 @@ const ModellAnsicht = {
     const m = this._mod;
     if (!m) return false;
     if (k === "rolle") { m.rolleId = this._modRolleId = t.value; this._zeichnen(); return true; }
+    if (k === "dreh-grad") return true;
+    if (k === "muster") {
+      if (!FUELLMUSTER.some((x) => x.id === t.value)) return true;
+      m.muster = this._modMusterId = t.value;
+      this._modEinstellung("muster", t.value);
+      this._modSeiteNeu();
+      if (m.art === "stl" && m.tab === "schichten") this._modSchichtenStarten();
+      return true;
+    }
     if (k === "loch-d" || k === "loch-t") {
       const nr = Number(t.dataset.nr);
       if (m.eingesetzt[nr]) this._modTeilZeigen(nr, m.eingesetzt[nr], false);

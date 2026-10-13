@@ -365,12 +365,352 @@ function schichtBerechnen(s, z, opt) {
     innerste.push(f || letzte);
   }
   if (opt.fuellung > 0 && innerste.length) {
-    const voll = opt.massiv;   // Boden/Deckel: dicht gefüllt
-    const abstand = voll ? breite : Math.max(breite, (breite * 2) / (opt.fuellung / 100));
-    const winkel = ((opt.nr % 2 ? 45 : -45) * Math.PI) / 180;
-    fuellung.push(...fuellLinien(innerste, abstand, winkel));
+    if (opt.massiv) {   // Boden/Deckel: dicht gefüllt, geradlinig
+      const winkel = ((opt.nr % 2 ? 45 : -45) * Math.PI) / 180;
+      fuellung.push(...fuellLinien(innerste, breite, winkel));
+    } else {
+      // Abstand so, dass eine einzelne Linienschar die gewünschte Dichte hätte; jedes Muster rechnet das auf seine Form um
+      const s = Math.max(breite, breite / (opt.fuellung / 100));
+      fuellung.push(...fuellMuster(opt.muster || "grid", innerste, { s, z, nr: opt.nr || 0, hoehe: opt.hoehe || z }));
+    }
   }
   return { z, aussen, innen, fuellung };
+}
+
+// ---- Füllmuster wie in Bambu Studio (Prozess › Stärke › „Sparse infill pattern“) ----
+// Vereinfachte Nachbildung je Schicht; Muster der Gruppe „3d“ ändern sich mit der Höhe.
+const FUELLMUSTER = [
+  { id: "grid", name: "Gitter", bambu: "Grid", gruppe: "2d", text: "Zwei Linienrichtungen in jeder Schicht. Stabil, in vielen Bambu-Profilen voreingestellt." },
+  { id: "zig-zag", name: "Geradlinig", bambu: "Rectilinear", gruppe: "2d", text: "Eine Richtung je Schicht, abwechselnd um 90° gedreht und am Rand verbunden. Schnell und sparsam." },
+  { id: "line", name: "Linie", bambu: "Line", gruppe: "2d", text: "Wie Geradlinig, aber ohne Verbindungen am Rand. Sehr schnell, eher schwach." },
+  { id: "alignedrectilinear", name: "Ausgerichtet geradlinig", bambu: "Aligned Rectilinear", gruppe: "2d", text: "Geradlinig, aber alle Schichten liegen in derselben Richtung übereinander." },
+  { id: "triangles", name: "Dreiecke", bambu: "Triangles", gruppe: "2d", text: "Drei Richtungen in jeder Schicht ergeben Dreiecke. Steif in der Ebene." },
+  { id: "tri-hexagon", name: "Tri-Hexagon", bambu: "Tri-hexagon", gruppe: "2d", text: "Sterne aus Dreiecken und Sechsecken. Steif und gleichmäßig." },
+  { id: "honeycomb", name: "Wabe", bambu: "Honeycomb", gruppe: "2d", text: "Sechseckige Waben. Sehr stabil, druckt aber langsamer." },
+  { id: "2dlattice", name: "2D-Gitter", bambu: "2D Lattice", gruppe: "2d", text: "Rautengitter aus zwei schrägen Richtungen." },
+  { id: "zigzag", name: "Zickzack", bambu: "Zig Zag", gruppe: "2d", text: "Zickzack-Linien, alle in derselben Richtung." },
+  { id: "crosszag", name: "Kreuz-Zickzack", bambu: "Cross Zag", gruppe: "2d", text: "Zickzack-Linien, die je Schicht die Richtung wechseln." },
+  { id: "cubic", name: "Kubisch", bambu: "Cubic", gruppe: "3d", text: "Drei Richtungen, die mit der Höhe wandern: Würfel auf der Spitze. Stabil in alle Richtungen." },
+  { id: "adaptivecubic", name: "Adaptiv kubisch", bambu: "Adaptive Cubic", gruppe: "3d", text: "Kubisch, innen grob und zum Rand hin dichter. Spart Material bei großen Teilen." },
+  { id: "supportcubic", name: "Stützend kubisch", bambu: "Support Cubic", gruppe: "3d", text: "Kubisch, aber nur unter den Deckflächen dicht. Spart Material und Zeit." },
+  { id: "gyroid", name: "Gyroid", bambu: "Gyroid", gruppe: "3d", text: "Wellige Fläche, die sich mit jeder Schicht verschiebt. In alle Richtungen gleich stark." },
+  { id: "3dhoneycomb", name: "3D-Wabe", bambu: "3D Honeycomb", gruppe: "3d", text: "Räumliche Waben aus Oktaederstümpfen: das Muster wechselt mit der Höhe." },
+  { id: "crosshatch", name: "Kreuzschraffur", bambu: "Cross Hatch", gruppe: "3d", text: "Schichtblöcke wechseln die Richtung mit weichem Übergang. Stabil und schnell." },
+  { id: "lockedzag", name: "Verriegelter Zickzack", bambu: "Locked Zag", gruppe: "3d", text: "Zickzack, das sich von Schicht zu Schicht verzahnt." },
+  { id: "lightning", name: "Blitz", bambu: "Lightning", gruppe: "3d", text: "Baumartige Äste nur unter den Deckflächen. Am schnellsten, aber nicht belastbar." },
+  { id: "concentric", name: "Konzentrisch", bambu: "Concentric", gruppe: "kurve", text: "Ringe parallel zur Außenwand. Flexibel, gut für TPU und durchscheinende Teile." },
+  { id: "hilbertcurve", name: "Hilbert-Kurve", bambu: "Hilbert Curve", gruppe: "kurve", text: "Eine einzige raumfüllende Kurve. Dekorativ, z. B. für sichtbare Flächen." },
+  { id: "archimedeanchords", name: "Archimedische Akkorde", bambu: "Archimedean Chords", gruppe: "kurve", text: "Spirale aus kurzen Sehnen von der Mitte nach außen." },
+  { id: "octagramspiral", name: "Oktagramm-Spirale", bambu: "Octagram Spiral", gruppe: "kurve", text: "Sternförmige Spirale mit acht Spitzen. Dekorativ." },
+];
+const FUELLMUSTER_GRUPPEN = { "2d": "Jede Schicht gleich", "3d": "Ändert sich mit der Höhe", kurve: "Kurven und Spiralen" };
+
+// Kanten der Füllfläche in waagerechte Bänder sortieren: schnelles Innen-Prüfen und Zuschneiden
+function bereichIndex(konturen) {
+  const k = [];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const z of konturen) for (let i = 0; i < z.length; i++) {
+    const p = z[i], q = z[(i + 1) % z.length];
+    k.push(p[0], p[1], q[0], q[1]);
+    x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+  }
+  const kanten = new Float64Array(k), n = kanten.length / 4;
+  const nb = Math.max(1, Math.min(512, Math.ceil(n / 3)));
+  const h = (y1 - y0) / nb || 1;
+  const baender = Array.from({ length: nb }, () => []);
+  for (let e = 0; e < n; e++) {
+    const a = kanten[e * 4 + 1], b = kanten[e * 4 + 3];
+    const von = Math.max(0, Math.floor((Math.min(a, b) - y0) / h)), bis = Math.min(nb - 1, Math.floor((Math.max(a, b) - y0) / h));
+    for (let j = von; j <= bis; j++) baender[j].push(e);
+  }
+  return { kanten, baender, y0, h, nb, box: [x0, y0, x1, y1], stempel: new Int32Array(n), runde: 0 };
+}
+function bereichInnen(ix, x, y) {
+  const j = Math.floor((y - ix.y0) / ix.h);
+  if (j < 0 || j >= ix.nb) return false;
+  let drin = false;
+  const k = ix.kanten;
+  for (const e of ix.baender[j]) {
+    const ax = k[e * 4], ay = k[e * 4 + 1], bx = k[e * 4 + 2], by = k[e * 4 + 3];
+    if ((ay > y) !== (by > y) && x < ax + ((y - ay) * (bx - ax)) / (by - ay)) drin = !drin;
+  }
+  return drin;
+}
+// Strecke a→b auf die Fläche zuschneiden (gerade/ungerade-Regel); ohne = Fläche, die ausgespart wird
+function streckeZuschneiden(ix, a, b, aus, ohne) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  if (Math.abs(dx) + Math.abs(dy) < 1e-9) return;
+  const ts = [0, 1], k = ix.kanten, r = ++ix.runde;
+  const von = Math.max(0, Math.floor((Math.min(a[1], b[1]) - ix.y0) / ix.h)), bis = Math.min(ix.nb - 1, Math.floor((Math.max(a[1], b[1]) - ix.y0) / ix.h));
+  for (let j = von; j <= bis; j++) for (const e of ix.baender[j]) {
+    if (ix.stempel[e] === r) continue;
+    ix.stempel[e] = r;
+    const ex = k[e * 4 + 2] - k[e * 4], ey = k[e * 4 + 3] - k[e * 4 + 1];
+    const d = dx * ey - dy * ex;
+    if (Math.abs(d) < 1e-12) continue;
+    const wx = k[e * 4] - a[0], wy = k[e * 4 + 1] - a[1];
+    const t = (wx * ey - wy * ex) / d, u = (wx * dy - wy * dx) / d;
+    if (t > 0 && t < 1 && u >= 0 && u <= 1) ts.push(t);
+  }
+  ts.sort((x, y) => x - y);
+  for (let i = 0; i + 1 < ts.length; i++) {
+    const t0 = ts[i], t1 = ts[i + 1];
+    if (t1 - t0 < 1e-6) continue;
+    const tm = (t0 + t1) / 2, mx = a[0] + dx * tm, my = a[1] + dy * tm;
+    if (!bereichInnen(ix, mx, my) || (ohne && bereichInnen(ohne, mx, my))) continue;
+    aus.push([[a[0] + dx * t0, a[1] + dy * t0], [a[0] + dx * t1, a[1] + dy * t1]]);
+  }
+}
+// Unendliche Linienschar (Winkel in Grad, Abstand, Versatz) über die Fläche
+function linienSchar(box, grad, abstand, versatz = 0) {
+  const w = (grad * Math.PI) / 180, d = [Math.cos(w), Math.sin(w)], n = [-d[1], d[0]];
+  const c = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2], R = Math.hypot(box[2] - box[0], box[3] - box[1]) / 2 + 1;
+  const cn = c[0] * n[0] + c[1] * n[1], cd = c[0] * d[0] + c[1] * d[1];
+  const v = ((versatz % abstand) + abstand) % abstand;
+  const out = [];
+  for (let o = Math.ceil((cn - R - v) / abstand) * abstand + v; o <= cn + R; o += abstand) {
+    out.push([[n[0] * o + d[0] * (cd - R), n[1] * o + d[1] * (cd - R)], [n[0] * o + d[0] * (cd + R), n[1] * o + d[1] * (cd + R)]]);
+  }
+  return out;
+}
+// Zickzack-Linien: Schar in Richtung grad, Zacken mit Periode und Amplitude; versetzt = Nachbarn gespiegelt
+function zickzackSchar(box, grad, abstand, periode, amplitude, phase = 0, gespiegelt = false) {
+  const w = (grad * Math.PI) / 180, d = [Math.cos(w), Math.sin(w)], n = [-d[1], d[0]];
+  const c = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2], R = Math.hypot(box[2] - box[0], box[3] - box[1]) / 2 + periode;
+  const cn = c[0] * n[0] + c[1] * n[1], cd = c[0] * d[0] + c[1] * d[1];
+  const out = [], halb = periode / 2;
+  for (let o = Math.ceil((cn - R) / abstand) * abstand; o <= cn + R; o += abstand) {
+    const vz = gespiegelt && Math.round(o / abstand) % 2 ? -1 : 1;
+    let vor = null;
+    for (let t = Math.floor((cd - R) / halb) * halb + (phase % halb); t <= cd + R; t += halb) {
+      const zacke = (Math.round((t - phase) / halb) % 2 ? 1 : -1) * amplitude * vz;
+      const p = [n[0] * (o + zacke) + d[0] * t, n[1] * (o + zacke) + d[1] * t];
+      if (vor) out.push([vor, p]);
+      vor = p;
+    }
+  }
+  return out;
+}
+
+function fuellMuster(id, konturen, { s, z, nr, hoehe }) {
+  const ix = bereichIndex(konturen), box = ix.box, aus = [];
+  const schneiden = (strecken, ohne) => { for (const [a, b] of strecken) streckeZuschneiden(ix, a, b, aus, ohne); };
+  const kubisch = (S, auch) => { [0, 60, 120].forEach((g, k) => schneiden(linienSchar(box, g, S, z * [1, -1, 1][k] * 1.15), auch)); };
+  switch (id) {
+    case "zig-zag": case "line": case "alignedrectilinear": {
+      const g = id === "alignedrectilinear" ? 45 : nr % 2 ? 45 : -45;
+      schneiden(linienSchar(box, g, s));
+      if (id !== "line") verbinden(aus, ix, s);
+      break;
+    }
+    case "grid": schneiden(linienSchar(box, 45, 2 * s)); schneiden(linienSchar(box, -45, 2 * s)); break;
+    case "2dlattice": schneiden(linienSchar(box, 60, 2 * s)); schneiden(linienSchar(box, 120, 2 * s)); break;
+    case "triangles": [0, 60, 120].forEach((g) => schneiden(linienSchar(box, g, 3 * s))); break;
+    case "tri-hexagon": [0, 60, 120].forEach((g, k) => schneiden(linienSchar(box, g, 3 * s, k === 0 ? 1.5 * s : 0))); break;
+    case "cubic": kubisch(3 * s); break;
+    case "supportcubic": kubisch(z > hoehe * 0.72 ? 3 * s : 6 * s); break;
+    case "adaptivecubic": {
+      // grob überall, fein nur in einem Streifen entlang der Wände
+      kubisch(6 * s);
+      const kern = konturen.map((k) => zugVersetzen(k, 4 * s)).filter(Boolean);
+      const ohne = kern.length ? bereichIndex(kern) : null;
+      if (ohne) [0, 60, 120].forEach((g, k) => schneiden(linienSchar(box, g, 3 * s, z * [1, -1, 1][k] * 1.15), ohne));
+      else kubisch(3 * s);
+      break;
+    }
+    case "honeycomb": {
+      const a = 1.155 * s, hx = 1.5 * a, hy = Math.sqrt(3) * a, st = [];
+      for (let i = Math.floor(box[0] / hx) - 1; i * hx <= box[2] + hx; i++) {
+        for (let j = Math.floor(box[1] / hy) - 1; j * hy <= box[3] + hy; j++) {
+          const cx = i * hx, cy = j * hy + (i & 1 ? hy / 2 : 0);
+          const ecke = (k) => [cx + a * Math.cos((k * Math.PI) / 3), cy + a * Math.sin((k * Math.PI) / 3)];
+          st.push([ecke(0), ecke(1)], [ecke(1), ecke(2)], [ecke(5), ecke(0)]);
+        }
+      }
+      schneiden(st);
+      break;
+    }
+    case "zigzag": schneiden(zickzackSchar(box, 45, s, 2 * s, 0.35 * s)); break;
+    case "crosszag": schneiden(zickzackSchar(box, nr % 2 ? 45 : -45, s, 2 * s, 0.35 * s)); break;
+    case "lockedzag": schneiden(zickzackSchar(box, nr % 2 ? 45 : -45, s, 2 * s, 0.35 * s, Math.floor(nr / 2) % 2 ? s : 0)); break;
+    case "3dhoneycomb": {
+      // Schnitt durch Oktaederstümpfe: Zickzack, dessen Ausschlag mit der Höhe zu- und abnimmt, Richtung wechselt je Lage
+      const P = 2 * s, lage = Math.floor(z / (P / 2)), t = (z % (P / 2)) / (P / 2);
+      const amp = (P / 4) * (lage % 2 ? t : 1 - t);
+      schneiden(zickzackSchar(box, lage % 4 < 2 ? 0 : 90, P / 2, P, amp, 0, true));
+      break;
+    }
+    case "crosshatch": {
+      const H = Math.max(1.6, 2 * s), block = Math.floor(z / H), t = (z % H) / H;
+      const amp = t < 0.35 ? (s / 2) * (1 - t / 0.35) : 0;   // Übergang: Zacken werden flach
+      const g = block % 2 ? 90 : 0;
+      if (amp > 0.05) schneiden(zickzackSchar(box, g, s, s, amp, 0, true));
+      else schneiden(linienSchar(box, g, s));
+      break;
+    }
+    case "gyroid": {
+      // Gyroid-Fläche sin x·cos y + sin y·cos z + sin z·cos x = 0 bei Höhe z, Linien mit Marching Squares
+      const P = 2.4 * s, k = (2 * Math.PI) / P;
+      let zelle = P / 10;
+      const bw = box[2] - box[0] + 2, bh = box[3] - box[1] + 2;
+      while ((bw / zelle) * (bh / zelle) > 60000) zelle *= 1.25;
+      const nx = Math.ceil(bw / zelle) + 1, ny = Math.ceil(bh / zelle) + 1, x0 = box[0] - 1, y0 = box[1] - 1;
+      const sz = Math.sin(k * z), cz = Math.cos(k * z);
+      const f = new Float32Array(nx * ny);
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const x = k * (x0 + i * zelle), y = k * (y0 + j * zelle);
+        f[j * nx + i] = Math.sin(x) * Math.cos(y) + Math.sin(y) * cz + sz * Math.cos(x);
+      }
+      const st = [];
+      const rand = (i1, j1, i2, j2) => {
+        const a = f[j1 * nx + i1], b = f[j2 * nx + i2], t = a / (a - b);
+        return [x0 + (i1 + (i2 - i1) * t) * zelle, y0 + (j1 + (j2 - j1) * t) * zelle];
+      };
+      for (let j = 0; j + 1 < ny; j++) for (let i = 0; i + 1 < nx; i++) {
+        const p = [];
+        const v = [f[j * nx + i], f[j * nx + i + 1], f[(j + 1) * nx + i + 1], f[(j + 1) * nx + i]];
+        if ((v[0] > 0) !== (v[1] > 0)) p.push(rand(i, j, i + 1, j));
+        if ((v[1] > 0) !== (v[2] > 0)) p.push(rand(i + 1, j, i + 1, j + 1));
+        if ((v[2] > 0) !== (v[3] > 0)) p.push(rand(i + 1, j + 1, i, j + 1));
+        if ((v[3] > 0) !== (v[0] > 0)) p.push(rand(i, j + 1, i, j));
+        if (p.length >= 2) st.push([p[0], p[1]]);
+        if (p.length === 4) st.push([p[2], p[3]]);
+      }
+      schneiden(st);
+      break;
+    }
+    case "concentric": {
+      let ringe = konturen.slice();
+      // Ringe wandern nach innen (Löcher nach außen); ein Ring, der ganz außerhalb liegt, endet
+      for (let n = 0; n < 200 && ringe.length; n++) {
+        ringe = ringe.filter((r) => {
+          if (n >= 3 && flaecheZug(r) < 0) return false;   // um Löcher nur ein paar Ringe, den Rest machen die äußeren
+
+          const vorher = aus.length;
+          for (let i = 0; i < r.length; i++) streckeZuschneiden(ix, r[i], r[(i + 1) % r.length], aus);
+          return aus.length > vorher;
+        }).map((r) => zugVersetzen(r, s)).filter(Boolean);
+      }
+      break;
+    }
+    case "hilbertcurve": {
+      const groesse = Math.max(box[2] - box[0], box[3] - box[1]) + 2;
+      let ordnung = Math.ceil(Math.log2(groesse / s));
+      ordnung = Math.max(1, Math.min(7, ordnung));
+      const n = 1 << ordnung, schritt = Math.max(s, groesse / n);
+      const ox = Math.floor((box[0] - 1) / schritt) * schritt, oy = Math.floor((box[1] - 1) / schritt) * schritt;
+      const punkt = (d) => {
+        let x = 0, y = 0, t = d;
+        for (let q = 1; q < n; q *= 2) {
+          const rx = 1 & (t / 2), ry = 1 & (t ^ rx);
+          if (ry === 0) { if (rx === 1) { x = q - 1 - x; y = q - 1 - y; } [x, y] = [y, x]; }
+          x += q * rx; y += q * ry; t = Math.floor(t / 4);
+        }
+        return [ox + (x + 0.5) * schritt, oy + (y + 0.5) * schritt];
+      };
+      const st = [];
+      let vor = punkt(0);
+      for (let d = 1; d < n * n; d++) { const p = punkt(d); st.push([vor, p]); vor = p; }
+      schneiden(st);
+      break;
+    }
+    case "archimedeanchords": case "octagramspiral": {
+      const c = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2], R = Math.hypot(box[2] - box[0], box[3] - box[1]) / 2 + s;
+      const st = [];
+      let vor = c.slice(), th = 0;
+      while (true) {
+        const r = (s * th) / (2 * Math.PI);
+        if (r > R) break;
+        let p;
+        if (id === "archimedeanchords") { th += Math.min(1, Math.max(0.08, (1.6 * s) / Math.max(r, 0.1))); p = [c[0] + r * Math.cos(th), c[1] + r * Math.sin(th)]; }
+        else { th += Math.PI / 8; const zacke = Math.round(th / (Math.PI / 8)) % 2 ? 1 : 0.72; p = [c[0] + r * zacke * Math.cos(th), c[1] + r * zacke * Math.sin(th)]; }
+        st.push([vor, p]); vor = p;
+      }
+      schneiden(st);
+      break;
+    }
+    case "lightning": {
+      // Bäume, die nach oben hin (zu den Deckflächen) weiter verzweigen
+      const L = 5 * s, anteil = 0.25 + 0.75 * Math.min(1, Math.max(0, z / Math.max(hoehe, 0.01))), st = [];
+      const hx = L, hy = L * 0.866;
+      for (let j = Math.floor(box[1] / hy) - 1; j * hy <= box[3] + hy; j++) {
+        for (let i = Math.floor(box[0] / hx) - 1; i * hx <= box[2] + hx; i++) {
+          const cx = i * hx + (j & 1 ? hx / 2 : 0), cy = j * hy;
+          const zufall = Math.abs(Math.sin(i * 12.9898 + j * 78.233) * 43758.5453) % 1;
+          const dreh = zufall * Math.PI * 2;
+          for (let a = 0; a < 3; a++) {
+            const w = dreh + (a * 2 * Math.PI) / 3, len = (L / 2) * anteil;
+            const m = [cx + Math.cos(w) * len, cy + Math.sin(w) * len];
+            st.push([[cx, cy], m]);
+            if (anteil > 0.55) for (const sg of [-0.6, 0.6]) st.push([m, [m[0] + Math.cos(w + sg) * len * 0.45, m[1] + Math.sin(w + sg) * len * 0.45]]);
+          }
+        }
+      }
+      schneiden(st);
+      break;
+    }
+    default: schneiden(linienSchar(box, 45, 2 * s)); schneiden(linienSchar(box, -45, 2 * s));
+  }
+  return aus;
+}
+// Geradlinig: Nachbarlinien am Rand zu einem Zickzack verbinden, wenn die Verbindung innen liegt
+function verbinden(linien, ix, s) {
+  const n = linien.length;
+  for (let i = 1; i < n; i += 2) { const l = linien[i]; linien[i] = [l[1], l[0]]; }
+  for (let i = 0; i + 1 < n; i++) {
+    const a = linien[i][1], b = linien[i + 1][0];
+    if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 2.2 * s && bereichInnen(ix, (a[0] + b[0]) / 2 + (b[1] - a[1]) * 0.001, (a[1] + b[1]) / 2)) linien.push([a, b]);
+  }
+}
+
+// Kleine Vorschau eines Musters als SVG (für die Auswahl)
+function musterVorschauSvg(id, z = 6) {
+  const q = zuegeOrdnen([[[1, 1], [39, 1], [39, 39], [1, 39]]]).map((k) => k.zug);
+  const st = fuellMuster(id, q, { s: 3.2, z, nr: Math.round(z / 0.2), hoehe: 12 });
+  const d = st.map(([a, b]) => `M${a[0].toFixed(2)} ${a[1].toFixed(2)}L${b[0].toFixed(2)} ${b[1].toFixed(2)}`).join("");
+  return `<svg viewBox="0 0 40 40" class="mod-muster-bild" aria-hidden="true"><rect x="1" y="1" width="38" height="38" rx="3"/><path d="${d}"/></svg>`;
+}
+
+// ---- Strahl gegen Dreiecke (Möller–Trumbore): nächster Treffer {t, n} oder null ----
+function strahlTreffer(v, o, d) {
+  let best = Infinity, n = null;
+  for (let i = 0; i < v.length; i += 9) {
+    const e1x = v[i + 3] - v[i], e1y = v[i + 4] - v[i + 1], e1z = v[i + 5] - v[i + 2];
+    const e2x = v[i + 6] - v[i], e2y = v[i + 7] - v[i + 1], e2z = v[i + 8] - v[i + 2];
+    const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < 1e-12) continue;
+    const inv = 1 / det, tx = o[0] - v[i], ty = o[1] - v[i + 1], tz = o[2] - v[i + 2];
+    const u = (tx * px + ty * py + tz * pz) * inv;
+    if (u < 0 || u > 1) continue;
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+    const w = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
+    if (w < 0 || u + w > 1) continue;
+    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    if (t > 0 && t < best) { best = t; n = [e1y * e2z - e1z * e2y, e1z * e2x - e1x * e2z, e1x * e2y - e1y * e2x]; }
+  }
+  return n ? { t: best, n } : null;
+}
+
+// ---- Frei drehen: Winkel in Grad um X, dann Y, dann Z (um die Modellmitte), danach wieder aufs Bett ----
+// Drehmatrix (3×3 zeilenweise) R = Rz · Ry · Rx aus Winkeln in Grad
+function drehMatrix(grad) {
+  const [ax, ay, az] = grad.map((x) => ((Number(x) || 0) * Math.PI) / 180);
+  const cx = Math.cos(ax), sx = Math.sin(ax), cy = Math.cos(ay), sy = Math.sin(ay), cz = Math.cos(az), sz = Math.sin(az);
+  return [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+    sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+    -sy, cy * sx, cy * cx];
+}
+function drehenGrad(v, grad) {
+  const g = meshGrenzen(v), c = [0, 1, 2].map((i) => (g.min[i] + g.max[i]) / 2);
+  const R = drehMatrix(grad);
+  for (let i = 0; i < v.length; i += 3) {
+    const x = v[i] - c[0], y = v[i + 1] - c[1], z = v[i + 2] - c[2];
+    v[i] = R[0] * x + R[1] * y + R[2] * z + c[0];
+    v[i + 1] = R[3] * x + R[4] * y + R[5] * z + c[1];
+    v[i + 2] = R[6] * x + R[7] * y + R[8] * z + c[2];
+  }
+  return aufsBett(v);
 }
 
 // ---- G-Code ------------------------------------------------------------------

@@ -15,6 +15,11 @@ async function seite(breite, hoehe, mobil = false) {
   return p;
 }
 const el = (p) => p.locator("filament-werkstatt-panel");
+const kam = (p) => p.evaluate(() => { const b = document.querySelector("filament-werkstatt-panel")._buehne; return { f: b._f(), r: b.r, u: b.u, ziel: b.ziel, abstand: b.abstand, neig: b.neigung(), unten: b.unterBett(), art: b.orbitArt, getroffen: b.drehpunktGetroffen, dp: b.drehpunkt }; });
+const nah = (a, b, tol = 0.02) => a.every((x, i) => Math.abs(x - b[i]) < tol);
+const imBild = async (p, loc) => { const bb = await loc.boundingBox(); const vp = p.viewportSize(); return !!bb && bb.y >= 0 && bb.y + bb.height <= vp.height && bb.x >= 0 && bb.x + bb.width <= vp.width; };
+const muster = (p, id) => el(p).locator('select[data-mod="muster"]').evaluate((s, id) => { s.value = id; s.dispatchEvent(new Event("change", { bubbles: true })); }, id);
+const musterFertig = (p, id) => warte(p, async () => p.evaluate((id) => { const m = document.querySelector("filament-werkstatt-panel")._mod; return m.muster === id && m.schichtFortschritt === 1 && m.schichtSchluessel.includes(`|${id}|`); }, id), 40000);
 const warte = async (p, f, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await f()) return true; await p.waitForTimeout(150); } return false; };
 
 // ---- Desktop: leere Ansicht, STL laden ----
@@ -34,6 +39,124 @@ pruefe(await warte(p, async () => (await el(p).locator(".mod-pin").count()) === 
 pruefe(await el(p).locator("canvas.buehne-canvas").evaluate((c) => c.width > 100 && c.height > 100), "WebGL-Bühne hat Größe");
 await p.waitForTimeout(500);
 await p.screenshot({ path: `${out}/m2-stl.png` });
+
+// ---- Warteschlange: immer sichtbar, nicht im Menü ----
+const ws = el(p).locator('.mod-fuss [data-aktion="ws-aus-modell"]');
+pruefe(await ws.isVisible() && await imBild(p, ws), "„In die Warteschlange“ sichtbar (Übersicht)");
+const wsVorher = await p.evaluate(() => document.querySelector("filament-werkstatt-panel")._daten.warteschlange.length);
+await ws.click();
+await p.waitForTimeout(200);
+pruefe(await p.evaluate((n) => document.querySelector("filament-werkstatt-panel")._daten.warteschlange.length === n + 1, wsVorher), "Warteschlange-Knopf legt einen Auftrag an");
+
+// ---- Ausrichtungswürfel ----
+pruefe((await el(p).locator(".mod-w-flaeche").count()) === 6 && (await el(p).locator(".mod-w-zone").count()) === 54, "Würfel: 6 Flächen mit Kanten und Ecken (54 Zonen)");
+const wTexte = await el(p).locator(".mod-w-zone.flaeche span").allTextContents();
+pruefe(["OBEN", "UNTEN", "VORNE", "HINTEN", "LINKS", "RECHTS"].every((t) => wTexte.includes(t)), "Würfel beschriftet: OBEN UNTEN VORNE HINTEN LINKS RECHTS");
+pruefe((await el(p).locator("#mod-achsen line").count()) === 3, "XYZ-Achsenkreuz da");
+const tf0 = await el(p).locator("#mod-w-koerper").evaluate((k) => k.style.transform);
+await el(p).locator(".w-oben .mod-w-zone.flaeche").click();
+await p.waitForTimeout(800);
+let k1 = await kam(p);
+pruefe(nah(k1.f, [0, 0, -1]) && nah(k1.u, [0, 1, 0]), "Klick auf OBEN: Blick von oben, vorne unten im Bild");
+const tf1 = await el(p).locator("#mod-w-koerper").evaluate((k) => k.style.transform);
+pruefe(tf0 !== tf1 && tf1.startsWith("matrix3d"), "Würfel dreht sich mit der Kamera");
+await el(p).locator('.mod-w-zone.flaeche[data-d="0,-1,0"]').evaluate((b) => b.click());
+await p.waitForTimeout(800);
+pruefe(nah((await kam(p)).f, [0, 1, 0]), "Klick auf VORNE: Blick von vorne");
+await el(p).locator('.mod-w-zone.ecke[data-d="1,-1,1"]').first().evaluate((b) => b.click());
+await p.waitForTimeout(800);
+const s3 = 1 / Math.sqrt(3);
+pruefe(nah((await kam(p)).f, [-s3, s3, -s3]), "Klick auf eine Ecke: Blick schräg von vorne rechts oben");
+await el(p).locator('.mod-w-zone.kante[data-d="1,0,1"]').first().evaluate((b) => b.click());
+await p.waitForTimeout(800);
+pruefe(nah((await kam(p)).f, [-Math.SQRT1_2, 0, -Math.SQRT1_2]), "Klick auf eine Kante: Blick von rechts oben");
+await p.screenshot({ path: `${out}/m11-wuerfel-kante.png` });
+
+// ---- Von unten (unter die Druckplatte) ----
+await el(p).locator('.mod-w-zone.flaeche[data-d="0,0,-1"]').evaluate((b) => b.click());
+await p.waitForTimeout(900);
+k1 = await kam(p);
+pruefe(k1.unten && nah(k1.f, [0, 0, 1]), "UNTEN: Kamera unter der Druckplatte");
+pruefe(await p.evaluate(() => document.querySelector("filament-werkstatt-panel")._buehne.objekte.get("bett").alpha < 0.5), "Druckplatte von unten durchscheinend");
+await p.screenshot({ path: `${out}/m12-von-unten.png` });
+
+// ---- Orbit-Menü ----
+await el(p).locator('[data-aktion="mod-ansicht"][data-id="iso"]').click();
+await p.waitForTimeout(800);
+await el(p).locator(".mod-orbit-knopf").click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".mod-orbit-menue .mod-orbit-punkt").count()) === 3 && (await el(p).locator(".mod-orbit-menue").textContent()).includes("Eingeschränkter Orbit"), "Orbit-Menü: Orbit, Eingeschränkter Orbit, Würfel-Schalter");
+await p.screenshot({ path: `${out}/m13-orbit-menue.png` });
+await el(p).locator('[data-aktion="mod-orbit-art"][data-id="frei"]').click();
+await p.waitForTimeout(300);
+pruefe((await kam(p)).art === "frei" && (await el(p).locator(".mod-orbit-menue").count()) === 0, "Freier Orbit gewählt, Menü zu");
+
+// Orbit um die Stelle unter dem Zeiger: Drehpunkt bleibt an seiner Bildschirmstelle
+const cv = await el(p).locator("canvas.buehne-canvas").boundingBox();
+const ziel3 = await p.evaluate(() => document.querySelector("filament-werkstatt-panel")._buehne.projizieren([100, 115, 16]));
+await p.mouse.move(cv.x + ziel3[0], cv.y + ziel3[1]);
+await p.mouse.down();
+for (let i = 1; i <= 8; i++) await p.mouse.move(cv.x + ziel3[0] + i * 12, cv.y + ziel3[1] + i * 5);
+await p.waitForTimeout(150);
+k1 = await kam(p);
+pruefe(k1.getroffen && Math.abs(k1.dp[2] - 16) < 0.3, `Drehpunkt auf dem Modell getroffen (z ≈ ${k1.dp && k1.dp[2].toFixed(2)})`);
+const dpBild = await p.evaluate((dp) => document.querySelector("filament-werkstatt-panel")._buehne.projizieren(dp), k1.dp);
+pruefe(Math.hypot(dpBild[0] - ziel3[0], dpBild[1] - ziel3[1]) < 3, "Drehpunkt bleibt beim Drehen an seiner Stelle");
+pruefe((await el(p).locator("#mod-drehpunkt.an").count()) === 1, "Drehpunkt wird angezeigt");
+await p.screenshot({ path: `${out}/m14-orbit-drehpunkt.png` });
+await p.mouse.up();
+// Daneben ziehen: Modellmitte als Drehpunkt
+await p.mouse.move(cv.x + 20, cv.y + cv.height - 60);
+await p.mouse.down();
+await p.mouse.move(cv.x + 60, cv.y + cv.height - 60, { steps: 4 });
+k1 = await kam(p);
+await p.mouse.up();
+pruefe(k1.getroffen === false && nah(k1.dp, [128, 128, 8], 0.6), "Neben dem Modell: Drehpunkt ist die Modellmitte");
+// Eingeschränkter Orbit: waagerecht, bis unter die Platte, nie über Kopf
+await el(p).locator(".mod-orbit-knopf").click();
+await el(p).locator('[data-aktion="mod-orbit-art"][data-id="eingeschraenkt"]').click();
+await p.waitForTimeout(200);
+k1 = await kam(p);
+pruefe(k1.art === "eingeschraenkt" && Math.abs(k1.r[2]) < 1e-6, "Eingeschränkter Orbit: wieder waagerecht ausgerichtet");
+await p.mouse.move(cv.x + 30, cv.y + 300);
+await p.mouse.down();
+await p.mouse.move(cv.x + 30, cv.y + 40, { steps: 10 });
+await p.mouse.up();
+k1 = await kam(p);
+pruefe(k1.neig < -5 && k1.unten && Math.abs(k1.r[2]) < 1e-6, `Nach oben ziehen: Blick von unten (${k1.neig.toFixed(1)}°)`);
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/m15-unter-platte.png` });
+await p.mouse.move(cv.x + 30, cv.y + 120);
+await p.mouse.down();
+await p.mouse.move(cv.x + 30, cv.y + 900, { steps: 14 });
+await p.mouse.up();
+k1 = await kam(p);
+pruefe(k1.neig <= 89.6 && k1.neig > 80, `Weit nach unten ziehen: höchstens senkrecht von oben (${k1.neig.toFixed(1)}°)`);
+// Würfel ziehen dreht die Ansicht (Schalter)
+const wb = await el(p).locator("#mod-wuerfel").boundingBox();
+const vorZiehen = await kam(p);
+await p.mouse.move(wb.x + wb.width / 2, wb.y + wb.height / 2);
+await p.mouse.down();
+await p.mouse.move(wb.x + wb.width / 2 + 40, wb.y + wb.height / 2 + 10, { steps: 6 });
+await p.mouse.up();
+await p.waitForTimeout(500);
+const nachZiehen = await kam(p);
+pruefe(!nah(vorZiehen.r, nachZiehen.r, 0.05), "Würfel ziehen dreht die Ansicht");
+await el(p).locator(".mod-orbit-knopf").click();
+await el(p).locator('[data-aktion="mod-wuerfel-ziehen"]').click();
+await p.waitForTimeout(200);
+pruefe((await el(p).locator(".mod-wuerfel-ecke.ziehbar").count()) === 0, "Würfel-Ziehen abgeschaltet");
+await el(p).locator(".mod-orbit-knopf").click();
+const vor2 = await kam(p);
+await p.mouse.move(wb.x + wb.width / 2, wb.y + wb.height / 2);
+await p.mouse.down();
+await p.mouse.move(wb.x + wb.width / 2 + 40, wb.y + wb.height / 2 + 10, { steps: 6 });
+await p.mouse.up();
+pruefe(nah(vor2.r, (await kam(p)).r, 1e-4), "Abgeschaltet: Ziehen am Würfel dreht nicht");
+await el(p).locator(".mod-orbit-knopf").click();
+await el(p).locator('[data-aktion="mod-wuerfel-ziehen"]').click();
+await el(p).locator('[data-aktion="mod-ansicht"][data-id="iso"]').click();
+await p.waitForTimeout(800);
 
 // ---- Löcher ----
 await el(p).locator('.tab[data-aktion="mod-tab"][data-id="loecher"]').click();
@@ -90,6 +213,68 @@ await p.waitForTimeout(300);
 pruefe((await el(p).locator(".stuetz-eintrag").count()) === 5, "Stützen-Erklärung mit 5 Bildern");
 await p.screenshot({ path: `${out}/m5-stuetzen.png` });
 await el(p).locator('.dialog [data-aktion="dialog-zu"]').click();
+pruefe(await imBild(p, el(p).locator('.mod-fuss [data-aktion="ws-aus-modell"]')), "„In die Warteschlange“ auch bei Schichten sichtbar");
+
+// ---- Füllmuster ----
+const musterListe = await el(p).locator('select[data-mod="muster"] option').evaluateAll((o) => o.map((x) => x.value));
+pruefe(musterListe.length === 22 && ["grid", "gyroid", "honeycomb", "cubic", "lightning", "hilbertcurve", "crosshatch", "3dhoneycomb", "lockedzag", "2dlattice"].every((x) => musterListe.includes(x)), `Füllmuster wie in Bambu Studio (${musterListe.length})`);
+const fuellHash = (nr) => p.evaluate((nr) => {
+  const m = document.querySelector("filament-werkstatt-panel")._mod, l = m.schichtLinien, f = m.schichtFarben;
+  let h = 0, n = 0;
+  for (let i = nr > 1 ? m.schichtEnden[nr - 2] : 0; i < m.schichtEnden[nr - 1]; i += 2) {
+    if (Math.abs(f[i * 3] - 0.85) > 0.01 || Math.abs(f[i * 3 + 1] - 0.3) > 0.01) continue;   // nur Füllung
+    h = (h * 31 + Math.round(l[i * 3] * 10) * 7 + Math.round(l[i * 3 + 1] * 10)) % 1000000007; n++;
+  }
+  return { h, n };
+}, nr);
+const gridA = await fuellHash(30), gridB = await fuellHash(31);
+const vorschauGrid = await el(p).locator(".mod-muster-vorschau").innerHTML();
+await muster(p, "gyroid");
+pruefe(await musterFertig(p, "gyroid"), "Gyroid gewählt, Schichten neu berechnet");
+pruefe((await el(p).locator(".mod-muster-vorschau").innerHTML()) !== vorschauGrid && (await el(p).locator(".mod-muster").textContent()).includes("ändert sich je Schicht"), "Vorschau und Beschreibung zum Muster");
+const gyA = await fuellHash(30), gyB = await fuellHash(31);
+pruefe(gridA.h === gridB.h && gridA.n > 0, "Gitter: jede Schicht gleich");
+pruefe(gyA.n > 0 && gyA.h !== gyB.h && gyA.h !== gridA.h, "Gyroid: ändert sich von Schicht zu Schicht");
+await el(p).locator('[data-mod="schicht"]').evaluate((r) => { r.value = 30; r.dispatchEvent(new Event("input", { bubbles: true })); });
+await el(p).locator('.mod-w-zone.flaeche[data-d="0,0,1"]').evaluate((b) => b.click());
+await p.waitForTimeout(900);
+await p.screenshot({ path: `${out}/m16-gyroid-oben.png` });
+for (const [id, datei] of [["honeycomb", "m17-wabe"], ["hilbertcurve", "m18-hilbert"], ["cubic", "m19-kubisch"]]) {
+  await muster(p, id);
+  pruefe(await musterFertig(p, id), `Muster ${id} berechnet`);
+  await p.waitForTimeout(300);
+  await p.screenshot({ path: `${out}/${datei}.png` });
+}
+const cA = await fuellHash(30), cB = await fuellHash(31);
+pruefe(cA.n > 0 && cA.h !== cB.h, "Kubisch wandert mit der Höhe");
+await el(p).locator('[data-aktion="mod-ansicht"][data-id="iso"]').click();
+await p.waitForTimeout(700);
+
+// ---- Drehen: 90° bleibt, dazu Benutzerdefiniert ----
+await el(p).locator('.tab[data-aktion="mod-tab"][data-id="uebersicht"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator('.mod-dreh [data-aktion="mod-drehen"]').count()) === 3, "90°-Knöpfe weiter da");
+await el(p).locator('[data-aktion="mod-dreh-eigen"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".mod-dreh-feld input").count()) === 3, "Benutzerdefiniert: Felder für X, Y, Z");
+await el(p).locator("#mod-dreh-2").fill("90");
+await p.waitForTimeout(200);
+pruefe(await p.evaluate(() => Math.abs(document.querySelector("filament-werkstatt-panel")._buehne.objekte.get("modell").m[0]) < 0.01), "Vorschau dreht das Modell schon mit");
+await p.screenshot({ path: `${out}/m20-drehen-eigen.png` });
+await el(p).locator('[data-aktion="mod-dreh-anwenden"]').click();
+await p.waitForTimeout(500);
+let mm = (await el(p).locator(".mod-masse").textContent()).replace(/\s+/g, " ");
+pruefe(/X\s*40,0.*Y\s*78,0/.test(mm), `Z um 90° gedreht: 40 × 78 (${mm.trim()})`);
+await el(p).locator("#mod-dreh-2").fill("-45");
+await el(p).locator('[data-aktion="mod-dreh-plus"][data-g="-45"]').click();
+await el(p).locator('[data-aktion="mod-dreh-anwenden"]').click();
+await p.waitForTimeout(500);
+mm = (await el(p).locator(".mod-masse").textContent()).replace(/\s+/g, " ");
+pruefe(/X\s*78,0.*Y\s*40,0/.test(mm), `Mit −45° und Schnellknopf −45° zurück: 78 × 40 (${mm.trim()})`);
+await el(p).locator("#mod-dreh-0").evaluate((i) => { i.type = "text"; i.value = "12,5"; i.dispatchEvent(new Event("input", { bubbles: true })); });
+await p.waitForTimeout(100);
+pruefe(await p.evaluate(() => document.querySelector("filament-werkstatt-panel")._mod.drehWerte[0] === 12.5), "Komma als Dezimalzeichen: 12,5°");
+await el(p).locator('[data-aktion="mod-dreh-null"]').click();
 
 // ---- G-Code über den Plus-Knopf ----
 await el(p).locator(".mod-plus").click();
@@ -118,6 +303,57 @@ await el(p).locator('input[data-mod="datei"]').setInputFiles("test/modelle/halte
 await warte(p, async () => (await el(p).locator(".mod-pin").count()) === 5);
 await p.waitForTimeout(400);
 await p.screenshot({ path: `${out}/m9-handy-stl.png` });
+pruefe(await el(p).locator(".mod-wuerfel-ecke").isVisible(), "Handy: Ausrichtungswürfel sichtbar");
+const wsH = el(p).locator('.mod-fuss [data-aktion="ws-aus-modell"]');
+const navTop = (await el(p).locator(".nav-unten").boundingBox()).y;
+const wsBox = await wsH.boundingBox();
+pruefe(wsBox && wsBox.y + wsBox.height <= navTop + 1 && wsBox.y > 0, "Handy: „In die Warteschlange“ sofort sichtbar über der unteren Leiste");
+// Ein Finger dreht, zwei Finger zoomen
+const cvH = await el(p).locator("canvas.buehne-canvas").boundingBox();
+const cdpH = await p.context().newCDPSession(p);
+const tvor = await kam(p);
+await cdpH.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: cvH.x + 60, y: cvH.y + 300 }] });
+for (let i = 1; i <= 8; i++) await cdpH.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: cvH.x + 60 + i * 15, y: cvH.y + 300 }] });
+await cdpH.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+await p.waitForTimeout(150);
+const tnach = await kam(p);
+pruefe(!nah(tvor.r, tnach.r, 0.05), "Handy: ein Finger dreht");
+await cdpH.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: cvH.x + 150, y: cvH.y + 250, id: 1 }, { x: cvH.x + 250, y: cvH.y + 250, id: 2 }] });
+for (let i = 1; i <= 6; i++) await cdpH.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: cvH.x + 150 - i * 12, y: cvH.y + 250, id: 1 }, { x: cvH.x + 250 + i * 12, y: cvH.y + 250, id: 2 }] });
+await cdpH.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+await p.waitForTimeout(150);
+pruefe((await kam(p)).abstand < tnach.abstand * 0.9, "Handy: zwei Finger zoomen");
+await el(p).locator('[data-aktion="mod-ansicht"][data-id="iso"]').click();
+await p.waitForTimeout(700);
+await el(p).locator('.mod-w-zone.ecke[data-d="1,-1,-1"]').first().evaluate((b) => b.click());
+await p.waitForTimeout(800);
+await p.screenshot({ path: `${out}/m21-handy-unten.png` });
+await el(p).locator(".mod-orbit-knopf").click();
+await p.waitForTimeout(300);
+await p.screenshot({ path: `${out}/m22-handy-orbit.png` });
+await el(p).locator('[data-aktion="mod-orbit-art"][data-id="eingeschraenkt"]').click();
+await el(p).locator('[data-aktion="mod-ansicht"][data-id="iso"]').click();
+await el(p).locator('[data-aktion="mod-dreh-eigen"]').click();
+await p.waitForTimeout(300);
+await el(p).locator("#mod-dreh-0").fill("30");
+await p.waitForTimeout(200);
+await el(p).locator(".mod-dreh-eigen").scrollIntoViewIfNeeded();
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/m23-handy-drehen.png` });
+await el(p).locator('[data-aktion="mod-dreh-null"]').click();
+await el(p).locator('.tab[data-aktion="mod-tab"][data-id="schichten"]').click();
+await warte(p, async () => p.evaluate(() => document.querySelector("filament-werkstatt-panel")._mod.schichtFortschritt === 1), 40000);
+await muster(p, "gyroid");
+pruefe(await musterFertig(p, "gyroid"), "Handy: Gyroid berechnet");
+await p.evaluate(() => { const h = document.querySelector("filament-werkstatt-panel").shadowRoot.querySelector(".haupt"); h.scrollTop = 0; });
+await el(p).locator('[data-aktion="mod-ansicht"][data-id="iso"]').click();
+await p.waitForTimeout(800);
+await p.screenshot({ path: `${out}/m24-handy-gyroid.png` });
+await el(p).locator(".mod-muster").scrollIntoViewIfNeeded();
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/m25-handy-muster.png` });
+pruefe(await imBild(p, wsH), "Handy: Warteschlange-Knopf bleibt beim Scrollen sichtbar");
+await el(p).locator('.tab[data-aktion="mod-tab"][data-id="uebersicht"]').click();
 await el(p).locator('.tab[data-aktion="mod-tab"][data-id="loecher"]').click();
 await el(p).locator('[data-aktion="mod-alle-einsetzen"]').click();
 await p.waitForTimeout(2200);
