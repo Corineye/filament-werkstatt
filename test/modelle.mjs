@@ -274,6 +274,23 @@ pruefe(/X\s*78,0.*Y\s*40,0/.test(mm), `Mit −45° und Schnellknopf −45° zur�
 await el(p).locator("#mod-dreh-0").evaluate((i) => { i.type = "text"; i.value = "12,5"; i.dispatchEvent(new Event("input", { bubbles: true })); });
 await p.waitForTimeout(100);
 pruefe(await p.evaluate(() => document.querySelector("filament-werkstatt-panel")._mod.drehWerte[0] === 12.5), "Komma als Dezimalzeichen: 12,5°");
+// Bei schrägen Winkeln liegt der tiefste Punkt in der Vorschau genau auf dem Bett
+const tiefster = () => p.evaluate(() => {
+  const e = document.querySelector("filament-werkstatt-panel"), v = e._mod.v, M = e._buehne.objekte.get("modell").m;
+  let u = Infinity;
+  for (let i = 0; i < v.length; i += 3) u = Math.min(u, M[2] * v[i] + M[6] * v[i + 1] + M[10] * v[i + 2] + M[14]);
+  return u;
+});
+await el(p).locator("#mod-dreh-0").fill("30");
+await p.waitForTimeout(150);
+let u = await tiefster();
+pruefe(Math.abs(u) < 0.01, `Vorschau X 30°: tiefster Punkt auf dem Bett (${u.toFixed(3)} mm)`);
+await el(p).locator("#mod-dreh-1").fill("-47");
+await p.waitForTimeout(150);
+u = await tiefster();
+pruefe(Math.abs(u) < 0.01, `Vorschau X 30°, Y −47°: tiefster Punkt auf dem Bett (${u.toFixed(3)} mm)`);
+await p.screenshot({ path: `${out}/m26-drehen-schraeg.png` });
+await el(p).locator("#mod-dreh-1").fill("0");
 await el(p).locator('[data-aktion="mod-dreh-null"]').click();
 
 // ---- G-Code über den Plus-Knopf ----
