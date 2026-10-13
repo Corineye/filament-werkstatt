@@ -118,12 +118,17 @@ const DruckerAnsicht = {
     }
     const k = (steckdose ? "s:" : "") + schluessel;
     if (k in this._drIds) return this._drIds[k];
+    // Zuerst, was die Integration bei der Einrichtung gefunden hat
+    const konf = this._konfig && this._konfig[steckdose ? "steckdose" : "drucker"];
+    if (konf && konf[schluessel] && states[konf[schluessel]]) return (this._drIds[k] = konf[schluessel]);
     const [name, id] = (steckdose ? DR_STECKDOSE_ENTITAETEN : DR_ENTITAETEN)[schluessel];
     const voll = steckdose ? (name ? `${DR_STECKDOSE} ${name}` : DR_STECKDOSE) : `${DR_GERAET} ${name}`;
     const gefunden = this._drNamen[`${id.split(".")[0]}|${voll}`] || (states[id] ? id : null);
     this._drIds[k] = gefunden;
     return gefunden;
   },
+  _drListe() { return (this._konfig && this._konfig.liste) || DR_LISTE; },
+  _drSteckdoseName() { return (this._konfig && this._konfig.steckdose_name) || DR_STECKDOSE; },
   _drS(schluessel, steckdose = false) {
     const id = this._drId(schluessel, steckdose);
     return id ? this._hass.states[id] : null;
@@ -301,7 +306,7 @@ const DruckerAnsicht = {
   async _drVerlaufLaden() {
     this._drVerlaufLaedt = true;
     try {
-      const r = await this._hass.callWS({ type: "todo/item/list", entity_id: DR_LISTE });
+      const r = await this._hass.callWS({ type: "todo/item/list", entity_id: this._drListe() });
       this._drVerlauf = (r.items || []).map(druckDaten).sort((a, b) => (b.start || "").localeCompare(a.start || ""));
       this._drVerlaufFehler = null;
     } catch (e) {
@@ -414,7 +419,7 @@ const DruckerAnsicht = {
     const an = this._drSchaltZiel === "an";
     if (an) {
       return `<h2>Drucker einschalten?</h2>
-        <p class="leise">Die Steckdose „${esc(DR_STECKDOSE)}“ wird eingeschaltet. Der Drucker meldet sich nach etwa 15–30 Sekunden.</p>
+        <p class="leise">Die Steckdose „${esc(this._drSteckdoseName())}“ wird eingeschaltet. Der Drucker meldet sich nach etwa 15–30 Sekunden.</p>
         <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
           <button class="knopf" data-aktion="dr-schalten-ok">Einschalten</button></div>`;
     }
@@ -425,7 +430,7 @@ const DruckerAnsicht = {
     return `<h2>Drucker ausschalten?</h2>
       ${druckt ? `<div class="hinweis rot-hinweis"><strong>Achtung, es läuft ein Druck.</strong> Ausschalten bricht ihn sofort ab und er ist verloren.</div>` : ""}
       ${heiss ? `<div class="hinweis amber">Die Düse ist noch ${zahl(duese)} °C heiß. Der Hotend-Lüfter braucht Strom, um sie abzukühlen. Besser warten, bis sie unter 50 °C ist, sonst kann das Filament im Hotend verstopfen.</div>` : ""}
-      ${!druckt && !heiss ? `<p class="leise">Die Steckdose „${esc(DR_STECKDOSE)}“ wird ausgeschaltet. Es läuft kein Druck und die Düse ist kalt.</p>` : ""}
+      ${!druckt && !heiss ? `<p class="leise">Die Steckdose „${esc(this._drSteckdoseName())}“ wird ausgeschaltet. Es läuft kein Druck und die Düse ist kalt.</p>` : ""}
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
         <button class="knopf rot-knopf" data-aktion="dr-schalten-ok">${druckt ? "Trotzdem ausschalten" : "Ausschalten"}</button></div>`;
   },

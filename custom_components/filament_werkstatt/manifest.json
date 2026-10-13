@@ -1,13 +1,27 @@
 {
   "domain": "filament_werkstatt",
   "name": "Filament-Werkstatt",
-  "codeowners": ["@Corineye"],
+  "after_dependencies": [
+    "camera",
+    "image",
+    "automation",
+    "bambu_lab"
+  ],
+  "codeowners": [
+    "@Corineye"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "frontend", "panel_custom"],
+  "dependencies": [
+    "http",
+    "frontend",
+    "panel_custom",
+    "todo",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/Corineye/filament-werkstatt",
   "integration_type": "service",
-  "iot_class": "local_polling",
+  "iot_class": "calculated",
   "issue_tracker": "https://github.com/Corineye/filament-werkstatt/issues",
   "single_config_entry": true,
-  "version": "0.9.0"
+  "version": "0.10.0"
 }

@@ -2177,12 +2177,17 @@ const DruckerAnsicht = {
     }
     const k = (steckdose ? "s:" : "") + schluessel;
     if (k in this._drIds) return this._drIds[k];
+    // Zuerst, was die Integration bei der Einrichtung gefunden hat
+    const konf = this._konfig && this._konfig[steckdose ? "steckdose" : "drucker"];
+    if (konf && konf[schluessel] && states[konf[schluessel]]) return (this._drIds[k] = konf[schluessel]);
     const [name, id] = (steckdose ? DR_STECKDOSE_ENTITAETEN : DR_ENTITAETEN)[schluessel];
     const voll = steckdose ? (name ? `${DR_STECKDOSE} ${name}` : DR_STECKDOSE) : `${DR_GERAET} ${name}`;
     const gefunden = this._drNamen[`${id.split(".")[0]}|${voll}`] || (states[id] ? id : null);
     this._drIds[k] = gefunden;
     return gefunden;
   },
+  _drListe() { return (this._konfig && this._konfig.liste) || DR_LISTE; },
+  _drSteckdoseName() { return (this._konfig && this._konfig.steckdose_name) || DR_STECKDOSE; },
   _drS(schluessel, steckdose = false) {
     const id = this._drId(schluessel, steckdose);
     return id ? this._hass.states[id] : null;
@@ -2360,7 +2365,7 @@ const DruckerAnsicht = {
   async _drVerlaufLaden() {
     this._drVerlaufLaedt = true;
     try {
-      const r = await this._hass.callWS({ type: "todo/item/list", entity_id: DR_LISTE });
+      const r = await this._hass.callWS({ type: "todo/item/list", entity_id: this._drListe() });
       this._drVerlauf = (r.items || []).map(druckDaten).sort((a, b) => (b.start || "").localeCompare(a.start || ""));
       this._drVerlaufFehler = null;
     } catch (e) {
@@ -2473,7 +2478,7 @@ const DruckerAnsicht = {
     const an = this._drSchaltZiel === "an";
     if (an) {
       return `<h2>Drucker einschalten?</h2>
-        <p class="leise">Die Steckdose „${esc(DR_STECKDOSE)}“ wird eingeschaltet. Der Drucker meldet sich nach etwa 15–30 Sekunden.</p>
+        <p class="leise">Die Steckdose „${esc(this._drSteckdoseName())}“ wird eingeschaltet. Der Drucker meldet sich nach etwa 15–30 Sekunden.</p>
         <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
           <button class="knopf" data-aktion="dr-schalten-ok">Einschalten</button></div>`;
     }
@@ -2484,7 +2489,7 @@ const DruckerAnsicht = {
     return `<h2>Drucker ausschalten?</h2>
       ${druckt ? `<div class="hinweis rot-hinweis"><strong>Achtung, es läuft ein Druck.</strong> Ausschalten bricht ihn sofort ab und er ist verloren.</div>` : ""}
       ${heiss ? `<div class="hinweis amber">Die Düse ist noch ${zahl(duese)} °C heiß. Der Hotend-Lüfter braucht Strom, um sie abzukühlen. Besser warten, bis sie unter 50 °C ist, sonst kann das Filament im Hotend verstopfen.</div>` : ""}
-      ${!druckt && !heiss ? `<p class="leise">Die Steckdose „${esc(DR_STECKDOSE)}“ wird ausgeschaltet. Es läuft kein Druck und die Düse ist kalt.</p>` : ""}
+      ${!druckt && !heiss ? `<p class="leise">Die Steckdose „${esc(this._drSteckdoseName())}“ wird ausgeschaltet. Es läuft kein Druck und die Düse ist kalt.</p>` : ""}
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
         <button class="knopf rot-knopf" data-aktion="dr-schalten-ok">${druckt ? "Trotzdem ausschalten" : "Ausschalten"}</button></div>`;
   },
@@ -5785,15 +5790,11 @@ const ModellAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.9.0";
+const VERSION = "0.10.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
-const DRUCKER = "sensor.p1s_01p00c572701906_";
-const DRUCKER_SENSOREN = [
-  "druckstatus", "name_der_aufgabe", "gewicht_des_drucks", "drucklange",
-  "zieltemperatur_der_duse", "zieltemperatur_vom_druckbett", "startzeit",
-  "druckfortschritt", "dusengrosse", "temperatur_der_duse", "druckbetttemperatur",
-];
+// Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
+const DRUCKER_WICHTIG = ["status", "name", "gewicht", "laenge", "duese_ziel", "bett_ziel", "start", "fortschritt", "duese_mm", "duese", "bett"];
 
 const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
@@ -5978,6 +5979,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   // ---- Laden und Speichern ------------------------------------------------
   async _laden() {
     this._fehler = null;
+    await this._konfigLaden();
     try {
       const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
       if (r && r.value && Array.isArray(r.value.rollen)) {
@@ -5996,6 +5998,17 @@ class FilamentWerkstattPanel extends HTMLElement {
       this._fehler = e.message || String(e);
     }
     this._zeichnen();
+  }
+
+  // Drucker, Steckdose und Druckliste aus der Einrichtung der Integration
+  async _konfigLaden() {
+    try {
+      const k = await this._hass.callWS({ type: "filament_werkstatt/einstellungen" });
+      this._konfig = k && k.liste ? k : null;
+    } catch (e) {
+      this._konfig = null;   // ältere Einrichtung ohne Integration: Suche über Namen
+    }
+    this._drCache = null;
   }
 
   _speichern() {
@@ -6557,15 +6570,19 @@ class FilamentWerkstattPanel extends HTMLElement {
     const liste = [];
     this._check = { laeuft: true, liste };
     const add = (titel, ok, details) => { liste.push({ titel, ok, details }); this._zeichnen(); };
-    const fehlen = DRUCKER_SENSOREN.filter((s) => !hass.states[DRUCKER + s]);
+    const k = this._konfig;
+    add("Integration", !!(k && k.liste), k && k.liste
+      ? `Drucker: ${k.drucker_name || "keiner gewählt"} · Steckdose: ${k.steckdose_name || "keine gewählt"} · Liste: ${k.liste}`
+      : "Keine Einstellungen der Integration gefunden, es wird nach Namen gesucht");
+    const fehlen = DRUCKER_WICHTIG.filter((s) => !this._drId(s));
     add("Drucker-Sensoren", !fehlen.length, !fehlen.length
-      ? `Alle ${DRUCKER_SENSOREN.length} gefunden, Druckstatus: ${hass.states[DRUCKER + "druckstatus"].state}`
+      ? `Alle ${DRUCKER_WICHTIG.length} gefunden, Druckstatus: ${this._drW("status") || "–"}`
       : `Nicht gefunden: ${fehlen.join(", ")}. Direkt nach einem HA-Neustart ist das normal, dann in einer Minute neu prüfen.`);
-    const kameras = Object.keys(hass.states).filter((id) => id.startsWith("camera.") && id.includes("p1s"));
-    add("Drucker-Kamera", kameras.length > 0, kameras.length ? kameras.join(", ") : "Keine Kamera mit „p1s“ im Namen gefunden");
+    const kamera = this._drId("kamera");
+    add("Drucker-Kamera", !!kamera, kamera || "Keine Kamera gefunden");
     try {
-      const r = await hass.callWS({ type: "todo/item/list", entity_id: "todo.3d_drucke" });
-      add("Druckliste lesen", true, `${(r.items || []).length} Einträge in todo.3d_drucke`);
+      const r = await hass.callWS({ type: "todo/item/list", entity_id: this._drListe() });
+      add("Druckliste lesen", true, `${(r.items || []).length} Einträge in ${this._drListe()}`);
     } catch (e) { add("Druckliste lesen", false, e.message || String(e)); }
     try {
       const r = await hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
