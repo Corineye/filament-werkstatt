@@ -503,7 +503,11 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .mod-loch { border-radius: 14px; background: rgba(0,0,0,.18); border: 1px solid var(--rand); overflow: hidden; }
 .mod-loch.auf { border-color: rgba(255,181,71,.5); }
 .mod-loch.drin { border-color: rgba(62,230,168,.4); }
-.mod-loch-kopf { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; padding: 10px; }
+.mod-loch-zeile { display: flex; align-items: stretch; }
+.mod-loch-weg { flex: none; width: 44px; display: grid; place-items: center; color: var(--leise); border-left: 1px solid var(--rand); }
+.mod-loch-weg:hover, .mod-loch-weg:focus-visible { color: var(--rot); background: rgba(255,107,107,.1); }
+.mod-loch-weg svg { width: 18px; height: 18px; }
+.mod-loch-kopf { flex: 1; min-width: 0; width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; padding: 10px; }
 .mod-loch-kopf:hover { background: var(--flaeche-hover); }
 .mod-nr { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; border: 2px solid var(--amber); color: var(--amber); }
 .mod-loch.drin .mod-nr { border-color: var(--mint); color: var(--mint); }

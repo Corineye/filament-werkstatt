@@ -1322,7 +1322,11 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .mod-loch { border-radius: 14px; background: rgba(0,0,0,.18); border: 1px solid var(--rand); overflow: hidden; }
 .mod-loch.auf { border-color: rgba(255,181,71,.5); }
 .mod-loch.drin { border-color: rgba(62,230,168,.4); }
-.mod-loch-kopf { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; padding: 10px; }
+.mod-loch-zeile { display: flex; align-items: stretch; }
+.mod-loch-weg { flex: none; width: 44px; display: grid; place-items: center; color: var(--leise); border-left: 1px solid var(--rand); }
+.mod-loch-weg:hover, .mod-loch-weg:focus-visible { color: var(--rot); background: rgba(255,107,107,.1); }
+.mod-loch-weg svg { width: 18px; height: 18px; }
+.mod-loch-kopf { flex: 1; min-width: 0; width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; padding: 10px; }
 .mod-loch-kopf:hover { background: var(--flaeche-hover); }
 .mod-nr { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; border: 2px solid var(--amber); color: var(--amber); }
 .mod-loch.drin .mod-nr { border-color: var(--mint); color: var(--mint); }
@@ -6029,6 +6033,8 @@ function zylinderDreiecke(r, h, z0 = 0, teile = 40) {
   }
   return v;
 }
+const ICON_MUELL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>`;
+
 // Teil entlang der lokalen z-Achse bauen: z = 0 ist die Lochöffnung, positiv geht ins Loch hinein
 function teilGeometrie(teil, loch) {
   const teileFarben = [];
@@ -6313,17 +6319,17 @@ const ModellAnsicht = {
       const vor = teileFuerLoch(l, inv);
       const richtung = l.achse === 2 ? "senkrecht" : l.achse === 0 ? "quer (X)" : "quer (Y)";
       return `<div class="mod-loch ${auf ? "auf" : ""} ${drin ? "drin" : ""}">
-        <button class="mod-loch-kopf" data-aktion="mod-loch" data-nr="${l.nr}">
+        <div class="mod-loch-zeile"><button class="mod-loch-kopf" data-aktion="mod-loch" data-nr="${l.nr}">
           <span class="mod-nr">${l.nr}</span>
           <span class="dr-druck-text"><strong>Ø ${zahl(l.durchmesser, 2)} mm · ${zahl(l.tiefe, 1)} mm tief</strong>
             <small>${l.manuell ? "von Hand · " : ""}${l.durch ? "durchgehend" : "Sackloch"} · ${richtung}${drin ? ` · ✓ ${esc(kategorie((inv.find((t) => t.id === drin) || {}).kat).einzahl)} ${esc(teilName(inv.find((t) => t.id === drin) || {}))}` : ""}</small></span>
           <span class="pille ${vor.length ? "mint" : "leise"}">${vor.length ? `${vor.length} passend` : "nichts passend"}</span>
-        </button>
+        </button><button class="mod-loch-weg" data-aktion="mod-loch-weg" data-nr="${l.nr}" title="Loch löschen" aria-label="Loch ${l.nr} löschen">${ICON_MUELL}</button></div>
         ${auf && l.manuell ? `<div class="mod-manuell">
           ${this._modReglerHtml(`loch-d-${l.nr}`, "Durchmesser", l.durchmesser, 1, 30, 0.05, "mm").replace(`data-mod="loch-d-${l.nr}"`, `data-mod="loch-d" data-nr="${l.nr}"`)}
           ${this._modReglerHtml(`loch-t-${l.nr}`, "Tiefe", l.tiefe, 0.5, 60, 0.5, "mm").replace(`data-mod="loch-t-${l.nr}"`, `data-mod="loch-t" data-nr="${l.nr}"`)}
           <div class="chips"><button class="chip ${l.durch ? "" : "an"}" data-aktion="mod-loch-art" data-nr="${l.nr}" data-durch="0">Sackloch</button><button class="chip ${l.durch ? "an" : ""}" data-aktion="mod-loch-art" data-nr="${l.nr}" data-durch="1">Durchgehend</button>
-          <button class="mini" data-aktion="mod-loch-weg" data-nr="${l.nr}">Loch löschen</button></div></div>` : ""}
+          </div></div>` : ""}
         ${auf ? `<div class="mod-vorschlaege">${vor.length ? vor.map((x) => `
           <div class="mod-vorschlag ${drin === x.teil.id ? "an" : ""}">
             <span class="mod-v-bild">${teilSvg(x.teil)}</span>
@@ -6343,6 +6349,7 @@ const ModellAnsicht = {
     return `<div class="knopf-reihe"><button class="knopf" data-aktion="mod-alle-einsetzen">Alle passenden einsetzen</button>
         ${Object.keys(eingesetzt).length ? `<button class="knopf leise" data-aktion="mod-alle-raus">Alle entfernen</button>` : ""}</div>
       <div class="mod-loecher">${liste}</div>${markierKnopf}
+      ${m.geloescht && m.geloescht.length ? `<button class="knopf leise breit" data-aktion="mod-loch-zurueck">↺ Gelöschte Löcher zurückholen (${m.geloescht.length})</button>` : ""}
       ${teileliste ? `<h3>🧾 Teileliste für dieses Modell</h3><div class="info-liste">${teileliste}</div>` : ""}
       <p class="leise klein oben-abstand">Erkannt werden kreisrunde Löcher entlang X, Y und Z. Schräge Löcher und Sechskant-Taschen für Muttern noch nicht. Tiefe auf etwa ±0,3 mm genau.</p>`;
   },
@@ -6675,7 +6682,7 @@ const ModellAnsicht = {
     m.grenzen = meshGrenzen(m.v);
     m.kenn = meshKennwerte(m.v);
     m.ueber = ueberhaenge(m.v);
-    m.loecher = null; m.eingesetzt = {}; m.lochAuswahl = null;
+    m.loecher = null; m.eingesetzt = {}; m.lochAuswahl = null; m.geloescht = [];
     m.schichten = null; m.schichtZahl = 0; m.schichtGewicht = null;
     const id = (m.id = (m.id || 0) + 1);
     setTimeout(() => {
@@ -7069,12 +7076,18 @@ const ModellAnsicht = {
       case "mod-loch-art": { const l = m.loecher.find((x) => x.nr === Number(el.dataset.nr)); if (l) { l.durch = el.dataset.durch === "1"; this._modLochGrenzen(l); } this._modSeiteNeu(); return; }
       case "mod-loch-weg": {
         const nr = Number(el.dataset.nr);
+        const weg = m.loecher.find((x) => x.nr === nr);
+        if (weg && !weg.manuell) (m.geloescht = m.geloescht || []).push(weg);
         m.loecher = m.loecher.filter((x) => x.nr !== nr);
         delete m.eingesetzt[nr];
         if (this._buehne) this._buehne.weg(`teil-${nr}`);
         m.lochAuswahl = null;
         break;
       }
+      case "mod-loch-zurueck":
+        m.loecher = m.loecher.concat(m.geloescht || []).sort((a, b) => a.nr - b.nr);
+        m.geloescht = [];
+        break;
       case "mod-stuetzen-hilfe": this._dialog = "mod-stuetzen"; break;
       case "mod-schicht": this._modSchichtSetzen((m.schichtNr || 1) + Number(el.dataset.d)); return;
       case "mod-zuletzt":
@@ -7225,7 +7238,7 @@ const ModellAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.11.1";
+const VERSION = "0.11.2";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
