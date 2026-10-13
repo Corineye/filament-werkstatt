@@ -184,6 +184,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       else if (this._dialog && !["bu", "sich-import", "konflikt"].includes(this._dialog)) { this._dialog = null; this._zeichnen(); }
       return;
     }
+    if (this._drTaste(e)) return;
     if (e.key === "Enter" && e.target.id === "global-suche") {
       const erst = this.shadowRoot.querySelector(".such-treffer");
       if (erst) erst.click();
@@ -679,6 +680,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._invEingabe(t)) return;
     if (this._modEingabe(t)) return;
     if (this._buEingabe(t)) return;
+    if (this._drEingabe(t)) return;
     if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
@@ -714,6 +716,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._invAenderung(t)) return;
     if (this._modAenderung(t)) return;
     if (this._buAenderung(t)) return;
+    if (this._drAenderung(t)) return;
     if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
     if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
@@ -1360,7 +1363,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     return liste.map((r) => {
       const rest = r.rest_g == null ? "nicht gewogen" : `${zahl(r.rest_g)} g`;
       const p = prozent(r);
-      return `<button class="kachel ${r.probiert ? "" : "offen"}" data-aktion="oeffnen" data-id="${esc(r.id)}">
+      const geladen = r.id === this._daten.geladen;
+      return `<button class="kachel ${r.probiert ? "" : "offen"} ${geladen ? "geladen" : ""}" data-aktion="oeffnen" data-id="${esc(r.id)}">
+        ${geladen ? `<span class="badge-geladen">● geladen</span>` : ""}
         ${r.probiert ? "" : `<span class="badge-offen">noch nicht probiert</span>`}
         ${r.achtung ? `<span class="achtung-punkt kachel-achtung" title="Nach Fehldruck: testen und genau hinschauen">!</span>` : ""}
         <div class="kachel-spule">${spuleSvg(r)}</div>
@@ -1399,6 +1404,9 @@ class FilamentWerkstattPanel extends HTMLElement {
             ${r.probiert
               ? `<span class="pille mint">✓ probiert${r.probiert_am ? ` am ${new Date(r.probiert_am).toLocaleDateString("de-DE")}` : ""}</span>`
               : `<span class="pille amber">noch nicht probiert</span>`}
+            ${r.id === this._daten.geladen
+              ? `<button class="geladen-knopf an" data-aktion="dr-laden" data-id="" title="Antippen: kein Filament mehr geladen">● Geladen</button>`
+              : `<button class="geladen-knopf" data-aktion="dr-laden" data-id="${esc(r.id)}" title="Diese Rolle steckt jetzt im Drucker">Geladen</button>`}
           </div>
           <button class="icon-knopf" data-aktion="schliessen" aria-label="Schließen">✕</button>
         </header>
@@ -1676,6 +1684,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._dialog === "mod-laden") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod"></div><div class="dialog" role="dialog" data-einmal="dialog-mod">${this._modLadenDialogHtml()}</div>`;
     if (this._dialog === "mod-stuetzen") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod-s"></div><div class="dialog breit-dialog" role="dialog" data-einmal="dialog-mod-s">${this._modStuetzenHilfeHtml()}</div>`;
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
+    if (this._dialog === "dr-temp") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-t"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-t">${this._drTempDialogHtml()}</div>`;
+    if (this._dialog === "dr-luefter") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-l"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-l">${this._drLuefterDialogHtml()}</div>`;
     if (this._dialog === "dr-druck") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr"></div><div class="dialog" role="dialog" data-einmal="dialog-dr">${this._drDialogHtml()}</div>`;
     const r = this._rolle();
     let inhalt = "";
