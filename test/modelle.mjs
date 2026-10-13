@@ -191,6 +191,17 @@ await el(p).locator('[data-mod="loch-d"]').evaluate((r) => { r.value = 10.15; r.
 await p.waitForTimeout(300);
 pruefe(/Magnet/.test(await el(p).locator(".mod-loch.auf").textContent()), "Ø 10,15 von Hand → Magnet vorgeschlagen");
 await p.screenshot({ path: `${out}/m3c-hand.png` });
+// Löcher löschen: das von Hand gesetzte und ein erkanntes, dann zurückholen
+await el(p).locator('.mod-loch-weg[data-nr="6"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".mod-pin").count()) === 5 && (await el(p).locator(".mod-loch").count()) === 5, "Von Hand gesetztes Loch gelöscht");
+await el(p).locator('.mod-loch-weg[data-nr="1"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".mod-pin").count()) === 4 && (await el(p).locator('[data-aktion="mod-loch-zurueck"]').count()) === 1, "Erkanntes Loch gelöscht, Zurückholen angeboten");
+await p.screenshot({ path: `${out}/m3d-geloescht.png` });
+await el(p).locator('[data-aktion="mod-loch-zurueck"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".mod-pin").count()) === 5 && (await el(p).locator('[data-aktion="mod-loch-zurueck"]').count()) === 0, "Gelöschtes Loch zurückgeholt");
 await el(p).locator('[data-aktion="mod-ansicht"][data-id="vorne"]').click();
 await p.waitForTimeout(500);
 await p.screenshot({ path: `${out}/m3b-vorne.png` });
