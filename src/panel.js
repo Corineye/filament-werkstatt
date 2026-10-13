@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.5.0";
+const VERSION = "0.6.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -16,7 +16,7 @@ const DRUCKER_SENSOREN = [
 const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
   { id: "inventar", name: "Inventar", icon: "🔩" },
-  { id: "drucker", name: "Drucker", icon: "🖨️", bald: true },
+  { id: "drucker", name: "Drucker", icon: "🖨️" },
   { id: "hilfe", name: "Hilfe", icon: "💡", bald: true },
   { id: "system", name: "System", icon: "⚙️" },
 ];
@@ -126,6 +126,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const erstes = !this._hass;
     this._hass = hass;
     if (erstes) this._laden();
+    else this._drHassNeu();
   }
   set narrow(n) {
     if (this._narrow !== !!n) { this._narrow = !!n; this._zeichnen(); }
@@ -323,6 +324,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a === "dd") { this._ddAuf(el); return; }
     if (a === "dd-wahl") { this._ddWaehlen(el); return; }
     if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
+    if (a.startsWith("dr-")) { this._drKlick(a, el); return; }
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
       const k = el.dataset.k;
@@ -889,6 +891,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._ansicht === "system") return this._systemHtml();
     if (!this._daten) return `<div class="laden">Lade Daten aus Home Assistant …</div>`;
     if (this._ansicht === "inventar") return this._invHtml();
+    if (this._ansicht === "drucker") return this._drHtml();
     return this._filamentHtml();
   }
 
@@ -1245,6 +1248,8 @@ class FilamentWerkstattPanel extends HTMLElement {
   // ---- Dialoge ------------------------------------------------------------
   _dialogHtml() {
     if (!this._dialog) return "";
+    if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
+    if (this._dialog === "dr-druck") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr"></div><div class="dialog" role="dialog" data-einmal="dialog-dr">${this._drDialogHtml()}</div>`;
     const r = this._rolle();
     let inhalt = "";
     if (this._dialog === "probiert") {
@@ -1303,7 +1308,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);
