@@ -206,6 +206,7 @@ const HilfeAnsicht = {
   },
 
   _hiKlick(a, el) {
+    if (a.startsWith("hi-ks-") || a.startsWith("hi-cd-")) { this._ksKlick(a, el); return; }   // Kunststoffe/Fehlercodes (kunststoffe.js)
     const h = this._hiZustand();
     switch (a) {
       case "hi-tab": h.tab = el.dataset.id; h.fehler = null; break;
