@@ -852,4 +852,54 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 
 /* ---- Sicherungs-Balken ---- */
 .bu-balken.blau { background: linear-gradient(90deg, rgba(92,200,255,.18), rgba(92,200,255,.05)); border-bottom-color: rgba(92,200,255,.4); }
+/* ==== Allgemein: Kopfzeilen-Suche, Regler-Wertbox, Wartungs-Infos ==== */
+:host { --gelb: #ffd54a; --gelb-weich: rgba(255,213,74,.14); }
+/* Suche in der Kopfzeile links neben „Filament“ */
+.kopf-suche { display: flex; align-items: center; gap: 8px; flex: none; height: 38px; padding: 0 8px 0 12px; margin-left: 8px; border-radius: 12px;
+  border: 1px solid var(--rand); background: rgba(0,0,0,.28); color: var(--leise); font-size: 14px; transition: border-color .15s, background .15s, color .15s; }
+.kopf-suche:hover, .kopf-suche:focus-visible { border-color: rgba(62,230,168,.5); background: rgba(62,230,168,.06); color: var(--text); outline: none; }
+.kopf-suche-icon { font-size: 15px; }
+.kopf-suche-text { min-width: 64px; text-align: left; }
+.kopf-suche kbd { font: inherit; font-size: 11px; letter-spacing: .3px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--rand); background: rgba(255,255,255,.04); color: var(--leise); }
+.kopf-suche + .nav-oben { margin-left: 0; }
+.nav-oben .nav-punkt { white-space: nowrap; flex: none; }
+@media (max-width: 1400px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
+@media (max-width: 1340px) { .kopf .speicher { font-size: 0; } .kopf .speicher::before { font-size: 14px; } }
+@media (max-width: 1180px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
+@media (max-width: 1640px) { .kopf-suche kbd { display: none; } }
+@media (max-width: 1520px) { .kopf-suche-text { display: none; } .kopf-suche { width: 38px; padding: 0; justify-content: center; margin-left: 4px; } }
+
+/* Regler: aktueller Wert in gelber Box über dem Knopf, antippen zum Eintippen */
+.regler-wert { position: absolute; z-index: 35; transform: translateY(-100%); display: grid; justify-items: center; gap: 2px;
+  padding: 3px; border-radius: 11px; background: var(--gelb); color: #1b1503; box-shadow: 0 0 0 4px rgba(255,213,74,.16), 0 6px 18px rgba(0,0,0,.5);
+  animation: regler-wert-rein .14s ease-out; pointer-events: auto; }
+.regler-wert::after { content: ""; position: absolute; left: var(--spitze, 50%); bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: var(--gelb); transform: rotate(45deg); border-radius: 2px; }
+@keyframes regler-wert-rein { from { opacity: 0; transform: translateY(calc(-100% + 6px)); } }
+.regler-wert-knopf { display: flex; align-items: baseline; gap: 6px; padding: 3px 8px; border-radius: 8px; color: inherit; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; min-height: 28px; }
+.regler-wert-knopf:hover, .regler-wert-knopf:focus-visible { background: rgba(0,0,0,.08); outline: none; }
+.regler-wert-knopf i { font-style: normal; font-weight: 400; font-size: 12px; opacity: .6; }
+.regler-wert small { position: relative; z-index: 1; font-size: 11px; font-weight: 600; padding: 0 6px 2px; white-space: nowrap; opacity: .8; }
+.regler-wert-feld { width: 9ch; min-width: 72px; padding: 5px 8px; border-radius: 8px; border: 2px solid rgba(27,21,3,.55); background: #fff8dc; color: #1b1503;
+  font: inherit; font-weight: 800; font-size: 16px; text-align: center; outline: none; font-variant-numeric: tabular-nums; }
+.regler-wert-feld:focus { border-color: #1b1503; }
+.regler-wert-feld.falsch { border-color: var(--rot); background: #ffe1e1; animation: regler-wackeln .25s; }
+@keyframes regler-wackeln { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+input[type=range]:active::-webkit-slider-thumb { background: var(--gelb); box-shadow: 0 0 0 7px rgba(255,213,74,.2), 0 2px 8px rgba(0,0,0,.4); }
+
+/* Wartung: Info mit kleiner P1S-Zeichnung */
+.ws-wartung { flex-wrap: wrap; }
+.ws-info-knopf { width: 32px; height: 32px; border-radius: 10px; flex: none; display: grid; place-items: center; font-size: 15px; font-weight: 700; color: var(--leise); border: 1px solid var(--rand); }
+.ws-info-knopf:hover { color: var(--text); background: var(--flaeche-hover); }
+.ws-info-knopf.an { color: #1b1503; background: var(--gelb); border-color: var(--gelb); }
+.ws-info { flex: 1 0 100%; display: flex; gap: 14px; align-items: center; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.28); border: 1px solid rgba(255,213,74,.22); animation: blende .2s ease; }
+.ws-info-bild { width: 170px; flex: none; }
+.ws-info-bild svg { width: 100%; height: auto; display: block; }
+.ws-info-text { display: grid; gap: 6px; font-size: 14px; line-height: 1.45; min-width: 0; }
+.ws-info-text p { margin: 0; }
+.ws-info-text b { color: var(--gelb); font-weight: 600; }
+.mobil .ws-info { flex-direction: column; align-items: stretch; }
+.mobil .ws-info-bild { width: min(240px, 100%); align-self: center; }
+.ws-p1s .an { filter: drop-shadow(0 0 3px rgba(255,213,74,.85)); }
+.ws-p1s .ws-p1s-puls { fill: none; stroke: var(--gelb); stroke-width: 1.4; animation: ws-puls 1.8s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ws-puls { from { opacity: .9; transform: scale(.6); } to { opacity: 0; transform: scale(1.6); } }
 `;

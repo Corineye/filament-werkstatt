@@ -161,6 +161,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       this._updateTimer = setInterval(() => this._updatePruefen(), 30 * 60000);
       document.addEventListener("visibilitychange", this._sichtbar);
       this._wischenEinrichten();
+      this._reglerEinrichten();
     }
     this._ro.observe(this);
     this._zeichnen();
@@ -284,7 +285,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   _speicherHtml() {
     const s = this._speicherStatus;
     const text = s === "speichert" ? "Speichert …" : s === "gespeichert" ? "Gespeichert" : s === "fehler" ? (this._konflikt ? "Nicht gespeichert" : this._versuche && this._versuche <= 3 ? "Speichern fehlgeschlagen, neuer Versuch …" : "Speichern fehlgeschlagen") : "";
-    return `<span id="speicher" class="speicher ${s}">${text}</span>`;
+    return `<span id="speicher" class="speicher ${s}" title="${text}">${text}</span>`;
   }
 
   _toast(text) {
@@ -831,6 +832,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       html = `<div class="app ${this._mobil ? "mobil" : ""}">${this._kopfHtml()}<main class="haupt"><div class="karte fehlerkarte"><h2>Diese Ansicht konnte nicht angezeigt werden</h2>
         <p>${esc(e.message || e)}</p><p class="leise klein">Deine Daten sind nicht betroffen.</p><button class="knopf" data-aktion="ansicht" data-id="filament">Zur Filament-Übersicht</button></div></main></div>`;
     }
+    this._reglerMerken();
     root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}${html}`;
     this._nachZeichnen(root, scrollHaupt, fokusId, schonDa);
   }
@@ -877,6 +879,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       this._klappNeu = null;
       if (k) this._klappAnimieren(k, true);
     }
+    this._reglerWiederfinden();
   }
 
   // ---- Handy: Detailansicht nach unten wegwischen ------------------------
@@ -1066,13 +1069,208 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._ddOffen = null;
   }
 
+  // ---- Regler: aktueller Wert in einer gelben Box über dem Knopf ----------
+  // Gilt für jeden input[type=range] im Panel, auch für künftige und nach dem
+  // Neuzeichnen. Antippen der Box: genauen Wert eintippen (Enter/Verlassen
+  // übernimmt, Escape bricht ab). Übernommen wird wie beim Ziehen: Wert setzen,
+  // dann „input“ und „change“ auslösen, damit alle abhängigen Anzeigen mitgehen.
+  _reglerEinrichten() {
+    const root = this.shadowRoot;
+    const istRegler = (x) => x && x.matches && x.matches('input[type="range"]');
+    root.addEventListener("pointerdown", (e) => {
+      const r = e.target.closest && e.target.closest('input[type="range"]');
+      const inBox = e.target.closest && e.target.closest(".regler-wert");
+      // Woanders hingetippt, während eine Zahl eingetippt wird: erst übernehmen
+      if (!inBox && this._regler && this._regler.edit) this._reglerUebernehmen();
+      if (r) this._reglerAn(r);
+      else if (!inBox) this._reglerAus();
+    }, true);
+    // Tastatur: Tab auf einen Regler zeigt die Box ebenfalls
+    root.addEventListener("keydown", (e) => { if (e.key === "Tab") this._reglerTab = Date.now(); }, true);
+    root.addEventListener("keyup", (e) => { if (istRegler(e.target) && /^(Arrow|Page|Home|End)/.test(e.key)) this._reglerAn(e.target); }, true);
+    root.addEventListener("focusin", (e) => {
+      if (istRegler(e.target)) { if (Date.now() - (this._reglerTab || 0) < 600) this._reglerAn(e.target); }
+      else if (this._regler && !(e.target.closest && e.target.closest(".regler-wert"))) this._reglerAus();
+    });
+    root.addEventListener("input", (e) => { if (this._regler && e.target === this._regler.el) this._reglerZeigen(); }, true);
+    root.addEventListener("scroll", () => { if (this._regler) this._reglerLage(); }, true);
+    window.addEventListener("resize", () => { if (this._regler) this._reglerLage(); });
+  }
+
+  // Merkmale, an denen derselbe Regler nach dem Neuzeichnen wiedererkannt wird
+  _reglerSchluessel(el) {
+    const teile = [...el.attributes].filter((a) => a.name === "id" || a.name.startsWith("data-")).map((a) => `[${a.name}="${CSS.escape(a.value)}"]`);
+    const sel = `input[type="range"]${teile.join("")}`;
+    return { sel, nr: [...this.shadowRoot.querySelectorAll(sel)].indexOf(el) };
+  }
+
+  _reglerAn(el) {
+    if (this._regler && this._regler.el === el) { this._reglerZeigen(); return; }
+    this._reglerAus();
+    this._regler = { el, edit: false, text: "" };
+    this._reglerZeigen();
+  }
+
+  _reglerAus() {
+    if (!this._regler) return;
+    const box = this._regler.box;
+    this._regler = null;
+    if (box) box.remove();
+  }
+
+  _reglerMerken() {
+    const r = this._regler;
+    if (!r) return;
+    if (r.el.isConnected) r.schl = this._reglerSchluessel(r.el);
+    if (r.edit && r.box) { const f = r.box.querySelector("input"); if (f) r.text = f.value; }
+    r.box = null;
+  }
+
+  _reglerWiederfinden() {
+    const r = this._regler;
+    if (!r) return;
+    if (!r.el.isConnected) {
+      const neu = r.schl && this.shadowRoot.querySelectorAll(r.schl.sel)[r.schl.nr];
+      if (!neu) { this._regler = null; return; }
+      r.el = neu;
+    }
+    this._reglerZeigen();
+  }
+
+  _reglerZahlen(el) {
+    const min = el.min === "" ? 0 : Number(el.min), max = el.max === "" ? 100 : Number(el.max);
+    const step = el.step === "any" ? 0 : (el.step === "" ? 1 : Number(el.step));
+    const nk = step ? Math.min(6, (String(el.step).split(".")[1] || "").length) : 2;
+    return { min, max, step, nk };
+  }
+
+  _reglerText(el, v, tausender = true) {
+    const { nk } = this._reglerZahlen(el);
+    return Number(v).toLocaleString("de-DE", { minimumFractionDigits: nk, maximumFractionDigits: nk, useGrouping: tausender });
+  }
+
+  // Box anlegen bzw. auffrischen
+  _reglerZeigen() {
+    const r = this._regler;
+    if (!r) return;
+    if (!r.el.isConnected) { this._reglerWiederfinden(); return; }
+    const app = this.shadowRoot.querySelector(".app");
+    if (!app) return;
+    if (!r.box || !r.box.isConnected) {
+      r.box = document.createElement("div");
+      r.box.className = "regler-wert";
+      for (const ev of ["click", "input", "change", "keydown", "keyup"]) r.box.addEventListener(ev, (e) => e.stopPropagation());
+      r.box.addEventListener("click", (e) => { if (e.target.closest(".regler-wert-knopf")) this._reglerBearbeiten(); });
+      app.appendChild(r.box);
+      r.inhalt = null;
+    }
+    if (r.edit) {
+      if (r.inhalt !== "edit") {
+        r.inhalt = "edit";
+        const { min, max } = this._reglerZahlen(r.el);
+        r.box.classList.add("edit");
+        r.box.innerHTML = `<input class="regler-wert-feld" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" aria-label="Wert eintippen (${this._reglerText(r.el, min, false)} bis ${this._reglerText(r.el, max, false)})"><small>${esc(this._reglerText(r.el, min))} – ${esc(this._reglerText(r.el, max))}</small>`;
+        const f = r.box.querySelector("input");
+        f.value = r.text;
+        f.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); this._reglerUebernehmen(); }
+          else if (e.key === "Escape") { e.preventDefault(); this._reglerAbbrechen(); }
+        });
+        f.addEventListener("input", () => { r.text = f.value; f.classList.remove("falsch"); });
+        f.addEventListener("blur", () => { if (this._regler === r && r.edit && r.box && r.box.contains(f)) this._reglerUebernehmen(); });
+        f.focus();
+        f.select();
+      }
+    } else {
+      r.box.classList.remove("edit");
+      const text = this._reglerText(r.el, r.el.value);
+      const knopf = r.inhalt === "zeige" && r.box.querySelector(".regler-wert-knopf");
+      if (knopf) knopf.firstChild.textContent = text;
+      else {
+        r.box.innerHTML = `<button type="button" class="regler-wert-knopf" title="Antippen, um eine genaue Zahl einzutippen"><span>${esc(text)}</span><i aria-hidden="true">✎</i></button>${r.hinweis ? `<small>${esc(r.hinweis)}</small>` : ""}`;
+        r.inhalt = "zeige";
+      }
+    }
+    this._reglerLage();
+  }
+
+  // Box mittig über den Reglerknopf setzen, innerhalb der Seite halten
+  _reglerLage() {
+    const r = this._regler;
+    if (!r || !r.box) return;
+    const app = this.shadowRoot.querySelector(".app");
+    const ra = r.el.getBoundingClientRect();
+    if (!app || !ra.width) { r.box.style.visibility = "hidden"; return; }
+    const pa = app.getBoundingClientRect();
+    const { min, max } = this._reglerZahlen(r.el);
+    const anteil = max > min ? Math.min(1, Math.max(0, (Number(r.el.value) - min) / (max - min))) : 0;
+    const knopf = 22;
+    const x = ra.left + knopf / 2 + anteil * (ra.width - knopf) - pa.left;
+    const b = r.box.offsetWidth || 60;
+    const links = Math.max(8, Math.min(pa.width - b - 8, x - b / 2));
+    r.box.style.visibility = "";
+    r.box.style.left = `${links}px`;
+    r.box.style.top = `${ra.top - pa.top + ra.height / 2 - 22}px`;
+    r.box.style.setProperty("--spitze", `${Math.max(10, Math.min(b - 10, x - links))}px`);
+  }
+
+  _reglerBearbeiten() {
+    const r = this._regler;
+    if (!r || r.edit) return;
+    r.edit = true;
+    r.hinweis = null;
+    r.text = this._reglerText(r.el, r.el.value, false);
+    this._reglerZeigen();
+  }
+
+  _reglerAbbrechen() {
+    const r = this._regler;
+    if (!r) return;
+    r.edit = false;
+    this._reglerZeigen();
+    try { r.el.focus({ preventScroll: true }); } catch (e) { /* egal */ }
+  }
+
+  // Eingabe prüfen: Komma oder Punkt, auf min/max begrenzen, auf die Schrittweite runden
+  _reglerUebernehmen() {
+    const r = this._regler;
+    if (!r || !r.edit) return;
+    const roh = String(r.text || "").trim().replace(/\s/g, "");
+    const norm = /,/.test(roh) ? roh.replace(/\./g, "").replace(",", ".") : roh;
+    let v = norm === "" ? NaN : Number(norm);
+    const f = r.box && r.box.querySelector("input");
+    if (!Number.isFinite(v)) {
+      if (f) { f.classList.add("falsch"); f.focus(); }
+      return;
+    }
+    const { min, max, step, nk } = this._reglerZahlen(r.el);
+    const eingegeben = v;
+    if (step) v = min + Math.round((v - min) / step) * step;
+    v = Math.min(max, Math.max(min, v));
+    if (step && min + Math.floor((max - min) / step + 1e-9) * step < v) v = min + Math.floor((max - min) / step + 1e-9) * step;
+    v = Number(v.toFixed(nk));
+    r.hinweis = eingegeben > max ? `höchstens ${this._reglerText(r.el, max)}` : eingegeben < min ? `mindestens ${this._reglerText(r.el, min)}` : Math.abs(eingegeben - v) > 1e-9 ? `gerundet auf ${this._reglerText(r.el, v)}` : null;
+    r.edit = false;
+    r.inhalt = null;
+    const el = r.el;
+    el.value = String(v);
+    this._reglerZeigen();
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    if (this._regler === r && r.hinweis) {
+      clearTimeout(this._reglerHinweisTimer);
+      this._reglerHinweisTimer = setTimeout(() => { if (this._regler === r && !r.edit) { r.hinweis = null; r.inhalt = null; this._reglerZeigen(); } }, 2500);
+    }
+  }
+
   _kopfHtml() {
     return `<header class="kopf">
       ${this._narrow ? `<button class="icon-knopf" data-aktion="menue" aria-label="Menü">☰</button>` : ""}
       <div class="marke"><span class="punkt-leucht"></span>Filament-Werkstatt</div>
+      ${!this._mobil && this._daten ? `<button class="such-knopf kopf-suche" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)"><span class="kopf-suche-icon">🔍</span><span class="kopf-suche-text">Suchen …</span><kbd>Strg K</kbd></button>` : ""}
       ${this._mobil ? "" : this._navHtml("oben")}
       ${this._speicherHtml()}
-      ${this._daten ? `<button class="icon-knopf such-knopf" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)">🔍</button>` : ""}
+      ${this._mobil && this._daten ? `<button class="icon-knopf such-knopf" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)">🔍</button>` : ""}
     </header>`;
   }
 
