@@ -1047,4 +1047,140 @@ input[type=range]:active::-webkit-slider-thumb { background: var(--gelb); box-sh
 .dr-l-stift { position: absolute; top: 6px; right: 8px; font-style: normal; font-size: 11px; color: var(--leise); }
 .dr-stufen { margin: 12px 0 4px; }
 .dr-stufen .chip { min-width: 54px; }
+
+/* ==== Werkstatt v0.12: Bibliothek-Filter, kluge Warteschlange, Projekte, Werkzeug & Zubehör (Inventar) ==== */
+/* Warteschlange: Umschalter, Zeitplan, Trenner je Rolle, rote Markierung */
+.ws-modus { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.ws-modus .mini { margin: 0; }
+.ws-umschalter { display: inline-flex; padding: 3px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid var(--rand); }
+.ws-umschalter button { padding: 7px 14px; border-radius: 9px; font-size: 13px; color: var(--leise); transition: background .18s, color .18s; white-space: nowrap; }
+.ws-umschalter button:hover { color: var(--text); }
+.ws-umschalter button.an { background: var(--mint-weich); color: var(--mint); box-shadow: inset 0 0 0 1px rgba(62,230,168,.45); }
+.mobil .ws-modus { flex-direction: column; align-items: stretch; }
+.mobil .ws-umschalter { display: grid; grid-template-columns: 1fr 1fr; }
+.ws-plan { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 14px 16px; margin-bottom: 12px;
+  background: radial-gradient(420px 140px at 0% 0%, rgba(62,230,168,.08), transparent 70%), var(--flaeche); }
+.mobil .ws-plan { grid-template-columns: 1fr; gap: 10px; }
+.ws-plan-zeile { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.ws-plan-zeile > div { display: grid; gap: 2px; min-width: 0; }
+.ws-plan-zeile strong { font-size: 14px; }
+.ws-plan-zeile small { font-size: 12px; line-height: 1.35; }
+.ws-plan-icon { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; background: rgba(0,0,0,.28); font-size: 15px; }
+.ws-plan-zahl { color: var(--gelb); font-size: 17px; }
+.ws-trenner { display: flex; align-items: center; gap: 8px; margin: 8px 0 -2px; font-size: 12px; font-weight: 600; color: var(--leise); letter-spacing: .2px; animation: blende .25s ease; }
+.ws-trenner::after { content: ""; flex: 1; height: 1px; background: var(--rand); }
+.ws-trenner .farbtupfer { width: 14px; height: 14px; border-width: 1px; }
+.ws-trenner.geladen { color: var(--gruen); }
+.ws-trenner.geladen::after { background: rgba(91,227,125,.35); }
+.ws-pillen { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pille.ws-uhr { color: var(--gelb); background: var(--gelb-weich); font-variant-numeric: tabular-nums; }
+.pille.ws-ohne-dauer { color: var(--leise); background: rgba(255,255,255,.05); font-weight: 500; }
+.pille.ws-pj-pille { color: var(--pj, var(--mint)); background: color-mix(in srgb, var(--pj, var(--mint)) 14%, transparent); border: 1px solid color-mix(in srgb, var(--pj, var(--mint)) 35%, transparent); }
+button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--mint)) 24%, transparent); }
+.ws-auftrag.fehlt { border-color: rgba(255,107,107,.5); background: linear-gradient(90deg, rgba(255,107,107,.10), var(--flaeche) 40%); box-shadow: inset 3px 0 0 var(--rot); }
+.ws-nr { position: relative; }
+.ws-auftrag.fehlt .ws-nr { background: rgba(255,107,107,.16); color: var(--rot); }
+.ws-rot-punkt { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--rot); box-shadow: 0 0 0 2px var(--grund), 0 0 10px var(--rot); animation: ws-rot-puls 1.6s ease-in-out infinite; }
+@keyframes ws-rot-puls { 50% { box-shadow: 0 0 0 2px var(--grund), 0 0 2px var(--rot); } }
+.mobil .ws-knoepfe { flex-wrap: wrap; }
+
+/* Bibliothek: Suche, Filter, Trefferzahl */
+.ws-bib-werkzeug { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.ws-bib-werkzeug .such-feld { flex: 1 1 260px; max-width: 360px; }
+.ws-bib-filter { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ws-bib-filter .auswahl { min-width: 170px; }
+.ws-bib-status .chip { padding: 8px 12px; }
+.mobil .ws-bib-werkzeug { display: grid; grid-template-columns: 1fr auto; }
+.mobil .ws-bib-werkzeug .such-feld { max-width: none; }
+.mobil .ws-bib-filter { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-radius: 14px; border: 1px solid rgba(62,230,168,.3); background: rgba(62,230,168,.05); animation: hoch .18s ease; }
+.mobil .ws-bib-filter .auswahl { min-width: 0; }
+.mobil .ws-bib-status { grid-column: 1 / -1; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.ws-treffer { display: flex; gap: 10px; align-items: center; justify-content: space-between; min-height: 30px; margin-bottom: 10px; font-size: 13px; color: var(--leise); }
+.ws-treffer strong { color: var(--text); }
+.ws-treffer .mini { margin-left: 0; flex: none; }
+.ws-bib-leer { grid-column: 1 / -1; }
+.ws-modell-knoepfe .rund { flex: none; }
+.ws-modell { min-width: 0; }
+.ws-modell-knoepfe { flex-wrap: wrap; }
+.ws-modell-knoepfe .knopf { min-width: 0; }
+
+/* Projekte: Übersicht */
+.ws-pj-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.mobil .ws-pj-raster { grid-template-columns: 1fr; }
+.ws-pj-karte { position: relative; overflow: hidden; display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: center; text-align: left; padding: 16px 16px 14px 18px; color: inherit;
+  background: radial-gradient(300px 120px at 0% 0%, color-mix(in srgb, var(--pj) 14%, transparent), transparent 70%), var(--flaeche); transition: border-color .18s, transform .18s; }
+.ws-pj-karte::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--pj); box-shadow: 0 0 14px var(--pj); }
+.ws-pj-karte:hover { border-color: color-mix(in srgb, var(--pj) 55%, transparent); transform: translateY(-1px); }
+.ws-pj-icon { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; font-size: 22px; background: color-mix(in srgb, var(--pj) 16%, transparent); border: 1px solid color-mix(in srgb, var(--pj) 40%, transparent); }
+.ws-pj-icon.klein { width: 34px; height: 34px; border-radius: 10px; font-size: 17px; flex: none; }
+.ws-pj-text { display: grid; gap: 2px; min-width: 0; }
+.ws-pj-text strong { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-pj-text small { font-size: 12px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ws-pj-prozent { font-weight: 800; font-size: 18px; color: var(--pj); font-variant-numeric: tabular-nums; }
+.ws-pj-balken { grid-column: 1 / -1; margin: 6px 0 0; }
+.ws-pj-balken span, .ws-pj-detail .ws-balken span { background: var(--pj); box-shadow: 0 0 10px var(--pj); }
+.ws-pj-fuss { grid-column: 1 / -1; font-size: 12px; }
+/* Projekte: Detail */
+.ws-pj-zurueck { margin: 0 0 10px; color: var(--leise); border-color: var(--rand); }
+.ws-pj-zurueck:hover { color: var(--text); }
+.ws-pj-kopf { display: flex; gap: 18px; align-items: center; margin-bottom: 12px; background: radial-gradient(420px 180px at 0% 0%, color-mix(in srgb, var(--pj) 14%, transparent), transparent 70%), var(--flaeche);
+  border-color: color-mix(in srgb, var(--pj) 35%, transparent); }
+.ws-pj-ring { position: relative; width: 112px; height: 112px; flex: none; }
+.ws-pj-ring .ring { overflow: visible; }
+.ws-pj-ring-text { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.ws-pj-ring-text span { font-size: 22px; line-height: 1; }
+.ws-pj-ring-text strong { font-size: 18px; }
+.ws-pj-kopf-text { min-width: 0; display: grid; gap: 4px; }
+.ws-pj-kopf-text h2 { margin: 0; font-size: 22px; overflow-wrap: anywhere; }
+.ws-pj-kopf-text p { margin: 0; line-height: 1.4; }
+.ws-pj-kopf-knoepfe { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.knopf.rot-text { color: var(--rot); }
+.mobil .ws-pj-kopf { flex-direction: column; align-items: stretch; text-align: center; }
+.mobil .ws-pj-ring { align-self: center; }
+.mobil .ws-pj-kopf-knoepfe { justify-content: center; }
+.ws-pj-zahlen { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.mobil .ws-pj-zahlen { grid-template-columns: 1fr 1fr; gap: 8px; }
+.ws-pj-zahl { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--flaeche); border: 1px solid var(--rand); animation: blende .3s ease; }
+.ws-pj-zahl span { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--leise); }
+.ws-pj-zahl strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.ws-pj-zahl small { font-size: 11px; color: var(--leise); }
+.ws-pj-teile-kopf { align-items: center; }
+.ws-pj-teile-kopf h3 { margin: 0; }
+.mobil .ws-pj-teile-kopf { flex-direction: row; }
+.ws-pj-teil.fertig { border-color: rgba(62,230,168,.35); }
+.ws-pj-teil.fertig .ws-foto { box-shadow: inset 0 0 0 2px rgba(62,230,168,.4); }
+.ws-pj-teil .ws-modell-knoepfe { flex-wrap: wrap; }
+/* Projekt-Dialoge */
+.ws-pj-farben { gap: 10px; }
+.ws-farbe { width: 32px; height: 32px; border-radius: 50%; background: var(--f); border: 2px solid rgba(255,255,255,.15); transition: transform .15s, box-shadow .15s; }
+.ws-farbe:hover { transform: scale(1.08); }
+.ws-farbe.an { box-shadow: 0 0 0 3px var(--grund), 0 0 0 5px var(--f), 0 0 16px var(--f); }
+.ws-pj-icons .chip { font-size: 17px; padding: 5px 10px; }
+.dialog textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; font-size: 14px; resize: vertical; }
+.ws-pj-wahl { display: grid; gap: 6px; max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; }
+.ws-pj-zeile { display: flex; gap: 10px; align-items: center; text-align: left; padding: 9px 12px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); color: inherit; transition: background .15s, border-color .15s; }
+.ws-pj-zeile:hover { background: var(--flaeche-hover); }
+.ws-pj-zeile.an { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.ws-pj-zeile-text { flex: 1; min-width: 0; display: grid; gap: 1px; font-size: 14px; overflow-wrap: anywhere; }
+.ws-pj-zeile-text small { font-size: 12px; color: var(--leise); }
+.ws-pj-zeile b { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--rand); color: var(--leise); }
+.ws-pj-zeile.an b { color: #062018; background: var(--mint); border-color: var(--mint); }
+.ws-pj-quellen .chip { padding: 6px 11px; font-size: 12px; }
+
+/* Inventar: Werkzeug & Zubehör */
+.kats { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.kat strong { overflow-wrap: anywhere; }
+.inv-schnell { grid-column: 1 / -1; margin-bottom: 14px; padding: 14px 16px; background: radial-gradient(420px 140px at 0% 0%, rgba(255,213,74,.07), transparent 70%), var(--flaeche); }
+.inv-schnell-kopf { display: grid; gap: 2px; margin-bottom: 8px; }
+.inv-vorlagen { display: grid; gap: 10px; margin: 6px 0 12px; }
+.inv-schnell .inv-vorlagen { margin-bottom: 0; }
+.inv-vorlagen-gruppe { display: grid; gap: 6px; }
+.inv-vorlagen .chip { padding: 6px 11px; font-size: 12px; }
+.mobil .inv-vorlagen .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.pille.inv-zustand { font-size: 11px; padding: 2px 8px; }
+.chip.an.zustand-amber { background: var(--amber-weich); border-color: rgba(255,181,71,.5); color: var(--amber); }
+.chip.an.zustand-rot { background: rgba(255,107,107,.16); border-color: rgba(255,107,107,.5); color: var(--rot); }
+.r-kopf strong.mint { color: var(--mint); }
+.r-kopf strong.amber { color: var(--amber); }
+.r-kopf strong.rot { color: var(--rot); }
 `;

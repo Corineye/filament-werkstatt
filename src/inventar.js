@@ -7,6 +7,7 @@ const INV_STATUS = [
   { id: "wenig", name: "Wenig Bestand" },
   { id: "ungezaehlt", name: "Nicht nachgezählt" },
   { id: "ohne", name: "Menge fehlt" },
+  { id: "ersetzen", name: "Zustand: ersetzen/abgenutzt" },
 ];
 const INV_SORTIERUNG = [
   { id: "kategorie", name: "Kategorie" },
@@ -106,6 +107,14 @@ function teilSvg(t, gross = false) {
       <path d="M ${cx - 22 * s} ${top + 30 * s} h ${44 * s} l ${-6 * s} ${12 * s} h ${-32 * s} z" fill="#b08d3e" stroke="${linie}"/>
       <path d="M ${cx - 12 * s} ${top + 42 * s} h ${24 * s} l ${-9 * s} ${14 * s} h ${-6 * s} z" fill="#d6a933" stroke="${linie}"/>
       <text x="${cx}" y="${top + 20 * s}" fill="var(--mint)" font-size="${gross ? 16 : 10}" font-weight="700" text-anchor="middle">${z(t.groesse)}</text>`;
+  } else if (t.kat === "werkzeug") {
+    // Symbol auf einer Kachel, Rand in der Farbe des Zustands
+    const zu = wzZustand(t.zustand), farbe = { mint: "var(--mint)", amber: "var(--amber)", rot: "var(--rot)" }[zu ? zu.farbe : ""] || "var(--rand)";
+    const g = gross ? 92 : 52, cx = B / 2, cy = H / 2;
+    const icon = t.icon || (WZ_ARTEN.find((a) => a.id === t.art) || WZ_ARTEN[0]).icon;
+    innen = `<rect x="${cx - g / 2}" y="${cy - g / 2}" width="${g}" height="${g}" rx="${g / 4}" fill="rgba(62,230,168,.06)" stroke="${farbe}" stroke-width="${gross ? 2 : 1.4}"/>
+      <text x="${cx}" y="${cy + g * 0.17}" font-size="${g * 0.5}" text-anchor="middle">${esc(icon)}</text>
+      ${t.gewinde ? `<text x="${cx + g / 2 + 6}" y="${cy + 4}" fill="var(--mint)" font-size="${gross ? 13 : 10}" font-weight="700">${esc(t.gewinde)}</text>` : ""}`;
   } else if (t.kat === "magnet") {
     const cx = B / 2, cy = H / 2;
     if (t.form === "folie") {
@@ -142,6 +151,7 @@ const InventarAnsicht = {
       if (f.status === "wenig" && !wenigBestand(t)) return false;
       if (f.status === "ungezaehlt" && (t.gezaehlt || t.menge == null)) return false;
       if (f.status === "ohne" && t.menge != null) return false;
+      if (f.status === "ersetzen" && !["ersetzen", "abgenutzt"].includes(t.zustand)) return false;
       return passtZurSuche(t, worte);
     });
     const katI = (t) => KATEGORIEN.findIndex((k) => k.id === t.kat);
@@ -196,11 +206,26 @@ const InventarAnsicht = {
       <select data-inv-filter="${k}"><option value="">${leer}</option>${optionen}</select></label>`;
   },
 
+  // Vorlagen für Werkzeug & Zubehör, die noch nicht im Bestand sind
+  _invVorlagenHtml(aktion = "inv-vorlage", aktiv = null) {
+    const da = new Set(this._inv().filter((t) => t.kat === "werkzeug").map((t) => (t.name || "").toLowerCase()));
+    const gruppen = WZ_ARTEN.map((a) => [a, WZ_VORLAGEN.map((v, i) => ({ v, i })).filter((x) => x.v.art === a.id && !da.has(x.v.name.toLowerCase()))]).filter(([, l]) => l.length);
+    if (!gruppen.length) return "";
+    return `<div class="inv-vorlagen">${gruppen.map(([a, l]) => `<div class="inv-vorlagen-gruppe"><span class="leise klein">${a.icon} ${a.name}</span>
+      <div class="chips">${l.map(({ v, i }) => `<button class="chip ${aktiv === i ? "an" : ""}" data-aktion="${aktion}" data-i="${i}">${v.icon} ${esc(v.name)}</button>`).join("")}</div></div>`).join("")}</div>`;
+  },
+
   _invRasterHtml() {
     const liste = this._invGefiltert();
-    let html = liste.length
+    let html = "";
+    if (this._invF.kat === "werkzeug" && !this._invSuche) {
+      const v = this._invVorlagenHtml();
+      if (v) html += `<div class="inv-schnell dr-karte" data-einmal="inv-schnell"><div class="inv-schnell-kopf"><strong>⚡ Schnell hinzufügen</strong>
+        <span class="leise klein">Typische Werkzeuge und Verbrauchsmaterial. Antippen, Zustand und Menge prüfen, anlegen.</span></div>${v}</div>`;
+    }
+    html += liste.length
       ? `<div class="raster">${liste.map((t) => this._invKachelHtml(t)).join("")}</div>`
-      : `<div class="leer-hinweis">Nichts gefunden.</div>`;
+      : `<div class="leer-hinweis">${this._invF.kat === "werkzeug" && !this._invSuche ? "Noch kein Werkzeug oder Zubehör erfasst. Leg oben los." : "Nichts gefunden."}</div>`;
     // Querverweise: passende Teile zu den Treffern, die selbst nicht in der Liste sind
     if (this._invSuche && liste.length) {
       const dabei = new Set(liste.map((t) => t.id));
@@ -222,7 +247,8 @@ const InventarAnsicht = {
       <div class="kachel-name">${esc(teilName(t))}</div>
       <div class="kachel-sub">${esc(teilUntertitel(t))}</div>
       <div class="kachel-fuss">
-        <span class="mat" style="--m:var(--leise)">${esc(kategorie(t.kat).einzahl)}</span>
+        ${t.kat === "werkzeug" && wzZustand(t.zustand) ? `<span class="pille ${wzZustand(t.zustand).farbe} inv-zustand">${esc(wzZustand(t.zustand).name)}</span>`
+          : `<span class="mat" style="--m:var(--leise)">${esc(t.kat === "werkzeug" ? (WZ_ARTEN.find((a) => a.id === t.art) || WZ_ARTEN[0]).name : kategorie(t.kat).einzahl)}</span>`}
         <span class="rest ${t.menge == null ? "leise" : wenig ? "rot" : ""}">${t.menge == null ? "Menge fehlt" : `${zahl(t.menge)} Stk${t.gezaehlt ? "" : " *"}`}</span>
       </div>
     </button>`;
@@ -240,9 +266,11 @@ const InventarAnsicht = {
       html += `<h3 class="abschnitt">1 · Was ist es?</h3>
         <div class="chips">${KATEGORIEN.map((x) => `<button class="chip ${t.kat === x.id ? "an" : ""}" data-aktion="inv-neu-kat" data-id="${x.id}">${x.icon} ${x.einzahl}</button>`).join("")}</div>`;
       if (t.kat === "magnet") html += `<div class="chips oben-abstand">${["rund", "quader"].map((f) => `<button class="chip ${t.form === f ? "an" : ""}" data-aktion="inv-neu-form" data-id="${f}">${f === "rund" ? "Scheibe (rund)" : "Quader"}</button>`).join("")}</div>`;
-      html += `<h3 class="abschnitt">2 · Maße</h3>`;
+      html += `<h3 class="abschnitt">2 · ${t.kat === "werkzeug" ? "Was genau?" : "Maße"}</h3>`;
+      if (t.kat === "werkzeug") html += `<p class="leise klein">Vorlage wählen oder selbst benennen:</p>${this._invVorlagenHtml("inv-neu-vorlage", this._invNeu.vorlage)}`;
     }
     html += `<div class="zeichnung">${teilSvg(t, true)}</div>`;
+    if (t.kat === "werkzeug") html += this._invWerkzeugHtml(t);
     if (k.gewinde) {
       html += `<div class="rechner-block"><div class="r-kopf"><span>Gewinde</span><strong>${esc(t.gewinde)}</strong></div>
         <div class="chips">${GEWINDE.map((g) => `<button class="chip ${t.gewinde === g ? "an" : ""}" data-aktion="inv-gewinde" data-id="${g}">${g}</button>`).join("")}</div></div>`;
@@ -267,14 +295,14 @@ const InventarAnsicht = {
       html += `<p class="leise klein">Maße nach Norm (${t.kat === "mutter" ? "DIN 934" : "DIN 125"}), gelten für alle ${esc(t.gewinde)}-${t.kat === "mutter" ? "Muttern" : "Scheiben"}.</p>`;
     }
     if (t.kat === "magnet" && t.form !== "folie") html += `<div class="hinweis klein">💡 Loch im Druck für ${t.form === "rund" ? "Ø" : "Maß"} ${zahl(t.durchmesser, 2)} mm: etwa ${zahl(t.durchmesser + 0.15, 2)} mm einplanen (Richtwert, je nach Drucker 0,1–0,2 mm Zugabe).</div>`;
-    if (t.kat === "feder" || neu) {
+    if (t.kat === "feder" || t.kat === "werkzeug" || neu) {
       html += `<label class="formular-zeile">Fach / Lagerort<input class="text" data-inv-text="fach" value="${esc(t.fach || "")}" placeholder="z. B. R1F3 oder Schublade 2"></label>`;
     }
 
     // Menge
     html += `${neu ? `<h3 class="abschnitt">3 · Menge</h3>` : ""}
       <div class="rechner-block menge-block">
-        <div class="r-kopf"><span>Menge</span><strong id="inv-menge">${t.menge == null ? "–" : `${zahl(t.menge)} Stück`}</strong></div>
+        <div class="r-kopf"><span>Menge${t.kat === "werkzeug" && t.art === "verbrauch" ? " (Flaschen, Stifte, Packungen …)" : ""}</span><strong id="inv-menge">${t.menge == null ? "–" : `${zahl(t.menge)} Stück`}</strong></div>
         <div class="regler-zeile mengen-knoepfe">
           <button class="rund" data-aktion="inv-menge" data-d="-10">−10</button>
           <button class="rund" data-aktion="inv-menge" data-d="-1">−1</button>
@@ -314,6 +342,16 @@ const InventarAnsicht = {
       </section>`;
   },
 
+  // Werkzeug & Zubehör: Name, Art und Zustand
+  _invWerkzeugHtml(t) {
+    return `<label class="formular-zeile">Name<input class="text" data-inv-text="name" value="${esc(t.name || "")}" placeholder="z. B. Spachtel, IPA, Textured PEI Plate" maxlength="60"></label>
+      <div class="rechner-block"><div class="r-kopf"><span>Art</span></div>
+        <div class="chips">${WZ_ARTEN.map((a) => `<button class="chip ${t.art === a.id ? "an" : ""}" data-aktion="inv-wz-art" data-id="${a.id}">${a.icon} ${a.name}</button>`).join("")}</div></div>
+      <div class="rechner-block"><div class="r-kopf"><span>Zustand</span><strong class="${(wzZustand(t.zustand) || {}).farbe || ""}">${esc((wzZustand(t.zustand) || { name: "–" }).name)}</strong></div>
+        <div class="chips inv-zustaende">${WZ_ZUSTAND.map((z) => `<button class="chip ${t.zustand === z.id ? `an zustand-${z.farbe}` : ""}" data-aktion="inv-wz-zustand" data-id="${z.id}">${z.name}</button>`).join("")}</div>
+        ${t.zustand === "ersetzen" ? `<p class="leise klein">Steht auf der Einkaufsliste in der Werkstatt.</p>` : ""}</div>`;
+  },
+
   _invNeuStarten() {
     this._invNeu = { id: "neu", kat: "schraube", gewinde: "M3", laenge: 10, kopf: "Zylinderkopf Innensechskant", menge: 10, gezaehlt: true, min: null, notiz: "", fach: "" };
     this._modus = "inv-neu";
@@ -323,8 +361,16 @@ const InventarAnsicht = {
   _invNeuKat(kat) {
     const v = { schraube: { gewinde: "M3", laenge: 10, kopf: "Zylinderkopf Innensechskant" }, mutter: { gewinde: "M3" }, scheibe: { gewinde: "M3" },
       einsatz: { gewinde: "M3", laenge: 5, aussen: 5, material: "Messing" }, feder: { draht: 0.4, aussen: 5, laenge: 20, material: "Edelstahl" },
-      duese: { groesse: 0.4, drucker: "Bambu Lab P1S", material: "" }, magnet: { form: "rund", durchmesser: 6, breite: 6, dicke: 2 } }[kat];
+      duese: { groesse: 0.4, drucker: "Bambu Lab P1S", material: "" }, magnet: { form: "rund", durchmesser: 6, breite: 6, dicke: 2 },
+      werkzeug: { name: "", art: "werkzeug", zustand: "neu", icon: "", menge: 1 } }[kat];
     this._invNeu = { id: "neu", kat, menge: this._invNeu.menge, gezaehlt: true, min: null, notiz: "", fach: this._invNeu.fach || "", ...v };
+  },
+  // Vorlage übernehmen (Werkzeug & Zubehör)
+  _invVorlage(i) {
+    const v = WZ_VORLAGEN[i];
+    if (!v) return;
+    this._invNeu = { id: "neu", kat: "werkzeug", art: v.art, name: v.name, icon: v.icon, zustand: "neu", menge: v.menge || 1, min: v.min || null,
+      gezaehlt: true, notiz: v.notiz || "", fach: (this._invNeu && this._invNeu.fach) || "", vorlage: i, ...(v.gewinde ? { gewinde: v.gewinde } : {}) };
   },
 
   // Gibt true zurück, wenn der Klick zum Inventar gehörte
@@ -339,6 +385,10 @@ const InventarAnsicht = {
         break;
       case "inv-neu-kat": this._invNeuKat(el.dataset.id); break;
       case "inv-neu-form": this._invNeu.form = el.dataset.id; break;
+      case "inv-vorlage": this._invNeuStarten(); this._invVorlage(Number(el.dataset.i)); break;
+      case "inv-neu-vorlage": this._invVorlage(Number(el.dataset.i)); break;
+      case "inv-wz-art": t.art = el.dataset.id; if (this._modus === "inv-neu" && t.vorlage == null) t.icon = ""; speichernWennAlt(); break;
+      case "inv-wz-zustand": t.zustand = el.dataset.id; speichernWennAlt(); break;
       case "inv-gewinde": t.gewinde = el.dataset.id; speichernWennAlt(); break;
       case "inv-schritt": {
         const f = masseFuer(t).find((x) => x.k === el.dataset.k);
@@ -362,7 +412,10 @@ const InventarAnsicht = {
         this._toast(`${teilName(t)} gelöscht.`);
         return true;
       case "inv-anlegen": {
+        if (this._invNeu.kat === "werkzeug" && !(this._invNeu.name || "").trim()) { this._toast("Bitte einen Namen eingeben oder eine Vorlage wählen."); return true; }
         const n = { ...this._invNeu, id: `${this._invNeu.kat}-${Date.now().toString(36)}`, angelegt_am: new Date().toISOString() };
+        delete n.vorlage;
+        if (n.name) n.name = n.name.trim();
         this._inv().push(n);
         this._modus = null; this._invNeu = null;
         this._speichern();
@@ -410,7 +463,14 @@ const InventarAnsicht = {
       if (anz) anz.textContent = teil.min ? `${teil.min} Stück` : "aus";
       return true;
     }
-    if (t.dataset.invText) { this._teil()[t.dataset.invText] = t.value; return true; }
+    if (t.dataset.invText) {
+      this._teil()[t.dataset.invText] = t.value;
+      if (t.dataset.invText === "name") {
+        const titel = this.shadowRoot.querySelector(".sheet-titel h2");
+        if (titel) titel.textContent = this._modus === "inv-neu" ? `Neues Teil: ${teilName(this._teil())}` : teilName(this._teil());
+      }
+      return true;
+    }
     return false;
   },
 

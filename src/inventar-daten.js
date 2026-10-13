@@ -44,6 +44,45 @@ const KATEGORIEN = [
     worte: "düse düsen duese nozzle hotend" },
   { id: "magnet", name: "Magnete", einzahl: "Magnet", icon: "🧲", gewinde: false, masse: ["durchmesser", "breite", "dicke"],
     worte: "magnet magnete neodym magnetfolie" },
+  { id: "werkzeug", name: "Werkzeug & Zubehör", einzahl: "Werkzeug/Zubehör", icon: "🛠️", gewinde: false, masse: [],
+    worte: "werkzeug zubehör zubehoer spachtel zange seitenschneider lötspitze lötkolben klebestift ipa isopropanol alkohol druckplatte platte pinzette messschieber verbrauch tool" },
+];
+// Werkzeug & Zubehör: Art und Zustand
+const WZ_ARTEN = [
+  { id: "werkzeug", name: "Werkzeug", icon: "🛠️" },
+  { id: "verbrauch", name: "Verbrauchsmaterial", icon: "🧴" },
+  { id: "platte", name: "Druckplatte", icon: "▦" },
+];
+const WZ_ZUSTAND = [
+  { id: "neu", name: "neu", farbe: "mint" },
+  { id: "gut", name: "gut", farbe: "mint" },
+  { id: "abgenutzt", name: "abgenutzt", farbe: "amber" },
+  { id: "ersetzen", name: "ersetzen", farbe: "rot" },
+];
+const wzZustand = (id) => WZ_ZUSTAND.find((z) => z.id === id);
+// Vorlagen zum schnellen Anlegen (nur Vorschläge, nichts davon ist schon im Bestand)
+const WZ_VORLAGEN = [
+  { name: "Spachtel", art: "werkzeug", icon: "🔪", notiz: "Zum Lösen der Drucke von der Platte" },
+  { name: "Seitenschneider", art: "werkzeug", icon: "✂️", notiz: "Stützen und Filamentenden abknipsen" },
+  { name: "Spitzzange", art: "werkzeug", icon: "🗜️" },
+  { name: "Pinzette", art: "werkzeug", icon: "🥢", notiz: "Fäden und Reste an der Düse entfernen" },
+  { name: "Entgrater", art: "werkzeug", icon: "🪒" },
+  { name: "Messschieber", art: "werkzeug", icon: "📏" },
+  { name: "Inbusschlüssel-Satz", art: "werkzeug", icon: "🔧" },
+  { name: "Lötkolben", art: "werkzeug", icon: "🔥", notiz: "Zum Einschmelzen von Gewindeeinsätzen" },
+  { name: "Lötspitze für Einsätze M2", art: "werkzeug", icon: "📍", gewinde: "M2" },
+  { name: "Lötspitze für Einsätze M3", art: "werkzeug", icon: "📍", gewinde: "M3" },
+  { name: "Lötspitze für Einsätze M4", art: "werkzeug", icon: "📍", gewinde: "M4" },
+  { name: "Lötspitze für Einsätze M5", art: "werkzeug", icon: "📍", gewinde: "M5" },
+  { name: "Düsen-Reinigungsnadeln", art: "werkzeug", icon: "🪡" },
+  { name: "Klebestift", art: "verbrauch", icon: "🧴", menge: 2, min: 1, notiz: "Haftung auf glatten Platten, Trennschicht bei PETG" },
+  { name: "IPA (Isopropanol)", art: "verbrauch", icon: "🧪", menge: 1, min: 1, notiz: "Druckplatte entfetten" },
+  { name: "Mikrofasertuch", art: "verbrauch", icon: "🧽", menge: 3 },
+  { name: "Spülmittel", art: "verbrauch", icon: "🫧", notiz: "Platte gründlich waschen, besser als nur IPA" },
+  { name: "Textured PEI Plate", art: "platte", icon: "▦" },
+  { name: "Smooth PEI Plate", art: "platte", icon: "▦" },
+  { name: "Cool Plate (SuperTack)", art: "platte", icon: "▦" },
+  { name: "Engineering Plate", art: "platte", icon: "▦" },
 ];
 const kategorie = (id) => KATEGORIEN.find((k) => k.id === id) || KATEGORIEN[0];
 
@@ -88,6 +127,7 @@ function teilName(t) {
     case "magnet":
       if (t.name) return t.name;
       return t.form === "rund" ? `Ø ${z(t.durchmesser)} × ${z(t.dicke)} mm` : `${z(t.durchmesser)} × ${z(t.breite)} × ${z(t.dicke)} mm`;
+    case "werkzeug": return t.name || "Werkzeug";
     default: return t.name || "Teil";
   }
 }
@@ -102,6 +142,10 @@ function teilUntertitel(t) {
     case "feder": return `Draht ${z(t.draht)} mm${t.fach ? ` · Fach ${t.fach}` : ""}`;
     case "duese": return `${t.material || "Material unbekannt"} · ${t.drucker || "P1S"}`;
     case "magnet": return t.form === "folie" ? `Dicke ${z(t.dicke)} mm` : t.form === "rund" ? "Scheibenmagnet" : "Quadermagnet";
+    case "werkzeug": {
+      const art = WZ_ARTEN.find((a) => a.id === t.art);
+      return `${art ? art.name : "Werkzeug"}${t.gewinde ? ` · ${t.gewinde}` : ""}${t.fach ? ` · Fach ${t.fach}` : ""}`;
+    }
     default: return "";
   }
 }
