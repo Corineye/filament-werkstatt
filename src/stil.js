@@ -471,9 +471,9 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .mod-leiste > * { pointer-events: auto; }
 .mod-leiste .chip { background: rgba(8,12,11,.75); backdrop-filter: blur(8px); padding: 6px 12px; font-size: 12px; }
 .mod-name { margin-right: auto; font-weight: 600; font-size: 14px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 12px; border-radius: 999px; background: rgba(8,12,11,.75); border: 1px solid var(--rand); }
-.mobil .mod-name { max-width: 100%; flex-basis: 100%; margin-right: 0; }
+.mobil .mod-name { max-width: 100%; flex-basis: 100%; margin-right: 0; padding-right: 44px; }
 .mod-zu { width: 32px; padding: 6px 0 !important; text-align: center; }
-.mobil .mod-zu { position: absolute; right: 0; top: 0; }
+.mobil .mod-zu { position: absolute; right: 34px; top: 0; }
 .mobil .mod-leiste { padding-right: 0; }
 .mod-schicht-leiste { position: absolute; left: 12px; right: 12px; bottom: 36px; display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 14px; background: rgba(8,12,11,.8); border: 1px solid var(--rand); backdrop-filter: blur(8px); flex-wrap: wrap; }
 .mod-schicht-leiste input { flex: 1; min-width: 120px; }
@@ -530,7 +530,23 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
   border: 2px dashed var(--mint); background: rgba(8,12,11,.8); color: var(--mint); font-size: 20px; font-weight: 600; pointer-events: none; }
 .mod-zuletzt { padding: 0 6px 0 0; }
 .mod-zuletzt-knopf { flex: 1; min-width: 0; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; }
-.mod-leiste .chip.mod-plus { background: var(--mint); color: #062018; border-color: var(--mint); font-weight: 700; }
+.mod-huelle { position: relative; display: flex; min-height: 0; }
+.mod-huelle > .mod-buehne-karte { flex: 1; }
+.mod-plus { position: absolute; z-index: 3; top: -14px; right: -14px; width: 52px; height: 52px; border-radius: 50%; background: var(--mint); color: #062018;
+  font-size: 30px; line-height: 1; display: grid; place-items: center; border: 4px solid var(--grund);
+  box-shadow: 0 0 0 4px rgba(62,230,168,.15), 0 8px 24px rgba(62,230,168,.35); transition: transform .2s cubic-bezier(.2,.9,.3,1.3); }
+.mod-plus:hover { transform: scale(1.08) rotate(90deg); }
+.mod-plus:active { transform: scale(.94); }
+.mobil .mod-plus { top: -12px; right: -8px; width: 48px; height: 48px; }
+.mod-leiste { padding-right: 34px; }
+.mod-markier-hinweis { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 2; display: flex; gap: 10px; align-items: center; white-space: nowrap;
+  padding: 8px 8px 8px 14px; border-radius: 999px; background: rgba(255,181,71,.16); border: 1px solid rgba(255,181,71,.5); color: #ffd59a; font-size: 13px; backdrop-filter: blur(8px); animation: hinweis-rein .25s ease; }
+@keyframes hinweis-rein { from { opacity: 0; transform: translate(-50%, -8px); } }
+.mod-markier-hinweis .mini { margin: 0; }
+.mobil .mod-markier-hinweis { top: 104px; white-space: normal; width: calc(100% - 24px); }
+.mod-markier.an { border-color: rgba(255,181,71,.5); color: var(--amber); }
+.mod-manuell { padding: 0 10px 6px; }
+.mod-manuell .chips { align-items: center; margin-bottom: 6px; }
 .mod-loch-kopf .dr-druck-text strong { white-space: normal; }
 .breit-dialog { width: min(560px, calc(100% - 32px)); }
 .stuetz-liste { display: grid; gap: 10px; margin: 14px 0; }

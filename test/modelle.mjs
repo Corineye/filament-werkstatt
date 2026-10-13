@@ -56,6 +56,18 @@ const liste = await el(p).locator(".mod-inhalt").textContent();
 pruefe(liste.includes("Teileliste") && (await el(p).locator(".mod-pin.drin").count()) >= 4, "Alle passenden eingesetzt, Teileliste da");
 pruefe(/Magnet/i.test(liste), "Magnet für die Ø10-Tasche"); if (!/Magnet/i.test(liste)) console.log(liste);
 await p.screenshot({ path: `${out}/m3-loecher.png` });
+// Loch von Hand markieren: auf die Oberseite tippen
+await el(p).locator('[data-aktion="mod-markieren"]').first().click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".mod-markier-hinweis").count()) === 1, "Markier-Hinweis sichtbar");
+const pkt = await p.evaluate(() => { const x = document.querySelector("filament-werkstatt-panel"); const s = x._buehne.projizieren([106, 140, 16]); const r = x._buehne.canvas.getBoundingClientRect(); return [r.left + s[0], r.top + s[1]]; });
+await p.mouse.click(pkt[0], pkt[1]);
+await p.waitForTimeout(400);
+pruefe((await el(p).locator(".mod-pin").count()) === 6 && (await el(p).locator(".mod-manuell").count()) === 1, "Loch 6 von Hand gesetzt, Regler offen");
+await el(p).locator('[data-mod="loch-d"]').evaluate((r) => { r.value = 10.15; r.dispatchEvent(new Event("input", { bubbles: true })); r.dispatchEvent(new Event("change", { bubbles: true })); });
+await p.waitForTimeout(300);
+pruefe(/Magnet/.test(await el(p).locator(".mod-loch.auf").textContent()), "Ø 10,15 von Hand → Magnet vorgeschlagen");
+await p.screenshot({ path: `${out}/m3c-hand.png` });
 await el(p).locator('[data-aktion="mod-ansicht"][data-id="vorne"]').click();
 await p.waitForTimeout(500);
 await p.screenshot({ path: `${out}/m3b-vorne.png` });

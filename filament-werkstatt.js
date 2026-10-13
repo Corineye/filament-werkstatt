@@ -865,9 +865,9 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .mod-leiste > * { pointer-events: auto; }
 .mod-leiste .chip { background: rgba(8,12,11,.75); backdrop-filter: blur(8px); padding: 6px 12px; font-size: 12px; }
 .mod-name { margin-right: auto; font-weight: 600; font-size: 14px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 12px; border-radius: 999px; background: rgba(8,12,11,.75); border: 1px solid var(--rand); }
-.mobil .mod-name { max-width: 100%; flex-basis: 100%; margin-right: 0; }
+.mobil .mod-name { max-width: 100%; flex-basis: 100%; margin-right: 0; padding-right: 44px; }
 .mod-zu { width: 32px; padding: 6px 0 !important; text-align: center; }
-.mobil .mod-zu { position: absolute; right: 0; top: 0; }
+.mobil .mod-zu { position: absolute; right: 34px; top: 0; }
 .mobil .mod-leiste { padding-right: 0; }
 .mod-schicht-leiste { position: absolute; left: 12px; right: 12px; bottom: 36px; display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 14px; background: rgba(8,12,11,.8); border: 1px solid var(--rand); backdrop-filter: blur(8px); flex-wrap: wrap; }
 .mod-schicht-leiste input { flex: 1; min-width: 120px; }
@@ -924,7 +924,23 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
   border: 2px dashed var(--mint); background: rgba(8,12,11,.8); color: var(--mint); font-size: 20px; font-weight: 600; pointer-events: none; }
 .mod-zuletzt { padding: 0 6px 0 0; }
 .mod-zuletzt-knopf { flex: 1; min-width: 0; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; }
-.mod-leiste .chip.mod-plus { background: var(--mint); color: #062018; border-color: var(--mint); font-weight: 700; }
+.mod-huelle { position: relative; display: flex; min-height: 0; }
+.mod-huelle > .mod-buehne-karte { flex: 1; }
+.mod-plus { position: absolute; z-index: 3; top: -14px; right: -14px; width: 52px; height: 52px; border-radius: 50%; background: var(--mint); color: #062018;
+  font-size: 30px; line-height: 1; display: grid; place-items: center; border: 4px solid var(--grund);
+  box-shadow: 0 0 0 4px rgba(62,230,168,.15), 0 8px 24px rgba(62,230,168,.35); transition: transform .2s cubic-bezier(.2,.9,.3,1.3); }
+.mod-plus:hover { transform: scale(1.08) rotate(90deg); }
+.mod-plus:active { transform: scale(.94); }
+.mobil .mod-plus { top: -12px; right: -8px; width: 48px; height: 48px; }
+.mod-leiste { padding-right: 34px; }
+.mod-markier-hinweis { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 2; display: flex; gap: 10px; align-items: center; white-space: nowrap;
+  padding: 8px 8px 8px 14px; border-radius: 999px; background: rgba(255,181,71,.16); border: 1px solid rgba(255,181,71,.5); color: #ffd59a; font-size: 13px; backdrop-filter: blur(8px); animation: hinweis-rein .25s ease; }
+@keyframes hinweis-rein { from { opacity: 0; transform: translate(-50%, -8px); } }
+.mod-markier-hinweis .mini { margin: 0; }
+.mobil .mod-markier-hinweis { top: 104px; white-space: normal; width: calc(100% - 24px); }
+.mod-markier.an { border-color: rgba(255,181,71,.5); color: var(--amber); }
+.mod-manuell { padding: 0 10px 6px; }
+.mod-manuell .chips { align-items: center; margin-bottom: 6px; }
 .mod-loch-kopf .dr-druck-text strong { white-space: normal; }
 .breit-dialog { width: min(560px, calc(100% - 32px)); }
 .stuetz-liste { display: grid; gap: 10px; margin: 14px 0; }
@@ -2475,6 +2491,20 @@ class Buehne {
     return [((x / w + 1) / 2) * r.width, ((1 - y / w) / 2) * r.height];
   }
 
+  // Bildschirmpunkt (CSS-Pixel) → Strahl {von, richtung} in Weltkoordinaten
+  strahl(px, py) {
+    const r = this.canvas.getBoundingClientRect();
+    const auge = this._auge();
+    const norm = (v) => { const l = Math.hypot(...v) || 1; return v.map((x) => x / l); };
+    const kreuz = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const f = norm([this.ziel[0] - auge[0], this.ziel[1] - auge[1], this.ziel[2] - auge[2]]);
+    const oben = Math.abs(Math.cos(this.neig)) < 1e-3 ? [0, 1, 0] : [0, 0, 1];
+    const re = norm(kreuz(f, oben)), ob = kreuz(re, f);
+    const t = Math.tan(0.35), x = (px / r.width) * 2 - 1, y = 1 - (py / r.height) * 2;
+    const seiten = r.width / Math.max(1, r.height);
+    return { von: auge, richtung: norm([0, 1, 2].map((i) => f[i] + re[i] * x * t * seiten + ob[i] * y * t)) };
+  }
+
   // ---- Bedienung: ziehen = drehen, rechts/zwei Finger = verschieben, Rad/zwei Finger = zoomen ----
   _ereignisse() {
     const c = this.canvas;
@@ -2482,9 +2512,17 @@ class Buehne {
     c.addEventListener("wheel", (e) => { e.preventDefault(); this.abstand = Math.min(1500, Math.max(8, this.abstand * Math.exp(e.deltaY * 0.0012))); this.neu(); }, { passive: false });
     c.addEventListener("pointerdown", (e) => {
       c.setPointerCapture(e.pointerId);
-      this.zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY, schieben: e.button === 2 || e.shiftKey });
+      this.zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, schieben: e.button === 2 || e.shiftKey });
     });
-    const ende = (e) => { this.zeiger.delete(e.pointerId); this._pinch = null; };
+    const ende = (e) => {
+      const z = this.zeiger.get(e.pointerId);
+      // Antippen (kaum bewegt, ein Finger) → für das Markieren von Löchern
+      if (z && e.type === "pointerup" && this.zeiger.size === 1 && !this._pinch && Math.hypot(e.clientX - z.x0, e.clientY - z.y0) < 6 && this.antippen) {
+        const r = c.getBoundingClientRect();
+        this.antippen(this.strahl(e.clientX - r.left, e.clientY - r.top));
+      }
+      this.zeiger.delete(e.pointerId); this._pinch = null;
+    };
     c.addEventListener("pointerup", ende);
     c.addEventListener("pointercancel", ende);
     c.addEventListener("pointermove", (e) => {
@@ -2675,12 +2713,13 @@ const ModellAnsicht = {
       ? [["uebersicht", "Übersicht"], ["loecher", `Löcher${m.loecher ? ` (${m.loecher.length})` : ""}`], ["schichten", "Schichten"]]
       : [["uebersicht", "Übersicht"], ["schichten", "Schichten"]];
     return `<div class="mod-raster">
+      <div class="mod-huelle">
+      <button class="mod-plus" data-aktion="neu" aria-label="Datei öffnen" title="STL oder G-Code öffnen">+</button>
       <div class="mod-buehne-karte dr-karte">
         <div id="mod-buehne" class="mod-buehne"></div>
         <div id="mod-marker" class="mod-marker"></div>
         <div class="mod-leiste">
           <span class="mod-name" title="${esc(m.name)}">${m.art === "stl" ? "🧊" : "🧾"} ${esc(m.name)}</span>
-          <button class="chip mod-plus" data-aktion="neu" aria-label="Andere Datei öffnen" title="Andere Datei öffnen (STL oder G-Code)">＋ Datei</button>
           <button class="chip" data-aktion="mod-ansicht" data-id="iso">3D</button>
           <button class="chip" data-aktion="mod-ansicht" data-id="oben">Oben</button>
           <button class="chip" data-aktion="mod-ansicht" data-id="vorne">Vorne</button>
@@ -2693,7 +2732,9 @@ const ModellAnsicht = {
           <button class="rund" data-aktion="mod-schicht" data-d="1" aria-label="Schicht höher">+</button>
           <span id="mod-schicht-text" class="mod-schicht-text">${this._modSchichtText()}</span>
         </div>` : ""}
+        ${m.markieren ? `<div class="mod-markier-hinweis" data-einmal="mod-markier">🎯 Tippe auf die Stelle, an der das Loch beginnt <button class="mini" data-aktion="mod-markieren">Abbrechen</button></div>` : ""}
         <p class="mod-hilfe leise">${this._mobil ? "Ein Finger drehen · zwei Finger zoomen und schieben" : "Ziehen dreht · Rechtsklick oder Shift schiebt · Mausrad zoomt"}</p>
+      </div>
       </div>
       <aside class="mod-seite dr-karte">
         <div class="tabs mod-tabs">${tabs.map(([id, n]) => `<button class="tab ${m.tab === id ? "an" : ""}" data-aktion="mod-tab" data-id="${id}">${n}</button>`).join("")}</div>
@@ -2795,7 +2836,8 @@ const ModellAnsicht = {
   _modLoecherHtml() {
     const m = this._mod;
     if (!m.loecher) return `<div class="mod-laden-klein"><span class="dreher klein"></span> Suche Löcher …</div>`;
-    if (!m.loecher.length) return `<div class="hinweis">Keine runden Löcher gefunden. Erkannt werden kreisrunde Löcher entlang X, Y und Z.</div>`;
+    const markierKnopf = `<button class="knopf leise breit mod-markier ${m.markieren ? "an" : ""}" data-aktion="mod-markieren">${m.markieren ? "✕ Markieren abbrechen" : "＋ Loch von Hand markieren"}</button>`;
+    if (!m.loecher.length) return `<div class="hinweis">Keine runden Löcher gefunden. Erkannt werden kreisrunde Löcher entlang X, Y und Z. Schräge oder eckige Löcher kannst du von Hand markieren.</div>${markierKnopf}`;
     const inv = this._daten.inventar;
     const eingesetzt = m.eingesetzt;
     const liste = m.loecher.map((l) => {
@@ -2807,9 +2849,14 @@ const ModellAnsicht = {
         <button class="mod-loch-kopf" data-aktion="mod-loch" data-nr="${l.nr}">
           <span class="mod-nr">${l.nr}</span>
           <span class="dr-druck-text"><strong>Ø ${zahl(l.durchmesser, 2)} mm · ${zahl(l.tiefe, 1)} mm tief</strong>
-            <small>${l.durch ? "durchgehend" : "Sackloch"} · ${richtung}${drin ? ` · ✓ ${esc(kategorie((inv.find((t) => t.id === drin) || {}).kat).einzahl)} ${esc(teilName(inv.find((t) => t.id === drin) || {}))}` : ""}</small></span>
+            <small>${l.manuell ? "von Hand · " : ""}${l.durch ? "durchgehend" : "Sackloch"} · ${richtung}${drin ? ` · ✓ ${esc(kategorie((inv.find((t) => t.id === drin) || {}).kat).einzahl)} ${esc(teilName(inv.find((t) => t.id === drin) || {}))}` : ""}</small></span>
           <span class="pille ${vor.length ? "mint" : "leise"}">${vor.length ? `${vor.length} passend` : "nichts passend"}</span>
         </button>
+        ${auf && l.manuell ? `<div class="mod-manuell">
+          ${this._modReglerHtml(`loch-d-${l.nr}`, "Durchmesser", l.durchmesser, 1, 30, 0.05, "mm").replace(`data-mod="loch-d-${l.nr}"`, `data-mod="loch-d" data-nr="${l.nr}"`)}
+          ${this._modReglerHtml(`loch-t-${l.nr}`, "Tiefe", l.tiefe, 0.5, 60, 0.5, "mm").replace(`data-mod="loch-t-${l.nr}"`, `data-mod="loch-t" data-nr="${l.nr}"`)}
+          <div class="chips"><button class="chip ${l.durch ? "" : "an"}" data-aktion="mod-loch-art" data-nr="${l.nr}" data-durch="0">Sackloch</button><button class="chip ${l.durch ? "an" : ""}" data-aktion="mod-loch-art" data-nr="${l.nr}" data-durch="1">Durchgehend</button>
+          <button class="mini" data-aktion="mod-loch-weg" data-nr="${l.nr}">Loch löschen</button></div></div>` : ""}
         ${auf ? `<div class="mod-vorschlaege">${vor.length ? vor.map((x) => `
           <div class="mod-vorschlag ${drin === x.teil.id ? "an" : ""}">
             <span class="mod-v-bild">${teilSvg(x.teil)}</span>
@@ -2828,7 +2875,7 @@ const ModellAnsicht = {
     }).join("");
     return `<div class="knopf-reihe"><button class="knopf" data-aktion="mod-alle-einsetzen">Alle passenden einsetzen</button>
         ${Object.keys(eingesetzt).length ? `<button class="knopf leise" data-aktion="mod-alle-raus">Alle entfernen</button>` : ""}</div>
-      <div class="mod-loecher">${liste}</div>
+      <div class="mod-loecher">${liste}</div>${markierKnopf}
       ${teileliste ? `<h3>🧾 Teileliste für dieses Modell</h3><div class="info-liste">${teileliste}</div>` : ""}
       <p class="leise klein oben-abstand">Erkannt werden kreisrunde Löcher entlang X, Y und Z. Schräge Löcher und Sechskant-Taschen für Muttern noch nicht. Tiefe auf etwa ±0,3 mm genau.</p>`;
   },
@@ -3024,6 +3071,7 @@ const ModellAnsicht = {
       this._buehne = new Buehne();
       if (!this._buehne.ok) { ort.innerHTML = `<div class="dr-kamera-leer">Dieser Browser kann kein WebGL.</div>`; return; }
       this._buehne.nachZeichnen = () => this._modMarkerSetzen();
+      this._buehne.antippen = (strahl) => this._modAntippen(strahl);
       this._modSzene();
       this._buehne.ansicht("iso", this._mod && this._mod.grenzen);
     }
@@ -3321,6 +3369,16 @@ const ModellAnsicht = {
         return;
       }
       case "mod-stuetzen": m.stuetzen = el.dataset.id; this._zeichnen(); this._modSzene(); return;
+      case "mod-markieren": m.markieren = !m.markieren; m.tab = "loecher"; break;
+      case "mod-loch-art": { const l = m.loecher.find((x) => x.nr === Number(el.dataset.nr)); if (l) { l.durch = el.dataset.durch === "1"; this._modLochGrenzen(l); } this._modSeiteNeu(); return; }
+      case "mod-loch-weg": {
+        const nr = Number(el.dataset.nr);
+        m.loecher = m.loecher.filter((x) => x.nr !== nr);
+        delete m.eingesetzt[nr];
+        if (this._buehne) this._buehne.weg(`teil-${nr}`);
+        m.lochAuswahl = null;
+        break;
+      }
       case "mod-stuetzen-hilfe": this._dialog = "mod-stuetzen"; break;
       case "mod-schicht": this._modSchichtSetzen((m.schichtNr || 1) + Number(el.dataset.d)); return;
       case "mod-zuletzt":
@@ -3333,6 +3391,44 @@ const ModellAnsicht = {
       default: return;
     }
     this._zeichnen();
+  },
+
+  // Loch von Hand: Strahl gegen alle Dreiecke (Möller–Trumbore), nächster Treffer zählt
+  _modAntippen(strahl) {
+    const m = this._mod;
+    if (!m || !m.markieren || m.art !== "stl") return;
+    const v = m.v, o = strahl.von, d = strahl.richtung;
+    let best = Infinity, n = null;
+    for (let i = 0; i < v.length; i += 9) {
+      const e1 = [v[i + 3] - v[i], v[i + 4] - v[i + 1], v[i + 5] - v[i + 2]], e2 = [v[i + 6] - v[i], v[i + 7] - v[i + 1], v[i + 8] - v[i + 2]];
+      const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
+      const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+      if (Math.abs(det) < 1e-12) continue;
+      const inv = 1 / det, tv = [o[0] - v[i], o[1] - v[i + 1], o[2] - v[i + 2]];
+      const u = (tv[0] * p[0] + tv[1] * p[1] + tv[2] * p[2]) * inv;
+      if (u < 0 || u > 1) continue;
+      const q = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
+      const w = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
+      if (w < 0 || u + w > 1) continue;
+      const t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
+      if (t > 0 && t < best) { best = t; n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; }
+    }
+    if (!n) { this._toast("Da ist kein Modell. Tippe direkt auf die Oberfläche."); return; }
+    const treffer = [0, 1, 2].map((i) => o[i] + d[i] * best);
+    // Normale zur Kamera drehen = nach außen; Lochachse = größte Komponente
+    if (n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0) n = n.map((x) => -x);
+    const achse = [0, 1, 2].reduce((a, i) => (Math.abs(n[i]) > Math.abs(n[a]) ? i : a), 0);
+    const nr = Math.max(0, ...m.loecher.map((l) => l.nr)) + 1;
+    const l = { nr, achse, durchmesser: 4.2, tiefe: 6, durch: false, mitte: treffer, oeffnung: treffer[achse], richtung: Math.sign(n[achse]) || 1, manuell: true };
+    this._modLochGrenzen(l);
+    m.loecher.push(l);
+    m.markieren = false;
+    m.lochAuswahl = nr;
+    this._zeichnen();
+  },
+  _modLochGrenzen(l) {
+    const ende = l.oeffnung - l.richtung * l.tiefe;
+    l.von = Math.min(l.oeffnung, ende); l.bis = Math.max(l.oeffnung, ende);
   },
 
   _modSchichtSetzen(nr) {
@@ -3350,6 +3446,15 @@ const ModellAnsicht = {
     if (!k || !this._mod) return false;
     const m = this._mod;
     if (k === "schicht") { this._modSchichtSetzen(Number(t.value)); return true; }
+    if (k === "loch-d" || k === "loch-t") {
+      const l = m.loecher && m.loecher.find((x) => x.nr === Number(t.dataset.nr));
+      if (!l) return true;
+      if (k === "loch-d") l.durchmesser = Number(t.value); else l.tiefe = Number(t.value);
+      this._modLochGrenzen(l);
+      const w = this.shadowRoot.getElementById(`mod-wert-${k}-${l.nr}`);
+      if (w) w.textContent = `${zahl(Number(t.value), 2)} mm`;
+      return true;
+    }
     if (["fuellung", "waende", "schicht_h"].includes(k)) {
       m[k] = Number(t.value);
       const w = this.shadowRoot.getElementById(`mod-wert-${k}`);
@@ -3372,6 +3477,12 @@ const ModellAnsicht = {
     const m = this._mod;
     if (!m) return false;
     if (k === "rolle") { m.rolleId = this._modRolleId = t.value; this._zeichnen(); return true; }
+    if (k === "loch-d" || k === "loch-t") {
+      const nr = Number(t.dataset.nr);
+      if (m.eingesetzt[nr]) this._modTeilZeigen(nr, m.eingesetzt[nr], false);
+      this._modSeiteNeu();
+      return true;
+    }
     if (["fuellung", "waende", "schicht_h"].includes(k) && m.tab === "schichten" && m.art === "stl") { this._modSchichtenStarten(); this._modSeiteNeu(); return true; }
     return ["fuellung", "waende", "schicht_h", "schicht"].includes(k);
   },
