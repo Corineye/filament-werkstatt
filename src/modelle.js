@@ -1516,7 +1516,18 @@ const ModellAnsicht = {
     if (!m || !b || m.art !== "stl") return;
     const aktiv = m.drehWerte && m.drehWerte.some((x) => Number(x));
     const c = [0, 1, 2].map((i) => (m.grenzen.min[i] + m.grenzen.max[i]) / 2);
-    const mat = aktiv ? M4.drehungUm(drehMatrix(m.drehWerte), c) : M4.eins();
+    const R = aktiv ? drehMatrix(m.drehWerte) : null;
+    const mat = aktiv ? M4.drehungUm(R, c) : M4.eins();
+    if (aktiv) {
+      // Wie beim Anwenden: der tiefste Punkt liegt immer auf dem Druckbett
+      const v = m.v;
+      let unten = Infinity;
+      for (let i = 0; i < v.length; i += 3) {
+        const z = R[6] * (v[i] - c[0]) + R[7] * (v[i + 1] - c[1]) + R[8] * (v[i + 2] - c[2]);
+        if (z < unten) unten = z;
+      }
+      mat[14] = -unten - (R[6] * c[0] + R[7] * c[1] + R[8] * c[2]);
+    }
     b.setze("modell", { m: mat });
     b.setze("grundriss", { sichtbar: !aktiv });
     for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: !aktiv && m.tab !== "schichten" });
