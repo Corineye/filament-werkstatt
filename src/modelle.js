@@ -454,7 +454,31 @@ function insLoch(lokal, loch) {
   return out;
 }
 
-// ---- Zuletzt geöffnete Dateien (nur in diesem Browser) ----------------------
+// ---- Zuletzt geöffnete Dateien ----------------------------------------------
+// Mit der Integration liegen sie auf dem Home-Assistant-Rechner (Medien › 3d-modelle)
+// und jedes Gerät sieht dieselbe Liste. Ohne Integration nur in diesem Browser.
+const MOD_SERVER_URL = "/api/filament_werkstatt/modelle";
+function modServer(hass) {
+  const url = (name) => `${MOD_SERVER_URL}/${encodeURIComponent(name)}`;
+  const pruefen = (r) => { if (!r.ok) throw new Error(`Home Assistant antwortet mit ${r.status}`); return r; };
+  return {
+    aufServer: true,
+    async alle() {
+      const d = await pruefen(await hass.fetchWithAuth(MOD_SERVER_URL)).json();
+      return (d.modelle || []).map((m) => ({ name: m.name, datum: m.zeit, groesse: m.groesse }));
+    },
+    async holen(name) {
+      const r = await hass.fetchWithAuth(url(name));
+      return r.ok ? { name, daten: await r.arrayBuffer() } : null;
+    },
+    async speichern(name, daten) {
+      pruefen(await hass.fetchWithAuth(`${MOD_SERVER_URL}?name=${encodeURIComponent(name)}`,
+        { method: "POST", body: daten, headers: { "Content-Type": "application/octet-stream" } }));
+    },
+    async loeschen(name) { await hass.fetchWithAuth(url(name), { method: "DELETE" }); },
+  };
+}
+
 const MOD_DB = {
   async db() {
     if (this._db) return this._db;
@@ -560,6 +584,8 @@ const ModellAnsicht = {
   },
 
   _modLeerHtml() {
+    // Liste beim Öffnen des Reiters auffrischen, ein anderes Gerät kann etwas geöffnet haben
+    if (this._modBereit && Date.now() - (this._modZuletztZeit || 0) > 15000) setTimeout(() => this._modZuletztLaden(), 0);
     const zuletzt = this._modZuletzt || [];
     return `<div class="mod-leer">
       <label class="ablage" data-ablage="1">
@@ -569,7 +595,9 @@ const ModellAnsicht = {
         <span class="leise">oder tippen, um eine Datei zu wählen</span>
         <span class="leise klein">.stl · .gcode · .gcode.3mf aus Bambu Studio</span>
       </label>
-      ${zuletzt.length ? `<div class="dr-karte"><h3 class="dr-titel">🕘 Zuletzt geöffnet (nur auf diesem Gerät)</h3><div class="dr-verlauf">${zuletzt.map((z) => `
+      ${zuletzt.length ? `<div class="dr-karte"><h3 class="dr-titel">🕘 Zuletzt geöffnet <small class="leise">${this._modZuletztServer
+        ? `auf allen Geräten · ${zahl(zuletzt.reduce((s, z) => s + (z.groesse || 0), 0) / 1048576, 1)} MB belegt`
+        : "nur auf diesem Gerät"}</small></h3><div class="dr-verlauf">${zuletzt.map((z) => `
         <div class="dr-druck mod-zuletzt"><button class="mod-zuletzt-knopf" data-aktion="mod-zuletzt" data-name="${esc(z.name)}"><span class="ld-bild">${/\.stl$/i.test(z.name) ? "🧊" : "🧾"}</span>
           <span class="dr-druck-text"><strong>${esc(z.name)}</strong><small>${new Date(z.datum).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · ${zahl(z.groesse / 1048576, 1)} MB</small></span></button>
           <button class="icon-knopf" data-aktion="mod-zuletzt-weg" data-name="${esc(z.name)}" aria-label="Aus der Liste entfernen">✕</button></div>`).join("")}</div></div>` : ""}
@@ -932,7 +960,7 @@ const ModellAnsicht = {
     this._modBereit = true;
     this._modOrbitArt = this._modEinstellung("orbit") === "frei" ? "frei" : "eingeschraenkt";
     this._modWuerfelZiehen = this._modEinstellung("wuerfel-ziehen") !== "0";
-    MOD_DB.alle().then((l) => { this._modZuletzt = l; if (this._ansicht === "modelle" && !this._mod) this._zeichnen(); });
+    this._modZuletztLaden();
     const root = this.shadowRoot;
     // Eigene Winkel: das zuletzt angetippte Feld bekommt die Schnellknöpfe
     root.addEventListener("focusin", (e) => {
@@ -964,6 +992,30 @@ const ModellAnsicht = {
     return { tab: "uebersicht", fuellung: 15, waende: 2, duese: 0.4, schicht_h: 0.2, stuetzen: "keine", eingesetzt: {}, rolleId: this._modRolleId || (rolle && rolle.id),
       muster: FUELLMUSTER.some((x) => x.id === muster) ? muster : "grid", drehEigen: false, drehWerte: [0, 0, 0], drehFeld: 2 };
   },
+  // Speicher für „Zuletzt geöffnet“: auf dem Server, wenn die Integration da ist
+  _modSpeicher() {
+    return this._konfig && this._hass && this._hass.fetchWithAuth ? modServer(this._hass) : MOD_DB;
+  },
+  async _modZuletztLaden() {
+    this._modZuletztZeit = Date.now();
+    const sp = this._modSpeicher();
+    try {
+      if (sp.aufServer && !this._modUmgezogen) {
+        // Einmalig: Modelle, die bisher nur in diesem Browser lagen, auf den Server legen
+        this._modUmgezogen = true;
+        for (const z of (await MOD_DB.alle()).reverse()) {
+          const x = await MOD_DB.holen(z.name);
+          if (x) { await sp.speichern(x.name, x.daten); await MOD_DB.loeschen(z.name); }
+        }
+      }
+      this._modZuletzt = await sp.alle();
+      this._modZuletztServer = !!sp.aufServer;
+    } catch (e) {
+      this._modZuletzt = await MOD_DB.alle();   // Server nicht erreichbar: wenigstens die lokalen
+      this._modZuletztServer = false;
+    }
+    if (this._ansicht === "modelle" && !this._mod) this._zeichnen();
+  },
   _modRolle() { const m = this._mod; return this._daten.rollen.find((r) => r.id === (m && m.rolleId)) || null; },
 
   async _modDatei(datei, name) {
@@ -987,7 +1039,8 @@ const ModellAnsicht = {
         this._modGcode(new TextDecoder().decode(await zip.lesen(g)), name);
       } else if (/\.gcode$/i.test(name)) this._modGcode(new TextDecoder().decode(puffer), name);
       else throw new Error("Unbekanntes Format. Erlaubt sind .stl, .gcode und .gcode.3mf.");
-      MOD_DB.speichern(name, puffer).then(() => MOD_DB.alle()).then((l) => (this._modZuletzt = l));
+      const sp = this._modSpeicher();
+      sp.speichern(name, puffer).catch(() => MOD_DB.speichern(name, puffer)).then(() => this._modZuletztLaden());
     } catch (e) {
       this._mod = null;
       this._toast(e.message || String(e));
@@ -1416,10 +1469,12 @@ const ModellAnsicht = {
       case "mod-stuetzen-hilfe": this._dialog = "mod-stuetzen"; break;
       case "mod-schicht": this._modSchichtSetzen((m.schichtNr || 1) + Number(el.dataset.d)); return;
       case "mod-zuletzt":
-        MOD_DB.holen(el.dataset.name).then((x) => x ? this._modDatei(x.daten, x.name) : this._toast("Datei nicht mehr gespeichert."));
+        (this._modZuletztServer ? this._modSpeicher() : MOD_DB).holen(el.dataset.name)
+          .catch(() => null)
+          .then((x) => x ? this._modDatei(x.daten, x.name) : this._toast("Datei nicht mehr gespeichert."));
         return;
       case "mod-zuletzt-weg":
-        MOD_DB.loeschen(el.dataset.name);
+        (this._modZuletztServer ? this._modSpeicher() : MOD_DB).loeschen(el.dataset.name).catch(() => {});
         this._modZuletzt = (this._modZuletzt || []).filter((z) => z.name !== el.dataset.name);
         break;
       default: return;
