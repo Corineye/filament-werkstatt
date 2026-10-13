@@ -3,11 +3,39 @@
     "step": {
       "user": {
         "title": "Filament-Werkstatt",
-        "description": "Adds the \"Filament\" page to the sidebar. No further settings are needed."
+        "description": "Adds the “Filament” page to the sidebar. The suggestions usually fit, just submit. Everything can be changed later via “Configure”.",
+        "data": {
+          "drucker": "Printer (Bambu Lab)",
+          "steckdose": "Smart plug powering the printer",
+          "liste": "Existing print list",
+          "protokoll": "Log prints automatically"
+        },
+        "data_description": {
+          "drucker": "From the Bambu Lab integration. Leave empty if you have none.",
+          "steckdose": "Optional. Lets the page switch the printer and calculate energy costs.",
+          "liste": "Optional. Leave empty and the integration creates its own list “3D-Drucke”.",
+          "protokoll": "Adds every print with weight, temperatures and a final photo to the list."
+        }
       }
     },
     "abort": {
       "single_instance_allowed": "Filament-Werkstatt is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Filament-Werkstatt",
+        "data": {
+          "drucker": "Printer (Bambu Lab)",
+          "steckdose": "Smart plug powering the printer",
+          "liste": "Existing print list",
+          "protokoll": "Log prints automatically"
+        },
+        "data_description": {
+          "liste": "Leave empty to use the integration's own list “3D-Drucke”."
+        }
+      }
     }
   }
 }
