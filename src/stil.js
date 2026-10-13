@@ -59,6 +59,7 @@ p { margin: 4px 0 12px; }
 .punkt-leucht { width: 10px; height: 10px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 12px var(--mint); }
 .nav-oben { display: flex; gap: 4px; margin-left: 12px; flex: 1; }
 .nav-punkt { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px; color: var(--leise); position: relative; }
+.nav-oben .nav-punkt.nur-icon { padding: 8px 10px; }
 .nav-punkt:hover { background: var(--flaeche-hover); color: var(--text); }
 .nav-punkt.aktiv { background: var(--mint-weich); color: var(--mint); }
 .nav-punkt.bald { opacity: .5; }
@@ -77,7 +78,7 @@ p { margin: 4px 0 12px; }
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: rgba(8,12,11,0.88);
   backdrop-filter: blur(16px); border-top: 1px solid var(--rand);
 }
-.nav-unten .nav-punkt { flex-direction: column; gap: 2px; padding: 6px 8px; font-size: 11px; min-width: 60px; }
+.nav-unten .nav-punkt { flex-direction: column; gap: 2px; padding: 6px 4px; font-size: 11px; min-width: 0; flex: 1; }
 .nav-unten .nav-icon { font-size: 20px; }
 .nav-unten small { position: absolute; top: 0; right: 4px; font-size: 8px !important; padding: 0 3px !important; }
 
@@ -645,7 +646,7 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .dialog textarea[readonly] { font-size: 13px; }
 .nav-oben { overflow-x: auto; scrollbar-width: none; }
 .nav-oben::-webkit-scrollbar { display: none; }
-@media (max-width: 1240px) { .nav-oben .nav-punkt { padding: 8px 10px; } }
+@media (max-width: 1440px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
 @media (max-width: 1080px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
 .nav-unten .nav-punkt { transition: color .15s, background .15s; border-radius: 14px; }
 .nav-unten .nav-punkt.aktiv .nav-icon { animation: tipp .3s ease; }
@@ -965,7 +966,7 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .nav-oben .nav-punkt { white-space: nowrap; flex: none; }
 @media (max-width: 1400px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
 @media (max-width: 1340px) { .kopf .speicher { font-size: 0; } .kopf .speicher::before { font-size: 14px; } }
-@media (max-width: 1180px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
+@media (max-width: 1320px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
 @media (max-width: 1640px) { .kopf-suche kbd { display: none; } }
 @media (max-width: 1520px) { .kopf-suche-text { display: none; } .kopf-suche { width: 38px; padding: 0; justify-content: center; margin-left: 4px; } }
 

@@ -23,10 +23,10 @@ const nav = async (p, id) => { await el(p).locator(`.nav-oben [data-id="${id}"]`
 
 // ---------------- Desktop ----------------
 let p = await seite(1400, 900);
-pruefe((await el(p).locator(".nav-oben .nav-punkt").count()) === 8, "8 Bereiche oben in der Navigation");
+pruefe((await el(p).locator(".nav-oben .nav-punkt").count()) === 11, "11 Bereiche oben in der Navigation");
 {
-  const lage = await p.evaluate(() => { const r = window.el.shadowRoot, s = r.querySelector(".kopf .kopf-suche"), f = r.querySelector('.nav-oben [data-id="filament"]'); return s && f ? [s.getBoundingClientRect().right, f.getBoundingClientRect().left, r.querySelector(".nav-oben").scrollWidth - r.querySelector(".nav-oben").clientWidth] : null; });
-  pruefe(lage && lage[0] <= lage[1] && lage[2] <= 1, "Kopfzeile: Suche links neben „Filament“, Navigation passt ohne Scrollen");
+  const lage = await p.evaluate(() => { const r = window.el.shadowRoot, s = r.querySelector(".kopf .kopf-suche"), f = r.querySelector('.nav-oben [data-id="start"]'); return s && f ? [s.getBoundingClientRect().right, f.getBoundingClientRect().left, r.querySelector(".nav-oben").scrollWidth - r.querySelector(".nav-oben").clientWidth] : null; });
+  pruefe(lage && lage[0] <= lage[1] && lage[2] <= 1, "Kopfzeile: Suche links neben „Start“, Navigation passt ohne Scrollen");
   await p.screenshot({ path: `${out}/k0-kopf.png`, clip: { x: 0, y: 0, width: 1400, height: 72 } });
   await el(p).locator(".kopf .kopf-suche").click();
   await p.waitForTimeout(250);
@@ -384,10 +384,10 @@ await p.close();
 
 // ---------------- Handy ----------------
 p = await seite(390, 844, true);
-pruefe((await el(p).locator(".nav-unten .nav-punkt").count()) === 5, "Handy: 5 Punkte unten (4 + Mehr)");
+pruefe((await el(p).locator(".nav-unten .nav-punkt").count()) === 6, "Handy: 6 Punkte unten (5 + Mehr)");
 await el(p).locator('.nav-unten [data-aktion="mehr"]').click();
 await p.waitForTimeout(350);
-pruefe((await el(p).locator(".mehr-punkt").count()) === 5, "Mehr-Menü mit Suche, Werkstatt, Hilfe, Nerd, System");
+pruefe((await el(p).locator(".mehr-punkt").count()) === 7, "Mehr-Menü mit Suche, Werkstatt, Hilfe, Shop, Notizbuch, Nerd, System");
 await p.screenshot({ path: `${out}/m1-mehr.png` });
 await el(p).locator('.mehr-punkt[data-id="werkstatt"]').click();
 await p.waitForTimeout(400);

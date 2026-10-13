@@ -878,6 +878,7 @@ p { margin: 4px 0 12px; }
 .punkt-leucht { width: 10px; height: 10px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 12px var(--mint); }
 .nav-oben { display: flex; gap: 4px; margin-left: 12px; flex: 1; }
 .nav-punkt { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px; color: var(--leise); position: relative; }
+.nav-oben .nav-punkt.nur-icon { padding: 8px 10px; }
 .nav-punkt:hover { background: var(--flaeche-hover); color: var(--text); }
 .nav-punkt.aktiv { background: var(--mint-weich); color: var(--mint); }
 .nav-punkt.bald { opacity: .5; }
@@ -896,7 +897,7 @@ p { margin: 4px 0 12px; }
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: rgba(8,12,11,0.88);
   backdrop-filter: blur(16px); border-top: 1px solid var(--rand);
 }
-.nav-unten .nav-punkt { flex-direction: column; gap: 2px; padding: 6px 8px; font-size: 11px; min-width: 60px; }
+.nav-unten .nav-punkt { flex-direction: column; gap: 2px; padding: 6px 4px; font-size: 11px; min-width: 0; flex: 1; }
 .nav-unten .nav-icon { font-size: 20px; }
 .nav-unten small { position: absolute; top: 0; right: 4px; font-size: 8px !important; padding: 0 3px !important; }
 
@@ -1464,7 +1465,7 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .dialog textarea[readonly] { font-size: 13px; }
 .nav-oben { overflow-x: auto; scrollbar-width: none; }
 .nav-oben::-webkit-scrollbar { display: none; }
-@media (max-width: 1240px) { .nav-oben .nav-punkt { padding: 8px 10px; } }
+@media (max-width: 1440px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
 @media (max-width: 1080px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
 .nav-unten .nav-punkt { transition: color .15s, background .15s; border-radius: 14px; }
 .nav-unten .nav-punkt.aktiv .nav-icon { animation: tipp .3s ease; }
@@ -1784,7 +1785,7 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .nav-oben .nav-punkt { white-space: nowrap; flex: none; }
 @media (max-width: 1400px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
 @media (max-width: 1340px) { .kopf .speicher { font-size: 0; } .kopf .speicher::before { font-size: 14px; } }
-@media (max-width: 1180px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
+@media (max-width: 1320px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
 @media (max-width: 1640px) { .kopf-suche kbd { display: none; } }
 @media (max-width: 1520px) { .kopf-suche-text { display: none; } .kopf-suche { width: 38px; padding: 0; justify-content: center; margin-left: 4px; } }
 
@@ -3481,12 +3482,17 @@ const BuchenAnsicht = {
 // Hilfe: P1S-Zeichnung mit Bereichen, Sovol-Trockner, Fehlerbilder, Kalibrierung
 // ---------------------------------------------------------------------------
 
-const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"]];
+const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"], ["kunststoffe", "🧪 Kunststoffe"], ["konstruktion", "📐 Konstruktion"], ["lexikon", "📖 Slicer-Lexikon"], ["platten", "🟫 Druckplatten"], ["codes", "⚠️ Fehlercodes"]];
 // Welche Rollenwerte zu welchem Bereich der Zeichnung gehören
 const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "max_vol"], luefter: ["luefter_min", "luefter_max"],
   riemen: ["v_aussen", "v_innen", "v_fuellung"], bett: ["bett"], spule: ["tr_temp", "tr_dauer"] };
 
 const HilfeAnsicht = {
+  // Neue Hilfe-Reiter (v0.12): Konstruktions-Tipps, Slicer-Lexikon, Druckplatten
+  _hiKonstruktionHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+  _hiLexikonHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+  _hiPlattenHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+
   _hiZustand() {
     if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", rolle: null, kalWert: null };
     return this._hi;
@@ -3494,7 +3500,10 @@ const HilfeAnsicht = {
 
   _hiHtml() {
     const h = this._hiZustand();
-    const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml() : this._hiDruckerHtml();
+    const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml()
+      : h.tab === "kunststoffe" ? this._hiKunststoffeHtml() : h.tab === "codes" ? this._hiCodesHtml()
+      : h.tab === "konstruktion" ? this._hiKonstruktionHtml() : h.tab === "lexikon" ? this._hiLexikonHtml() : h.tab === "platten" ? this._hiPlattenHtml()
+      : this._hiDruckerHtml();
     return `<div class="hi-seite" data-einmal="hi-${h.tab}">
       <div class="chips hi-tabs unter-tabs">${HI_TABS.map(([id, n]) => `<button class="chip ${h.tab === id ? "an" : ""}" data-aktion="hi-tab" data-id="${id}">${n}</button>`).join("")}</div>
       ${inhalt}${h.tab === "fehler" && fehlerbild(h.fehler) ? this._hiFehlerPopupHtml() : ""}</div>`;
@@ -7233,29 +7242,64 @@ const ModellAnsicht = {
     return ["fuellung", "waende", "schicht_h", "schicht"].includes(k);
   },
 };
+
+// ============================================================================
+// Hilfe › Kunststoffe (Materialien und Unterarten) und Fehlercodes des Druckers
+// ============================================================================
+const KunststoffAnsicht = {
+  _hiKunststoffeHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+  _hiCodesHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+};
+
+// ============================================================================
+// Start: die wichtigsten aktuellen Infos auf einen Blick, jede Kachel führt zu den Details
+// ============================================================================
+const StartAnsicht = {
+  _stHtml() { return `<div class="karte"><h2>Übersicht</h2><p class="leise">Kommt gleich.</p></div>`; },
+  _stKlick(a, el) { this._zeichnen(); },
+};
+
+// ============================================================================
+// Shop: Preisrechner, Produkte, Aufträge, Kleinunternehmer-Grenze, Düsenvergleich
+// ============================================================================
+const ShopAnsicht = {
+  _shHtml() { return `<div class="karte"><h2>Shop</h2><p class="leise">Kommt gleich.</p></div>`; },
+  _shKlick(a, el) { this._zeichnen(); },
+};
+
+// ============================================================================
+// Notizbuch: alle Notizen an einem Ort (Rollen, Fehldrucke, Drucke) plus eigene Einträge und Erinnerungen
+// ============================================================================
+const NotizAnsicht = {
+  _nbHtml() { return `<div class="karte"><h2>Notizbuch</h2><p class="leise">Kommt gleich.</p></div>`; },
+  _nbKlick(a, el) { this._zeichnen(); },
+};
 // ---------------------------------------------------------------------------
 // Die Seite selbst: ein Web-Component, das Home Assistant als Panel lädt.
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.11.2";
+const VERSION = "0.12.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
 const DRUCKER_WICHTIG = ["status", "name", "gewicht", "laenge", "duese_ziel", "bett_ziel", "start", "fortschritt", "duese_mm", "duese", "bett"];
 
 const NAVIGATION = [
+  { id: "start", name: "Start", icon: "🏠" },
   { id: "filament", name: "Filament", icon: "🧵" },
   { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️" },
   { id: "modelle", name: "3D-Modelle", kurz: "3D", icon: "🧊" },
   { id: "werkstatt", name: "Werkstatt", icon: "🧰" },
   { id: "hilfe", name: "Hilfe", icon: "💡" },
-  { id: "nerd", name: "Nerd", icon: "🤓" },
-  { id: "system", name: "System", icon: "⚙️" },
+  { id: "shop", name: "Shop", icon: "🛒" },
+  { id: "notiz", name: "Notizbuch", kurz: "Notizen", icon: "📓" },
+  { id: "nerd", name: "Nerd", icon: "🤓", nurIcon: true },
+  { id: "system", name: "System", icon: "⚙️", nurIcon: true },
 ];
 // Handy: diese Bereiche unten, der Rest im „Mehr“-Menü
-const NAV_UNTEN = ["filament", "inventar", "drucker", "modelle"];
+const NAV_UNTEN = ["start", "filament", "inventar", "drucker", "modelle"];
 
 const STATUS = [
   { id: "offen", name: "Nicht probiert" },
@@ -7329,7 +7373,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     } catch (e) { this._stilFest = false; }
     this._daten = null;
     this._fehler = null;
-    this._ansicht = "filament";
+    // Startansicht: Übersicht (Tests können per window.__fwStartAnsicht eine andere wählen)
+    this._ansicht = window.__fwStartAnsicht || "start";
     this._f = { sorte: "", hersteller: "", farbe: "", status: "" };
     this._sort = "material";
     this._suche = "";
@@ -7655,6 +7700,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("hi-")) { this._hiKlick(a, el); return; }
     if (a.startsWith("ws-")) { this._wsKlick(a, el); return; }
     if (a.startsWith("ne-")) { this._neKlick(a, el); return; }
+    if (a.startsWith("st-")) { this._stKlick(a, el); return; }
+    if (a.startsWith("sh-")) { this._shKlick(a, el); return; }
+    if (a.startsWith("nb-")) { this._nbKlick(a, el); return; }
     if (this._exKlick(a, el)) return;
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
@@ -8513,8 +8561,9 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 
   _navHtml(lage) {
-    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}">
-        <span class="nav-icon">${n.icon}</span><span class="nav-name">${lage === "unten" && n.kurz ? n.kurz : n.name}</span></button>`;
+    // Oben ist wenig Platz: Kurznamen, Nerd und System nur als Symbol (Name als Tooltip)
+    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""} ${lage === "oben" && n.nurIcon ? "nur-icon" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}" aria-label="${n.name}">
+        <span class="nav-icon">${n.icon}</span>${lage === "oben" && n.nurIcon ? "" : `<span class="nav-name">${n.kurz || n.name}</span>`}</button>`;
     if (lage === "oben") return `<nav class="nav nav-oben">${NAVIGATION.map(punkt).join("")}</nav>`;
     const mehrAktiv = !NAV_UNTEN.includes(this._ansicht);
     const mehrIcon = mehrAktiv ? (NAVIGATION.find((n) => n.id === this._ansicht) || {}).icon || "☰" : "☰";
@@ -8535,6 +8584,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._ansicht === "hilfe") return this._hiHtml();
     if (this._ansicht === "werkstatt") return this._wsHtml();
     if (this._ansicht === "nerd") return this._neHtml();
+    if (this._ansicht === "start") return this._stHtml();
+    if (this._ansicht === "shop") return this._shHtml();
+    if (this._ansicht === "notiz") return this._nbHtml();
     return this._filamentHtml();
   }
 
@@ -8980,7 +9032,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht, StartAnsicht, ShopAnsicht, NotizAnsicht, KunststoffAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);

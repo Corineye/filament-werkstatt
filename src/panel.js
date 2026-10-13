@@ -3,24 +3,27 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.11.2";
+const VERSION = "0.12.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
 const DRUCKER_WICHTIG = ["status", "name", "gewicht", "laenge", "duese_ziel", "bett_ziel", "start", "fortschritt", "duese_mm", "duese", "bett"];
 
 const NAVIGATION = [
+  { id: "start", name: "Start", icon: "🏠" },
   { id: "filament", name: "Filament", icon: "🧵" },
   { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️" },
   { id: "modelle", name: "3D-Modelle", kurz: "3D", icon: "🧊" },
   { id: "werkstatt", name: "Werkstatt", icon: "🧰" },
   { id: "hilfe", name: "Hilfe", icon: "💡" },
-  { id: "nerd", name: "Nerd", icon: "🤓" },
-  { id: "system", name: "System", icon: "⚙️" },
+  { id: "shop", name: "Shop", icon: "🛒" },
+  { id: "notiz", name: "Notizbuch", kurz: "Notizen", icon: "📓" },
+  { id: "nerd", name: "Nerd", icon: "🤓", nurIcon: true },
+  { id: "system", name: "System", icon: "⚙️", nurIcon: true },
 ];
 // Handy: diese Bereiche unten, der Rest im „Mehr“-Menü
-const NAV_UNTEN = ["filament", "inventar", "drucker", "modelle"];
+const NAV_UNTEN = ["start", "filament", "inventar", "drucker", "modelle"];
 
 const STATUS = [
   { id: "offen", name: "Nicht probiert" },
@@ -94,7 +97,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     } catch (e) { this._stilFest = false; }
     this._daten = null;
     this._fehler = null;
-    this._ansicht = "filament";
+    // Startansicht: Übersicht (Tests können per window.__fwStartAnsicht eine andere wählen)
+    this._ansicht = window.__fwStartAnsicht || "start";
     this._f = { sorte: "", hersteller: "", farbe: "", status: "" };
     this._sort = "material";
     this._suche = "";
@@ -420,6 +424,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("hi-")) { this._hiKlick(a, el); return; }
     if (a.startsWith("ws-")) { this._wsKlick(a, el); return; }
     if (a.startsWith("ne-")) { this._neKlick(a, el); return; }
+    if (a.startsWith("st-")) { this._stKlick(a, el); return; }
+    if (a.startsWith("sh-")) { this._shKlick(a, el); return; }
+    if (a.startsWith("nb-")) { this._nbKlick(a, el); return; }
     if (this._exKlick(a, el)) return;
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
@@ -1278,8 +1285,9 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 
   _navHtml(lage) {
-    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}">
-        <span class="nav-icon">${n.icon}</span><span class="nav-name">${lage === "unten" && n.kurz ? n.kurz : n.name}</span></button>`;
+    // Oben ist wenig Platz: Kurznamen, Nerd und System nur als Symbol (Name als Tooltip)
+    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""} ${lage === "oben" && n.nurIcon ? "nur-icon" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}" aria-label="${n.name}">
+        <span class="nav-icon">${n.icon}</span>${lage === "oben" && n.nurIcon ? "" : `<span class="nav-name">${n.kurz || n.name}</span>`}</button>`;
     if (lage === "oben") return `<nav class="nav nav-oben">${NAVIGATION.map(punkt).join("")}</nav>`;
     const mehrAktiv = !NAV_UNTEN.includes(this._ansicht);
     const mehrIcon = mehrAktiv ? (NAVIGATION.find((n) => n.id === this._ansicht) || {}).icon || "☰" : "☰";
@@ -1300,6 +1308,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._ansicht === "hilfe") return this._hiHtml();
     if (this._ansicht === "werkstatt") return this._wsHtml();
     if (this._ansicht === "nerd") return this._neHtml();
+    if (this._ansicht === "start") return this._stHtml();
+    if (this._ansicht === "shop") return this._shHtml();
+    if (this._ansicht === "notiz") return this._nbHtml();
     return this._filamentHtml();
   }
 
@@ -1745,7 +1756,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht, StartAnsicht, ShopAnsicht, NotizAnsicht, KunststoffAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);

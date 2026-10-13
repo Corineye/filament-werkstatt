@@ -1,6 +1,8 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>html,body{margin:0;background:#000}</style></head><body>
 <script>
+// Tests starten wie bisher in der Filament-Übersicht, außer ?ansicht=… sagt etwas anderes
+window.__fwStartAnsicht = new URLSearchParams(location.search).get("ansicht") || "filament";
 // Nachgebautes Home Assistant: nur das, was die Seite benutzt
 const P = "sensor.p1s_01p00c572701906_";
 const szenario = new URLSearchParams(location.search).get("drucker") || "druckt";
