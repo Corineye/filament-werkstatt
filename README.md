@@ -17,11 +17,15 @@ panel_custom:
     sidebar_title: Filament
     sidebar_icon: mdi:printer-3d-nozzle
     url_path: filament
-    module_url: /hacsfiles/filament-werkstatt/filament-werkstatt.js?v=1
+    module_url: /hacsfiles/filament-werkstatt/filament-werkstatt.js
 ```
 
 5. Home Assistant neu starten.
 
 ## Updates
 
-HACS meldet neue Versionen selbst. Nach dem Update die Zahl hinter `?v=` in der `configuration.yaml` um eins erhöhen und Home Assistant neu starten, damit der Browser die neue Datei lädt.
+HACS meldet neue Versionen selbst. Nach dem Update in HACS einfach die Seite neu laden, mehr ist nicht nötig. Die `configuration.yaml` bleibt unverändert und Home Assistant muss nicht neu gestartet werden.
+
+Ist die Seite beim Update offen, erscheint oben der Hinweis „Version … ist installiert“ mit einem Knopf zum Neuladen.
+
+So funktioniert es: `filament-werkstatt.js` ist nur ein kleiner Lader, der sich nie ändert. Er fragt bei jedem Öffnen `filament-werkstatt-version.js` ab (nie aus dem Zwischenspeicher) und lädt dann `filament-werkstatt-kern.js` mit genau dieser Versionsnummer. Eine neue Version hat damit automatisch eine neue Adresse, und der Browser kann keine alte Fassung mehr anzeigen.
