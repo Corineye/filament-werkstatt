@@ -66,6 +66,23 @@ window.hass = { states, callService: async (domain, dienst, data) => {
   if (m.type === "frontend/set_user_data") { speicher[m.key] = JSON.stringify(m.value); return null; }
   if (m.type === "todo/item/list") return { items: drucke };
   if (m.type === "media_source/resolve_media") { if (m.media_content_id.includes("2026-10-12_21-15")) return { url: "/test/foto.svg" }; throw new Error("nicht gefunden"); }
+  if (m.type === "history/history_during_period") {
+    if (m.entity_ids.length > 1) {
+      // Aufheizvorgänge: Ziel springt hoch, Ist folgt nach 70–110 s (Düse) bzw. 100–160 s (Bett)
+      const r = {}; const t0 = jetzt / 1000 - 3 * 86400;
+      const [ist, ziel, bist, bziel] = m.entity_ids;
+      r[ist] = []; r[ziel] = []; r[bist] = []; r[bziel] = [];
+      for (let k = 0; k < 6; k++) {
+        const t = t0 + k * 36000, d = 70 + k * 8, b = 100 + k * 12;
+        r[ziel].push({ s: "0", lu: t - 100 }, { s: "220", lu: t }, { s: "0", lu: t + 7200 });
+        r[ist].push({ s: "25", lu: t - 100 }, { s: "150", lu: t + d / 2 }, { s: "218", lu: t + d }, { s: "40", lu: t + 7300 });
+        r[bziel].push({ s: "0", lu: t - 100 }, { s: "55", lu: t }, { s: "0", lu: t + 7200 });
+        r[bist].push({ s: "23", lu: t - 100 }, { s: "53", lu: t + b }, { s: "30", lu: t + 7300 });
+      }
+      return r;
+    }
+    const id = m.entity_ids[0]; return { [id]: [{ s: "12.40" }, { s: "12.52" }, { s: "12.61" }] };
+  }
   if (m.type === "media_source/browse_media") return { children: [{title: "Grundriss.png"}] };
   throw new Error("unbekannt " + m.type);
 }};

@@ -6,7 +6,7 @@
 // Oberfläche anders eingefärbt, bis Corin sie übernimmt oder ändert.
 // ---------------------------------------------------------------------------
 
-const DATEN_VERSION = 3;
+const DATEN_VERSION = 4;
 
 // Leergewicht der Spulen in Gramm (Blatt „Tabelle2“)
 // Ändert sich das Gewicht einer Spule, gilt es für alle Rollen, die diese Spule nutzen.
@@ -212,6 +212,32 @@ function standardDaten() {
     materialien_eigen: [],
     arten_eigen: {},
     inventar: standardInventar(),
+    ...werkstattStandard(),
+  };
+}
+
+// Neu in Version 4: Verbuchen, Werkstatt, Wartung, Einstellungen
+const EINSTELLUNGEN_STANDARD = {
+  strompreis: 0.35,      // €/kWh
+  linie_g: 0.3,          // Anfangslinie + Reinigung am Druckstart (je Druck)
+  extruder_g: 0.1,       // 3 Extruder-Fahrten vor dem Druck (je Druck)
+  wechsel_g: 0.15,       // Reststück Schneider → Düse beim Rollenwechsel (alte Rolle)
+  mindest_g: 250,        // Einkaufsliste: unter dieser Menge je Farbe + Material nachkaufen
+  mindest_material_g: 500,
+  korrektur: {},         // Faktor je Material aus dem Abgleich beim Wiegen
+  sicherung_am: null,
+  sicherung_spaeter: null,
+  sicherung_start: null, // erste Erinnerung eine Woche nach dem ersten Start
+};
+function werkstattStandard() {
+  return {
+    einstellungen: { ...JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)), sicherung_start: new Date().toISOString() },
+    drucke: {},
+    letzte_rolle: null,
+    buchen_ab: new Date().toISOString(),   // ältere Drucke nicht nachfragen
+    warteschlange: [],
+    abgleich: [],
+    wartung: { aufgaben: {}, teile: null },
   };
 }
 
@@ -225,6 +251,10 @@ function migrieren(d) {
   if (!d.materialien_eigen) d.materialien_eigen = [];
   if (!d.arten_eigen) d.arten_eigen = {};
   if (!d.drucke) d.drucke = {};   // Kommentare usw. zu Drucken aus dem Verlauf, Schlüssel = Eintrag in „3D-Drucke“
+  const w = werkstattStandard();
+  for (const k of Object.keys(w)) if (d[k] == null) d[k] = w[k];
+  d.einstellungen = { ...EINSTELLUNGEN_STANDARD, ...d.einstellungen };
+  if (!d.einstellungen.sicherung_start) d.einstellungen.sicherung_start = new Date().toISOString();
   d.version = DATEN_VERSION;
   return d;
 }
@@ -391,6 +421,380 @@ function passtZurSuche(t, worte) {
     if (text.includes(w)) return true;
     return w.length >= 4 && woerter.some((x) => x.length >= 4 && abstand(w, x) <= 1);
   });
+}
+// ---------------------------------------------------------------------------
+// Wissen: Fehlerbilder, Kalibrierung, P1S-Zeichnung, Trockner, Wartung.
+// Wird von Hilfe, Fehldruck-Fragen, Werkstatt und Nerd-Menü gemeinsam genutzt.
+// ---------------------------------------------------------------------------
+
+// Kleine Zeichnungen der Fehlerbilder (120 × 80)
+const FB_FARBE = "#3ee6a8", FB_ROT = "#ff6b6b", FB_GRAU = "#2a3330";
+const fbBild = (inhalt) => `<svg viewBox="0 0 120 80" class="fb-bild" aria-hidden="true"><rect x="0" y="70" width="120" height="10" fill="${FB_GRAU}"/>${inhalt}</svg>`;
+const FB_ZEICHNUNG = {
+  haftung: fbBild(`<path d="M30 70 L32 40 L88 36 L92 62 Z" fill="${FB_FARBE}" opacity=".85" transform="rotate(-8 60 60)"/><path d="M20 70 q10 -6 20 0" stroke="${FB_ROT}" stroke-width="2" fill="none"/><text x="96" y="30" fill="${FB_ROT}" font-size="14">↑</text>`),
+  warping: fbBild(`<path d="M22 62 Q22 70 28 70 L92 70 Q98 70 98 62 L98 34 L22 34 Z" fill="${FB_FARBE}" opacity=".85"/><path d="M22 62 Q16 60 14 54 M98 62 Q104 60 106 54" stroke="${FB_ROT}" stroke-width="3" fill="none"/><path d="M14 54 L22 34 M106 54 L98 34" stroke="${FB_FARBE}" stroke-width="2"/>`),
+  spaghetti: fbBild(`<rect x="40" y="50" width="40" height="20" fill="${FB_FARBE}" opacity=".85"/><path d="M45 50 C30 20 70 40 60 15 C55 5 90 25 75 45 C65 60 100 30 95 10 M50 48 C40 30 25 40 30 20" stroke="${FB_FARBE}" stroke-width="1.6" fill="none"/>`),
+  verschiebung: fbBild(`<rect x="30" y="52" width="50" height="18" fill="${FB_FARBE}" opacity=".85"/><rect x="44" y="30" width="50" height="22" fill="${FB_FARBE}" opacity=".85"/><path d="M80 52 L94 52" stroke="${FB_ROT}" stroke-width="2"/><text x="96" y="62" fill="${FB_ROT}" font-size="11">→</text>`),
+  unterextrusion: fbBild(`<rect x="25" y="22" width="70" height="48" fill="none" stroke="${FB_FARBE}" stroke-width="1"/>${[26, 32, 38, 44, 50, 56, 62].map((y, i) => `<path d="M25 ${y} H95" stroke="${FB_FARBE}" stroke-width="3.5" stroke-dasharray="${i % 2 ? "9 5" : "14 4"}"/>`).join("")}`),
+  faeden: fbBild(`<rect x="18" y="26" width="18" height="44" fill="${FB_FARBE}" opacity=".85"/><rect x="84" y="26" width="18" height="44" fill="${FB_FARBE}" opacity=".85"/>${[32, 40, 47, 55].map((y) => `<path d="M36 ${y} Q60 ${y + 8} 84 ${y - 2}" stroke="${FB_FARBE}" stroke-width=".8" fill="none"/>`).join("")}`),
+  feucht: fbBild(`<rect x="25" y="28" width="70" height="42" fill="${FB_FARBE}" opacity=".85"/>${[[35, 40], [55, 36], [72, 48], [45, 58], [82, 34], [64, 62]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2.6" fill="#0b1210"/>`).join("")}<text x="98" y="26" fill="#5cc8ff" font-size="13">💧</text>`),
+  verstopft: fbBild(`<path d="M50 6 h20 v18 l-6 10 h-8 l-6 -10 z" fill="#8da49a"/><circle cx="60" cy="38" r="3" fill="${FB_ROT}"/><path d="M40 70 v-8 h40 v8" fill="${FB_FARBE}" opacity=".85"/><text x="72" y="48" fill="${FB_ROT}" font-size="12">✕</text>`),
+  stuetzen: fbBild(`<rect x="20" y="22" width="80" height="10" fill="${FB_FARBE}" opacity=".85"/><rect x="20" y="32" width="12" height="38" fill="${FB_FARBE}" opacity=".85"/><path d="M60 70 V50 M75 70 V44 M90 70 V56" stroke="#4fe08a" stroke-width="2"/><path d="M58 44 l6 6 M73 38 l6 6" stroke="${FB_ROT}" stroke-width="2"/><path d="M55 32 q10 8 20 0 q10 10 25 2" stroke="${FB_FARBE}" stroke-width="1.5" fill="none"/>`),
+  trennung: fbBild(`<rect x="30" y="54" width="60" height="16" fill="${FB_FARBE}" opacity=".85"/><rect x="30" y="24" width="60" height="26" fill="${FB_FARBE}" opacity=".85"/><path d="M28 52 L40 51 L50 53 L62 50 L74 53 L92 51" stroke="${FB_ROT}" stroke-width="2.2" fill="none"/>`),
+  elefantenfuss: fbBild(`<path d="M34 24 H86 V62 Q92 66 94 70 H26 Q28 66 34 62 Z" fill="${FB_FARBE}" opacity=".85"/><path d="M26 70 Q28 64 34 62 M94 70 Q92 64 86 62" stroke="${FB_ROT}" stroke-width="2.5" fill="none"/>`),
+  pickel: fbBild(`<rect x="25" y="24" width="70" height="46" fill="${FB_FARBE}" opacity=".85"/>${[[40, 34], [70, 30], [55, 50], [82, 58], [34, 60]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="3.2" fill="#b9f5dd"/>`).join("")}`),
+  geisterbild: fbBild(`<rect x="25" y="24" width="70" height="46" fill="${FB_FARBE}" opacity=".85"/><path d="M40 34 v26 M44 34 v26 M48 34 v26" stroke="#0b1210" stroke-width="1.2" opacity=".6"/><text x="56" y="52" fill="#0b1210" font-size="16" font-weight="700">B</text><text x="61" y="52" fill="#0b1210" font-size="16" font-weight="700" opacity=".35">B</text>`),
+  naht: fbBild(`<rect x="30" y="22" width="60" height="48" rx="8" fill="${FB_FARBE}" opacity=".85"/><path d="M62 22 v48" stroke="#b9f5dd" stroke-width="2.5" stroke-dasharray="3 2"/>`),
+};
+
+// Fehlerbilder mit Ursachen und konkreten Änderungen an den Rollenwerten.
+// aenderung: k = Feld aus FELDER, d = Änderung (absolut) oder f = Faktor, min/max = Grenzen
+const FEHLERBILDER = [
+  { id: "haftung", name: "Löst sich vom Bett", kurz: "Teil hat sich gelöst oder verschoben",
+    ursachen: ["Druckbett fettig (Fingerabdrücke)", "Bett zu kalt", "Erste Schicht zu schnell", "Falsche Platte für das Material"],
+    loesungen: [
+      { text: "Platte mit Spülmittel und warmem Wasser waschen, danach nicht mehr anfassen." },
+      { text: "Betttemperatur etwas erhöhen", aenderung: { k: "bett", d: 5, max: 110 } },
+      { text: "Erste Schicht langsamer drucken", aenderung: { k: "v_erste", d: -10, min: 15 } },
+      { text: "Rand (Brim) 5 mm in Bambu Studio einschalten, vor allem bei kleinen Kontaktflächen." },
+    ] },
+  { id: "warping", name: "Ecken heben sich (Verzug)", kurz: "Ecken biegen sich nach oben",
+    ursachen: ["Material schrumpft beim Abkühlen (ASA, ABS, PETG)", "Zugluft oder offene Haube", "Lüfter zu stark"],
+    loesungen: [
+      { text: "Bauteillüfter maximal reduzieren", aenderung: { k: "luefter_max", d: -20, min: 0 } },
+      { text: "Betttemperatur erhöhen", aenderung: { k: "bett", d: 5, max: 110 } },
+      { text: "Haube und Tür geschlossen lassen, Drucker vorher 10 min aufheizen lassen." },
+      { text: "Rand (Brim) oder Mausohren an den Ecken setzen." },
+    ] },
+  { id: "spaghetti", name: "Fadensalat (Spaghetti)", kurz: "Druck hängt in der Luft, Fäden überall",
+    ursachen: ["Teil hat sich gelöst", "Stützen fehlen oder sind umgekippt", "Überhang zu steil"],
+    loesungen: [
+      { text: "Haftung prüfen (siehe „Löst sich vom Bett“)." },
+      { text: "Stützen einschalten, Baum-Stützen für Überhänge über 45°." },
+      { text: "Teil so drehen, dass die größte flache Seite auf dem Bett liegt." },
+    ] },
+  { id: "verschiebung", name: "Schichtverschiebung", kurz: "Obere Schichten sind seitlich versetzt",
+    ursachen: ["Düse ist gegen ein hochgebogenes Teil gestoßen", "Zu schnell oder zu hohe Beschleunigung", "Riemen locker"],
+    loesungen: [
+      { text: "Außen- und Innenwand langsamer", aenderung: { k: "v_innen", f: 0.8, min: 20 } },
+      { text: "Füllung langsamer", aenderung: { k: "v_fuellung", f: 0.8, min: 20 } },
+      { text: "Z-Hop beim Verfahren in Bambu Studio einschalten (Prozess › Andere › Z-Hop)." },
+      { text: "Riemenspannung prüfen (Wartung)." },
+    ] },
+  { id: "unterextrusion", name: "Lücken (zu wenig Material)", kurz: "Wände löchrig, Linien dünn",
+    ursachen: ["Max. Volumenstrom zu hoch für das Material", "Düse teilweise verstopft", "Temperatur zu niedrig", "Rolle hakt"],
+    loesungen: [
+      { text: "Max. Volumenstrom senken", aenderung: { k: "max_vol", d: -2, min: 2 } },
+      { text: "Düsentemperatur etwas erhöhen", aenderung: { k: "duese", d: 5, max: 300 } },
+      { text: "Flow Ratio kalibrieren (Hilfe › Kalibrierung)." },
+      { text: "Prüfen, ob die Rolle frei abrollt und nichts verknotet ist." },
+    ] },
+  { id: "faeden", name: "Fäden (Stringing)", kurz: "Feine Fäden zwischen Teilen",
+    ursachen: ["Filament feucht", "Düse zu heiß", "Rückzug zu kurz"],
+    loesungen: [
+      { text: "Rolle trocknen (Werte siehe Trockner-Hilfe)." },
+      { text: "Düsentemperatur senken", aenderung: { k: "duese", d: -5, min: 170 } },
+      { text: "Rückzug in Bambu Studio um 0,2 mm erhöhen." },
+    ] },
+  { id: "feucht", name: "Blasen, Knacken, raue Oberfläche", kurz: "Knistert beim Drucken, Bläschen",
+    ursachen: ["Filament hat Feuchtigkeit gezogen (PETG, TPU, PA besonders)"],
+    loesungen: [
+      { text: "Rolle trocknen, danach luftdicht mit Trockenmittel lagern." },
+      { text: "Beim Drucken direkt aus dem Trockner ziehen." },
+    ] },
+  { id: "verstopft", name: "Kein Filament kommt", kurz: "Düse verstopft oder Extruder rutscht",
+    ursachen: ["Düse verstopft (Wood-PLA in 0,2 mm, Kohle im Hotend)", "Hitzestau bei PLA in warmer Kammer", "Filament gerissen"],
+    loesungen: [
+      { text: "Kaltzug (Cold Pull) machen oder Düse tauschen." },
+      { text: "Bei PLA Tür oder Haube einen Spalt öffnen (Hitzestau)." },
+      { text: "Düsentemperatur etwas erhöhen", aenderung: { k: "duese", d: 5, max: 300 } },
+    ] },
+  { id: "stuetzen", name: "Stützen versagen", kurz: "Stützen kippen oder lösen sich",
+    ursachen: ["Zu dünne Baumstützen", "Kleine Auflage auf dem Bett"],
+    loesungen: [
+      { text: "„Baum stark“ oder „Normal“ statt „Baum schlank“ wählen." },
+      { text: "Rand für Stützen einschalten (Stützen › Rand)." },
+    ] },
+  { id: "trennung", name: "Schichten trennen sich", kurz: "Teil bricht entlang der Schichten",
+    ursachen: ["Düse zu kalt", "Lüfter zu stark", "Material feucht"],
+    loesungen: [
+      { text: "Düsentemperatur erhöhen", aenderung: { k: "duese", d: 5, max: 300 } },
+      { text: "Bauteillüfter reduzieren", aenderung: { k: "luefter_max", d: -20, min: 0 } },
+      { text: "Bei ASA/ABS Haube geschlossen lassen." },
+    ] },
+  { id: "elefantenfuss", name: "Elefantenfuß", kurz: "Unterste Schichten stehen über",
+    ursachen: ["Bett zu heiß", "Erste Schicht zu dick gequetscht"],
+    loesungen: [
+      { text: "Betttemperatur senken", aenderung: { k: "bett", d: -5, min: 0 } },
+      { text: "„Elefantenfuß-Kompensation“ in Bambu Studio auf 0,15 mm setzen." },
+    ] },
+  { id: "pickel", name: "Pickel und Kleckse", kurz: "Kleine Knubbel auf der Oberfläche",
+    ursachen: ["Zu viel Material (Flow)", "Naht verteilt auf „Zufällig“", "Feuchtes Filament"],
+    loesungen: [
+      { text: "Flow Ratio leicht senken", aenderung: { k: "flow", d: -0.02, min: 0.85 } },
+      { text: "Nahtposition auf „Ausgerichtet“ oder „Hinten“ stellen." },
+    ] },
+  { id: "geisterbild", name: "Wellen hinter Kanten (Ghosting)", kurz: "Echo-Muster nach Ecken",
+    ursachen: ["Schwingungen bei hoher Geschwindigkeit", "Lockere Riemen"],
+    loesungen: [
+      { text: "Außenwand langsamer", aenderung: { k: "v_aussen", f: 0.8, min: 20 } },
+      { text: "Vibrations-Kalibrierung am Drucker neu laufen lassen." },
+    ] },
+  { id: "naht", name: "Sichtbare Naht", kurz: "Senkrechte Linie, wo jede Schicht beginnt",
+    ursachen: ["Druckdruck beim Start und Ende der Wand (K-Faktor)"],
+    loesungen: [
+      { text: "Flussdynamik (K-Faktor) kalibrieren (Hilfe › Kalibrierung)." },
+      { text: "Naht in eine Ecke legen: Nahtposition „Ausgerichtet“." },
+    ] },
+];
+const fehlerbild = (id) => FEHLERBILDER.find((f) => f.id === id);
+
+// Was eine Änderung konkret bedeutet: aktueller Wert → neuer Wert
+function aenderungRechnen(rolle, a) {
+  const alt = wert(rolle, a.k).v;
+  if (alt == null) return null;
+  let neu = a.f != null ? alt * a.f : alt + a.d;
+  if (a.min != null) neu = Math.max(a.min, neu);
+  if (a.max != null) neu = Math.min(a.max, neu);
+  const f = FELDER.find((x) => x.k === a.k);
+  const st = f ? f.step : 1;
+  neu = Math.round(neu / st) * st;
+  if (Math.abs(neu - alt) < 1e-9) return null;
+  return { k: a.k, alt, neu, feld: f };
+}
+
+// Fragenkatalog für Fehldrucke
+const FEHL_FRAGEN = {
+  wann: [
+    { id: "erste", name: "Erste Schicht", hinweis: "Fast immer Haftung: Bett sauber, Temperatur, erste Schicht." },
+    { id: "frueh", name: "Im ersten Drittel", hinweis: "Häufig Haftung oder Verzug, der langsam die Ecken anhebt." },
+    { id: "mitte", name: "Mittendrin", hinweis: "Oft Stützen, Kollision mit hochgebogenen Teilen oder verstopfte Düse." },
+    { id: "spaet", name: "Gegen Ende", hinweis: "Hitzestau, Verzug bei hohen Teilen oder Filament fast leer/feucht." },
+  ],
+  extra: [
+    { id: "getrocknet", frage: "War die Rolle frisch getrocknet?", ja: null, nein: "feucht" },
+    { id: "bett_sauber", frage: "War das Druckbett frisch gereinigt?", ja: null, nein: "haftung" },
+    { id: "haube", frage: "War die Haube/Tür geschlossen?", ja: null, nein: "warping" },
+  ],
+};
+// Aus Fortschritt (%) eine Antwort für „Wann?“ vorschlagen
+const wannAusFortschritt = (p) => (p == null ? null : p < 3 ? "erste" : p < 33 ? "frueh" : p < 80 ? "mitte" : "spaet");
+
+// Kalibrierungen (Bambu Studio › Kalibrierung)
+const KALIBRIERUNGEN = [
+  { id: "temp", name: "Temperaturturm", feld: "duese", icon: "🌡️",
+    wozu: "Findet die beste Düsentemperatur für eine Rolle: sauber, ohne Fäden, mit fester Schichthaftung.",
+    so: ["Bambu Studio › Kalibrierung › Temperatur.", "Material wählen, Bereich vorgeben (z. B. 230 → 190 °C bei PLA).", "Drucken. Jede Stufe hat eine andere Temperatur."],
+    achten: ["Unten heiß, oben kalt: die Stufe mit sauberen Brücken, wenig Fäden und ohne Lücken wählen.", "Turm oben abbrechen: wenn er leicht bricht, ist es zu kalt."],
+    fehler: ["Fäden an den heißen Stufen (zu heiß oder feucht)", "Brücken hängen durch", "Turm bricht bei kalten Stufen"],
+    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="38" y="${70 - i * 13}" width="44" height="12" fill="hsl(${10 + i * 28} 70% 55%)"/><text x="88" y="${79 - i * 13}" font-size="7" fill="#8da49a">${230 - i * 5}°</text>`).join("")}</svg>` },
+  { id: "flow", name: "Flow Rate", feld: "flow", icon: "💧",
+    wozu: "Stimmt, wie viel Material gefördert wird. Zu viel macht Pickel und raue Deckflächen, zu wenig Lücken.",
+    so: ["Bambu Studio › Kalibrierung › Flow-Rate › Durchgang 1.", "Die glatteste Fläche wählen und die Zahl eintragen.", "Optional Durchgang 2 für die Feinabstimmung."],
+    achten: ["Mit dem Finger über die Oberflächen fahren: die glatteste ohne Rillen und ohne Wülste.", "Bei Lücken zwischen den Linien ist der Wert zu klein."],
+    fehler: ["Deckfläche mit Rillen (zu wenig)", "Wülste und Pickel (zu viel)", "Flächen unterscheiden sich kaum: Material feucht oder Temperatur falsch"],
+    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => `<rect x="${8 + (i % 3) * 36}" y="${10 + Math.floor(i / 3) * 24}" width="30" height="20" rx="3" fill="#3ee6a8" opacity="${i === 4 ? 1 : 0.45}"/>`).join("")}</svg>` },
+  { id: "k", name: "Flussdynamik (K-Faktor)", feld: "k", icon: "📈",
+    wozu: "Gleicht den Druck in der Düse beim Beschleunigen und Bremsen aus. Saubere Ecken, gleichmäßige Wände, weniger Naht.",
+    so: ["Bambu Studio › Kalibrierung › Flussdynamik › Manuell (Linien-Methode).", "Die Linie mit der gleichmäßigsten Breite wählen.", "Den K-Wert eintragen und in Bambu Studio als PA-Profil speichern."],
+    achten: ["Gerade, gleich breite Linie ohne dicken Anfang und dünnes Ende.", "Bei 0,2-mm-Düse und TPU ist der Wert anders, eigenes Profil anlegen."],
+    fehler: ["Dicke Ecken und Wulst an der Naht (K zu klein)", "Lücken nach Ecken (K zu groß)"],
+    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5].map((i) => `<path d="M10 ${12 + i * 12} H40 L${40 + 4} ${12 + i * 12} H110" stroke="#3ee6a8" stroke-width="${i === 3 ? 3 : 2 + Math.abs(i - 3) * 0.6}" opacity="${i === 3 ? 1 : 0.5}" stroke-dasharray="${i < 3 ? "30 2 80 0" : "30 4 80 0"}"/>`).join("")}</svg>` },
+  { id: "maxvol", name: "Max. Volumenstrom", feld: "max_vol", icon: "🚀",
+    wozu: "Wie viel mm³/s die Düse schmelzen kann, bevor Lücken entstehen. Begrenzt das Tempo, damit der Druck nicht unterextrudiert.",
+    so: ["Bambu Studio › Kalibrierung › Max. Volumenstrom.", "Turm drucken, die Höhe ablesen, ab der die Wand Lücken bekommt.", "Höhe × Schritt + Start ergibt den Wert, davon 10–20 % abziehen."],
+    achten: ["Die Stelle, an der die Oberfläche matt und löchrig wird.", "Lieber etwas vorsichtiger eintragen."],
+    fehler: ["Ganzer Turm löchrig: Temperatur zu niedrig", "Kein Wechsel sichtbar: Bereich zu klein gewählt"],
+    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/><path d="M40 82 L50 10 L70 10 L80 82 Z" fill="#3ee6a8" opacity=".85"/><path d="M48 30 H72" stroke="#ff6b6b" stroke-width="2" stroke-dasharray="3 2"/><text x="78" y="32" font-size="8" fill="#ff6b6b">Lücken ab hier</text></svg>` },
+];
+
+// ---- Bambu Lab P1S: Bereiche der Zeichnung ----
+// x/y = Punkt in der Zeichnung (viewBox 420 × 440), live = Wert aus Home Assistant
+const P1S_BEREICHE = [
+  { id: "duese", n: 1, x: 214, y: 196, name: "Düse und Hotend", live: "duese", einheit: "°C",
+    text: "Hier wird das Filament geschmolzen. Die Temperatur entscheidet über Haftung der Schichten, Glanz und Fäden.",
+    einst: [["Düse erste Schicht / weitere", "Etwas heißer in der ersten Schicht verbessert die Haftung."], ["Düsendurchmesser", "0,2 fein und langsam, 0,4 Standard, 0,6 schnell und stabil."], ["Flow Ratio", "Wie viel Material genau gefördert wird."]] },
+  { id: "extruder", n: 2, x: 214, y: 140, name: "Extruder", live: null,
+    text: "Zahnräder schieben das Filament in die Düse. Von hier kommen Rückzug, Flussdynamik und das Förderlimit.",
+    einst: [["Rückzug (Retraction)", "Zieht das Filament beim Verfahren zurück, gegen Fäden."], ["K-Faktor", "Gleicht den Druck beim Beschleunigen aus."], ["Max. Volumenstrom", "Obergrenze für mm³/s, sonst Lücken."]] },
+  { id: "luefter", n: 3, x: 246, y: 178, name: "Bauteillüfter", live: "l_bauteil", einheit: "%",
+    text: "Kühlt die frische Schicht. Viel Luft für PLA und Überhänge, wenig für ASA/ABS/PETG.",
+    einst: [["Lüfter min. / max.", "Bereich, in dem der Lüfter je nach Schichtzeit läuft."], ["Überhang-Lüfter", "Volle Kühlung an Überhängen und Brücken."]] },
+  { id: "riemen", n: 4, x: 110, y: 88, name: "Riemen und Kohlestangen (X/Y)", live: "tempo",
+    text: "Bewegen den Druckkopf. Geschwindigkeit und Beschleunigung wirken hier, zu viel davon macht Wellen hinter Kanten.",
+    einst: [["Geschwindigkeiten", "Außenwand langsamer für schöne Oberflächen, Füllung schnell."], ["Beschleunigung", "Höher = schneller, aber mehr Schwingungen."], ["Geschwindigkeitsprofil am Drucker", "Leise, Standard, Sport, Wahnsinn."]] },
+  { id: "bett", n: 5, x: 210, y: 300, name: "Druckbett", live: "bett", einheit: "°C",
+    text: "Heizbett mit wechselbarer Platte. Platte und Temperatur entscheiden über Haftung und Elefantenfuß.",
+    einst: [["Druckbetttyp", "Textured PEI für fast alles, Cool Plate für PLA, Engineering für Kleber."], ["Betttemperatur", "PLA 55 °C, PETG 70 °C, ASA 100 °C."], ["Erste Schicht", "Höhe und Tempo der ersten Schicht."]] },
+  { id: "z", n: 6, x: 76, y: 262, name: "Z-Achse (Spindeln)", live: null,
+    text: "Senkt das Bett Schicht für Schicht ab. Hier wirken Schichthöhe und Z-Hop.",
+    einst: [["Schichthöhe", "0,2 mm Standard, 0,12 fein, 0,28 schnell (bei 0,4-mm-Düse)."], ["Z-Hop", "Hebt beim Verfahren an, verhindert Anstoßen."]] },
+  { id: "aux", n: 7, x: 36, y: 190, name: "Hilfslüfter (seitlich)", live: null,
+    text: "Großer Lüfter an der Seite für zusätzliche Kühlung. Gut für PLA bei hohem Tempo, bei ASA/ABS aus.",
+    einst: [["Hilfslüfter", "In Bambu Studio unter Filament › Kühlung."]] },
+  { id: "kammer", n: 8, x: 372, y: 64, name: "Druckraumlüfter", live: "l_raum", einheit: "%",
+    text: "Saugt warme Luft ab. Bei PLA gegen Hitzestau, bei ASA/ABS gering halten, damit es warm bleibt.",
+    einst: [["Kammerlüfter", "Filament › Kühlung › Druckraumlüfter."]] },
+  { id: "spule", n: 9, x: 402, y: 210, name: "Spulenhalter und PTFE", live: "filament",
+    text: "Die Rolle hängt hinten. Ohne AMS läuft das Filament durch den PTFE-Schlauch zum Druckkopf.",
+    einst: [["Trocknen", "Feuchtes Filament macht Fäden und Blasen."], ["Abrollen", "Rolle muss frei laufen, sonst Lücken."]] },
+  { id: "kamera", n: 10, x: 58, y: 54, name: "Kamera", live: null,
+    text: "Zeigt den Druck live und macht das Endfoto. Die Fehlererkennung (Spaghetti) läuft darüber.",
+    einst: [["Druckfehlererkennung", "Am Drucker unter Einstellungen einschalten."]] },
+  { id: "display", n: 11, x: 110, y: 404, name: "Display", live: "schritt",
+    text: "Bedienung am Gerät: Filament laden, Extruder fahren, Geschwindigkeitsprofil, Kalibrierung.",
+    einst: [["Extruder fahren", "Vor dem Druck 3× fördern (wird beim Verbuchen eingerechnet)."]] },
+  { id: "schneider", n: 12, x: 180, y: 158, name: "Filament-Schneider", live: null,
+    text: "Schneidet beim Entladen das Filament ab. Das Reststück bis zur Düse wird beim Rollenwechsel der alten Rolle abgezogen.",
+    einst: [["Reststück", "Etwa 4–5 cm, rund 0,15 g."]] },
+];
+
+function p1sSvg(aktiv) {
+  const linie = 'stroke="#5d726a" stroke-width="1.4" fill="none"';
+  return `<svg viewBox="0 0 420 440" class="p1s-bild" role="img" aria-label="Zeichnung Bambu Lab P1S">
+    <defs><pattern id="p1s-raster" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M10 0 H0 V10" stroke="rgba(62,230,168,.06)" fill="none"/></pattern></defs>
+    <rect x="0" y="0" width="420" height="440" fill="url(#p1s-raster)"/>
+    <!-- Gehäuse -->
+    <rect x="20" y="24" width="370" height="400" rx="14" ${linie}/>
+    <rect x="34" y="40" width="342" height="330" rx="6" stroke="#3ee6a8" stroke-opacity=".35" stroke-width="1" fill="rgba(62,230,168,.03)"/>
+    <path d="M34 40 L376 40" stroke="#5d726a" stroke-width="3"/>
+    <!-- Kammerlüfter hinten oben -->
+    <circle cx="372" cy="64" r="12" ${linie}/><path d="M372 52 V76 M360 64 H384" stroke="#5d726a"/>
+    <!-- Kamera -->
+    <rect x="48" y="48" width="20" height="12" rx="3" ${linie}/><circle cx="58" cy="54" r="3" fill="#5d726a"/>
+    <!-- Kohlestangen + Riemen -->
+    <path d="M44 88 H366" stroke="#8da49a" stroke-width="3"/><path d="M44 96 H366" stroke="#5d726a" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <path d="M44 88 V120 M366 88 V120" ${linie}/>
+    <!-- Druckkopf -->
+    <rect x="178" y="98" width="72" height="84" rx="8" fill="rgba(141,164,154,.10)" stroke="#8da49a" stroke-width="1.6"/>
+    <rect x="190" y="110" width="48" height="36" rx="4" ${linie}/><circle cx="214" cy="128" r="10" ${linie}/>
+    <circle cx="246" cy="164" r="11" ${linie}/><path d="M238 164 H254 M246 156 V172" stroke="#5d726a"/>
+    <path d="M178 150 L170 158 L182 162" ${linie}/>
+    <path d="M206 182 L222 182 L218 194 L210 194 Z" fill="#8da49a"/><path d="M212 194 L216 194 L214 200 Z" fill="#ffb547"/>
+    <!-- PTFE zur Spule -->
+    <path d="M214 98 C214 60 330 50 380 130 C392 150 396 180 400 196" stroke="#ffb547" stroke-opacity=".7" stroke-width="2" fill="none" stroke-dasharray="5 3"/>
+    <!-- Spule hinten -->
+    <circle cx="402" cy="210" r="14" stroke="#ffb547" stroke-width="2" fill="rgba(255,181,71,.12)"/><circle cx="402" cy="210" r="4" fill="#ffb547"/>
+    <!-- Hilfslüfter seitlich -->
+    <rect x="22" y="160" width="14" height="60" rx="3" ${linie}/><path d="M24 170 H34 M24 180 H34 M24 190 H34 M24 200 H34 M24 210 H34" stroke="#5d726a"/>
+    <!-- Z-Spindeln -->
+    <path d="M76 120 V360 M344 120 V360" stroke="#8da49a" stroke-width="2.5" stroke-dasharray="2 3"/>
+    <!-- Druckbett -->
+    <path d="M70 286 L350 286 L362 306 L58 306 Z" fill="rgba(62,230,168,.10)" stroke="#3ee6a8" stroke-width="1.6"/>
+    <rect x="58" y="306" width="304" height="8" fill="rgba(62,230,168,.25)"/>
+    <!-- kleines Druckteil -->
+    <rect x="196" y="268" width="36" height="22" rx="2" fill="#3ee6a8" opacity=".7"/>
+    <!-- Display + Tür -->
+    <rect x="70" y="390" width="80" height="26" rx="4" stroke="#8da49a" stroke-width="1.4" fill="rgba(62,230,168,.06)"/>
+    <path d="M78 403 H110" stroke="#3ee6a8" stroke-width="2"/>
+    <path d="M34 370 H376" ${linie}/>
+    ${P1S_BEREICHE.map((b) => `<g class="p1s-punkt ${aktiv === b.id ? "an" : ""}" data-aktion="hi-p1s" data-id="${b.id}" tabindex="0">
+      <circle cx="${b.x}" cy="${b.y}" r="16" class="p1s-flaeche"/>
+      <circle cx="${b.x}" cy="${b.y}" r="10" class="p1s-ring"/><text x="${b.x}" y="${b.y + 3.5}" text-anchor="middle">${b.n}</text></g>`).join("")}
+  </svg>`;
+}
+
+// ---- Sovol-Trockner: Bereiche des Displays ----
+const TROCKNER_BEREICHE = [
+  { id: "material", name: "Material", x: 92, y: 236, text: "Voreinstellung für das Material. Setzt Temperatur und Zeit. Für eigene Werte „Custom“ wählen und anpassen." },
+  { id: "feuchte", name: "Luftfeuchte", x: 162, y: 236, text: "Relative Feuchte im Trockner. Ziel: unter 15 % für PLA/PETG, unter 10 % für ASA, TPU, PA. Sinkt sie nicht mehr, ist die Rolle trocken." },
+  { id: "soll", name: "Soll-Temperatur", x: 232, y: 236, text: "Die eingestellte Temperatur. Nie über die Erweichungstemperatur, sonst verkleben die Windungen (PLA max. 55 °C)." },
+  { id: "ist", name: "Ist-Temperatur", x: 296, y: 236, text: "Aktuelle Temperatur im Inneren. Sie erreicht den Sollwert nach etwa 20–30 Minuten, die Zeit zählt aber sofort." },
+  { id: "zeit", name: "Restzeit", x: 360, y: 236, text: "Verbleibende Trocknungszeit. Danach Rolle warm luftdicht einpacken oder direkt aus dem Trockner drucken." },
+  { id: "spulen", name: "Zwei Spulenplätze", x: 200, y: 110, text: "Zwei Rollen gleichzeitig. Nur Materialien mit ähnlicher Temperatur zusammen trocknen, sonst nach dem empfindlicheren richten." },
+  { id: "auslass", name: "Filament-Auslass", x: 386, y: 96, text: "Durch die Öffnung kann direkt aus dem Trockner gedruckt werden. Gut für TPU und PETG bei langen Drucken." },
+];
+function trocknerSvg(aktiv) {
+  const l = 'stroke="#8da49a" stroke-width="1.5" fill="none"';
+  const spule = (cx) => `<circle cx="${cx}" cy="110" r="54" stroke="#ffb547" stroke-width="2" fill="rgba(255,181,71,.08)"/>
+    <circle cx="${cx}" cy="110" r="40" stroke="#ffb547" stroke-opacity=".5" fill="none"/><circle cx="${cx}" cy="110" r="10" fill="#ffb547" opacity=".6"/>`;
+  return `<svg viewBox="0 0 440 290" class="trockner-bild" role="img" aria-label="Zeichnung Sovol Filament-Trockner">
+    <rect x="20" y="20" width="400" height="250" rx="22" ${l}/>
+    <rect x="34" y="32" width="372" height="160" rx="14" stroke="#5cc8ff" stroke-opacity=".4" stroke-width="1.4" fill="rgba(92,200,255,.05)"/>
+    ${spule(130)}${spule(310)}
+    <path d="M386 84 h20" stroke="#ffb547" stroke-width="2"/><circle cx="406" cy="84" r="4" fill="none" stroke="#8da49a"/>
+    <rect x="60" y="206" width="330" height="54" rx="10" fill="rgba(0,0,0,.35)" stroke="#3ee6a8" stroke-opacity=".5"/>
+    <text x="92" y="228" class="tr-wert" text-anchor="middle">PETG</text>
+    <text x="162" y="228" class="tr-wert" text-anchor="middle">12 %</text>
+    <text x="232" y="228" class="tr-wert" text-anchor="middle">65°</text>
+    <text x="296" y="228" class="tr-wert" text-anchor="middle">63°</text>
+    <text x="360" y="228" class="tr-wert" text-anchor="middle">05:40</text>
+    ${TROCKNER_BEREICHE.map((b) => `<g class="p1s-punkt ${aktiv === b.id ? "an" : ""}" data-aktion="hi-tr" data-id="${b.id}" tabindex="0">
+      <rect x="${b.x - 30}" y="${b.y - (b.id === "spulen" ? 60 : 12)}" width="60" height="${b.id === "spulen" ? 120 : 24}" rx="8" class="p1s-flaeche"/>
+      <circle cx="${b.x}" cy="${b.y + (b.id === "spulen" ? 70 : 14)}" r="9" class="p1s-ring"/><text x="${b.x}" y="${b.y + (b.id === "spulen" ? 73.5 : 17.5)}" text-anchor="middle">${TROCKNER_BEREICHE.indexOf(b) + 1}</text></g>`).join("")}
+  </svg>`;
+}
+
+// Trocknen je Material (Richtwerte, Sovol max. 70 °C)
+const TROCKNEN_TABELLE = [
+  { m: "PLA", temp: 50, h: 6, ziel: 15, zeichen: "Fäden, matte Stellen, spröde Rolle", lagern: "Beutel mit Trockenmittel reicht meist." },
+  { m: "PLA Silk / Matte", temp: 50, h: 6, ziel: 15, zeichen: "Glanz geht verloren, Fäden", lagern: "Wie PLA." },
+  { m: "Wood-PLA", temp: 45, h: 6, ziel: 15, zeichen: "Verstopfte Düse, raue Oberfläche", lagern: "Trocken lagern, nicht mit 0,2-mm-Düse." },
+  { m: "PETG", temp: 65, h: 6, ziel: 15, zeichen: "Knistern, Blasen, viele Fäden", lagern: "Zieht schnell Wasser, luftdicht lagern." },
+  { m: "ASA", temp: 70, h: 6, ziel: 10, zeichen: "Blasen, schwache Schichthaftung", lagern: "Luftdicht mit Trockenmittel." },
+  { m: "ABS", temp: 70, h: 4, ziel: 10, zeichen: "Blasen, raue Oberfläche", lagern: "Luftdicht mit Trockenmittel." },
+  { m: "TPU", temp: 55, h: 8, ziel: 10, zeichen: "Starkes Knistern, Fäden ohne Ende", lagern: "Direkt aus dem Trockner drucken." },
+  { m: "PC", temp: 70, h: 8, ziel: 10, zeichen: "Blasen, trübe Oberfläche", lagern: "Am besten im Trockner lassen." },
+  { m: "PA / Nylon", temp: 70, h: 12, ziel: 10, zeichen: "Knistern, weiche Teile", lagern: "Nur aus dem Trockner drucken." },
+];
+
+// ---- Wartung (Stunden aus der „Gesamtnutzung“ des Druckers) ----
+const WARTUNG_AUFGABEN = [
+  { id: "platte", name: "Druckplatte reinigen", alle_h: 10, alle_tage: 7, text: "Spülmittel und warmes Wasser, abtrocknen, nicht mehr anfassen." },
+  { id: "stangen", name: "Kohlestangen reinigen", alle_h: 100, alle_tage: 30, text: "Mit trockenem Tuch oder etwas Isopropanol abwischen. Nicht ölen." },
+  { id: "duese", name: "Düse und Silikonsocke prüfen", alle_h: 200, alle_tage: 60, text: "Verkrustungen entfernen, Socke auf Risse prüfen." },
+  { id: "luefter", name: "Lüfter von Staub befreien", alle_h: 300, alle_tage: 90, text: "Hotend-, Bauteil- und Kammerlüfter mit Pinsel oder Druckluft." },
+  { id: "spindeln", name: "Z-Spindeln schmieren", alle_h: 300, alle_tage: 90, text: "Alte Schmiere abwischen, dünn neues Fett (Bambu-Schmierfett) auftragen." },
+  { id: "riemen", name: "Riemenspannung prüfen", alle_h: 300, alle_tage: 90, text: "Am Drucker: Einstellungen › Riemenspannung, danach Vibrations-Kalibrierung." },
+  { id: "ptfe", name: "PTFE-Schlauch und Schneider prüfen", alle_h: 500, alle_tage: 180, text: "Schlauch auf Knicke und Abrieb, Schneider auf stumpfe Klinge prüfen." },
+  { id: "filter", name: "Aktivkohlefilter tauschen", alle_h: 500, alle_tage: 180, text: "Vor allem, wenn du oft ASA/ABS druckst." },
+  { id: "kalibrieren", name: "Komplette Kalibrierung", alle_h: 500, alle_tage: 180, text: "Bett-Nivellierung, Vibration und Motoren am Drucker neu kalibrieren." },
+];
+// Verschleißteile mit Richtwert für die Lebensdauer in Druckstunden
+const ERSATZTEILE_STANDARD = [
+  { id: "duese04", name: "Düse 0,4 mm gehärtet", lebensdauer_h: 2000, eingebaut_h: 0 },
+  { id: "platte", name: "Textured PEI Plate", lebensdauer_h: 1500, eingebaut_h: 0 },
+  { id: "socke", name: "Silikonsocke Hotend", lebensdauer_h: 500, eingebaut_h: 0 },
+  { id: "ptfe", name: "PTFE-Schlauch", lebensdauer_h: 1000, eingebaut_h: 0 },
+  { id: "filter", name: "Aktivkohlefilter", lebensdauer_h: 500, eingebaut_h: 0 },
+  { id: "riemen", name: "Riemen X/Y", lebensdauer_h: 3000, eingebaut_h: 0 },
+];
+
+// ---- Unscharfe Suche ----
+function normText(s) {
+  return String(s || "").toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss").replace(/[^a-z0-9,.]+/g, " ").trim();
+}
+function wortAbstand(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 9;
+  const z = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let vor = z[0]; z[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const t = z[j];
+      z[j] = Math.min(z[j] + 1, z[j - 1] + 1, vor + (a[i - 1] === b[j - 1] ? 0 : 1));
+      vor = t;
+    }
+  }
+  return z[b.length];
+}
+// Punktzahl: 0 = passt nicht. Jedes Suchwort muss passen (genau, Anfang, enthalten oder vertippt)
+function suchPunkte(anfrage, text) {
+  const woerter = normText(anfrage).split(" ").filter(Boolean);
+  if (!woerter.length) return 0;
+  const t = normText(text), teile = t.split(" ");
+  let summe = 0;
+  for (const w of woerter) {
+    let best = 0;
+    if (t.includes(w)) best = 3;
+    for (const x of teile) {
+      if (x === w) best = Math.max(best, 4);
+      else if (x.startsWith(w)) best = Math.max(best, 3.5);
+      else if (w.length >= 4 && wortAbstand(w, x.slice(0, w.length + 1)) <= (w.length >= 7 ? 2 : 1)) best = Math.max(best, 1.5);
+    }
+    if (!best) return 0;
+    summe += best;
+  }
+  return summe;
 }
 // ---------------------------------------------------------------------------
 // Aussehen: dunkler Tech-Look, Mint-Akzente, Glas-Karten, Rasterhintergrund
@@ -843,6 +1247,378 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .rot-hinweis { color: #ffc2c2; background: rgba(255,107,107,.12); border-color: rgba(255,107,107,.4); }
 .mobil .dr-werte { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .mobil .dr-luefter { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* 3D-Modelle */
+.mod-raster { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; height: 100%; min-height: 480px; }
+.mobil .mod-raster { grid-template-columns: 1fr; height: auto; min-height: 0; gap: 12px; }
+.mod-buehne-karte { position: relative; display: flex; flex-direction: column; padding: 0; overflow: hidden; min-height: 0;
+  background: radial-gradient(600px 400px at 50% 0%, rgba(62,230,168,.07), transparent 70%), rgba(0,0,0,.25); }
+.mod-buehne { position: relative; flex: 1; min-height: 0; }
+.mobil .mod-buehne { flex: none; height: 52vh; height: 52dvh; }
+.buehne-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; outline: none; }
+.buehne-canvas:active { cursor: grabbing; }
+.mod-marker { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.mod-pin { position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; pointer-events: auto; font-size: 12px; font-weight: 700;
+  background: rgba(8,12,11,.85); color: var(--amber); border: 2px solid var(--amber); box-shadow: 0 2px 10px rgba(0,0,0,.5); transition: background .15s; }
+.mod-pin::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 16px; margin: 2px 0 0 -1px; background: var(--amber); opacity: .8; border-radius: 1px; }
+.mod-pin::before { content: ""; position: absolute; left: 50%; top: calc(100% + 16px); width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--amber); }
+.mod-pin.drin::after, .mod-pin.drin::before { background: var(--mint); }
+.mod-pin:hover, .mod-pin.an { background: var(--amber); color: #2a1a00; }
+.mod-pin.drin { color: var(--mint); border-color: var(--mint); }
+.mod-pin.drin.an { background: var(--mint); color: #062018; }
+.mod-leiste { position: absolute; left: 12px; right: 12px; top: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; pointer-events: none; }
+.mod-leiste > * { pointer-events: auto; }
+.mod-leiste .chip { background: rgba(8,12,11,.75); backdrop-filter: blur(8px); padding: 6px 12px; font-size: 12px; }
+.mod-name { margin-right: auto; font-weight: 600; font-size: 14px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 12px; border-radius: 999px; background: rgba(8,12,11,.75); border: 1px solid var(--rand); }
+.mobil .mod-name { max-width: 100%; flex-basis: 100%; margin-right: 0; padding-right: 44px; }
+.mod-zu { width: 32px; padding: 6px 0 !important; text-align: center; }
+.mobil .mod-zu { position: absolute; right: 34px; top: 0; }
+.mobil .mod-leiste { padding-right: 0; }
+.mod-schicht-leiste { position: absolute; left: 12px; right: 12px; bottom: 36px; display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 14px; background: rgba(8,12,11,.8); border: 1px solid var(--rand); backdrop-filter: blur(8px); flex-wrap: wrap; }
+.mod-schicht-leiste input { flex: 1; min-width: 120px; }
+.mod-schicht-text { font-size: 13px; color: var(--leise); min-width: 160px; text-align: right; font-variant-numeric: tabular-nums; }
+.mobil .mod-schicht-text { flex-basis: 100%; text-align: center; min-width: 0; }
+.mod-hilfe { position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 8px 12px; font-size: 12px; text-align: center; pointer-events: none; }
+.mod-seite { display: flex; flex-direction: column; padding: 0; min-height: 0; overflow: hidden; }
+.mod-tabs { padding: 4px 12px 0; flex: none; }
+.mod-inhalt { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 18px 90px; }
+.mobil .mod-inhalt { overflow: visible; padding-bottom: 18px; }
+.mod-inhalt h3:first-child { margin-top: 0; }
+.mod-masse { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.mod-masse > div { display: grid; gap: 0; padding: 10px; border-radius: 12px; background: rgba(0,0,0,.22); border: 1px solid var(--rand); }
+.mod-masse span { font-size: 11px; color: var(--leise); font-weight: 700; }
+.mod-masse strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.mod-masse small { font-size: 11px; color: var(--leise); }
+.mod-masse .rot { border-color: rgba(255,107,107,.5); background: rgba(255,107,107,.1); }
+.mod-masse .rot strong { color: var(--rot); }
+.mod-dreh { margin: 8px 0 4px; }
+.breit-auswahl { width: 100%; margin: 4px 0 8px; }
+.mod-regler { margin: 12px 0; }
+.mod-regler .r-kopf strong { font-size: 16px; }
+.mod-regler input { width: 100%; }
+.ergebnis.fehlt { border-color: rgba(255,107,107,.45); background: rgba(255,107,107,.1); }
+.ergebnis.fehlt strong { color: var(--rot); }
+.mod-loecher { display: grid; gap: 8px; margin: 12px 0; }
+.mod-loch { border-radius: 14px; background: rgba(0,0,0,.18); border: 1px solid var(--rand); overflow: hidden; }
+.mod-loch.auf { border-color: rgba(255,181,71,.5); }
+.mod-loch.drin { border-color: rgba(62,230,168,.4); }
+.mod-loch-kopf { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; padding: 10px; }
+.mod-loch-kopf:hover { background: var(--flaeche-hover); }
+.mod-nr { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; border: 2px solid var(--amber); color: var(--amber); }
+.mod-loch.drin .mod-nr { border-color: var(--mint); color: var(--mint); }
+.mod-vorschlaege { display: grid; gap: 6px; padding: 0 10px 10px; }
+.mod-vorschlag { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); }
+.mod-vorschlag.an { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.mod-vorschlag .mini { margin-left: 0; }
+.mod-v-bild { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 10px; background: rgba(0,0,0,.3); overflow: hidden; }
+.mod-v-bild svg { width: 100%; height: 100%; }
+.mod-legende { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 12px 0; font-size: 12px; color: var(--leise); }
+.mod-legende span { display: inline-flex; align-items: center; gap: 6px; }
+.mod-legende i { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
+.mod-laden { display: flex; gap: 16px; align-items: center; max-width: 520px; margin: 40px auto; }
+.mod-laden-klein { display: flex; gap: 8px; align-items: center; color: var(--leise); font-size: 13px; margin: 12px 0; }
+.mod-leer { display: grid; gap: 16px; max-width: 720px; margin: 0 auto; }
+.ablage { display: grid; justify-items: center; gap: 6px; text-align: center; padding: 56px 24px; border-radius: 22px; cursor: pointer;
+  border: 2px dashed rgba(62,230,168,.35); background: radial-gradient(400px 200px at 50% 0%, rgba(62,230,168,.10), transparent 70%), var(--flaeche); transition: border-color .2s, background .2s; }
+.ablage:hover, .app.ziehen .ablage { border-color: var(--mint); background: var(--mint-weich); }
+.ablage strong { font-size: 18px; }
+.ablage-icon { font-size: 44px; line-height: 1; margin-bottom: 6px; }
+.klein-ablage { padding: 30px 16px; margin: 14px 0; }
+.klein-ablage .ablage-icon { font-size: 30px; color: var(--mint); }
+.app.ziehen::after { content: "Datei loslassen zum Öffnen"; position: absolute; inset: 12px; z-index: 40; display: grid; place-items: center; border-radius: 22px;
+  border: 2px dashed var(--mint); background: rgba(8,12,11,.8); color: var(--mint); font-size: 20px; font-weight: 600; pointer-events: none; }
+.mod-zuletzt { padding: 0 6px 0 0; }
+.mod-zuletzt-knopf { flex: 1; min-width: 0; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; }
+.mod-huelle { position: relative; display: flex; min-height: 0; }
+.mod-huelle > .mod-buehne-karte { flex: 1; }
+.mod-plus { position: absolute; z-index: 3; top: -14px; right: -14px; width: 52px; height: 52px; border-radius: 50%; background: var(--mint); color: #062018;
+  font-size: 30px; line-height: 1; display: grid; place-items: center; border: 4px solid var(--grund);
+  box-shadow: 0 0 0 4px rgba(62,230,168,.15), 0 8px 24px rgba(62,230,168,.35); transition: transform .2s cubic-bezier(.2,.9,.3,1.3); }
+.mod-plus:hover { transform: scale(1.08) rotate(90deg); }
+.mod-plus:active { transform: scale(.94); }
+.mobil .mod-plus { top: -12px; right: -8px; width: 48px; height: 48px; }
+.mod-leiste { padding-right: 34px; }
+.mod-markier-hinweis { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 2; display: flex; gap: 10px; align-items: center; white-space: nowrap;
+  padding: 8px 8px 8px 14px; border-radius: 999px; background: rgba(255,181,71,.16); border: 1px solid rgba(255,181,71,.5); color: #ffd59a; font-size: 13px; backdrop-filter: blur(8px); animation: hinweis-rein .25s ease; }
+@keyframes hinweis-rein { from { opacity: 0; transform: translate(-50%, -8px); } }
+.mod-markier-hinweis .mini { margin: 0; }
+.mobil .mod-markier-hinweis { top: 104px; white-space: normal; width: calc(100% - 24px); }
+.mod-markier.an { border-color: rgba(255,181,71,.5); color: var(--amber); }
+.mod-manuell { padding: 0 10px 6px; }
+.mod-manuell .chips { align-items: center; margin-bottom: 6px; }
+.mod-loch-kopf .dr-druck-text strong { white-space: normal; }
+.breit-dialog { width: min(560px, calc(100% - 32px)); }
+.stuetz-liste { display: grid; gap: 10px; margin: 14px 0; }
+.stuetz-eintrag { display: flex; gap: 14px; align-items: center; padding: 10px; border-radius: 14px; background: var(--flaeche); border: 1px solid var(--rand); }
+.stuetz-eintrag p { margin: 2px 0 0; }
+.stuetz-bild { width: 110px; height: 69px; flex: none; border-radius: 10px; background: rgba(0,0,0,.3); }
+/* Verbuchen */
+.bu-balken { position: relative; z-index: 2; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 24px;
+  background: linear-gradient(90deg, rgba(62,230,168,.18), rgba(62,230,168,.06)); border-bottom: 1px solid rgba(62,230,168,.35); animation: balken-rein .35s cubic-bezier(.2,.9,.3,1.1); }
+.bu-balken.rot { background: linear-gradient(90deg, rgba(255,107,107,.26), rgba(255,107,107,.08)); border-bottom-color: rgba(255,107,107,.5); }
+@keyframes balken-rein { from { transform: translateY(-100%); opacity: 0; } }
+.bu-text { font-size: 14px; min-width: 0; }
+.bu-knoepfe { display: flex; gap: 8px; }
+.bu-mehr { font-size: 12px; color: var(--leise); margin-left: 6px; }
+.mobil .bu-balken { padding: 10px 16px; }
+.mobil .bu-knoepfe { width: 100%; }
+.mobil .bu-knoepfe .knopf { flex: 1; }
+.dialog-x { position: absolute; top: 12px; right: 12px; }
+.bu-dialog h2 { padding-right: 36px; }
+.bu-kopf { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; }
+.bu-kopf .ld-bild { width: 64px; height: 64px; }
+.bu-kopf p { margin: 2px 0 0; }
+.bu-rollen { display: grid; gap: 8px; margin-bottom: 8px; }
+.bu-rolle { position: relative; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; border-radius: 14px; background: var(--flaeche); border: 1px solid var(--rand); transition: border-color .15s, background .15s, transform .15s; }
+.bu-rolle:hover { border-color: rgba(62,230,168,.4); }
+.bu-rolle:active { transform: scale(.98); }
+.bu-rolle.an { border-color: var(--mint); background: var(--mint-weich); box-shadow: 0 0 0 3px rgba(62,230,168,.12); }
+.bu-rolle svg { width: 44px; height: 44px; flex: none; }
+.bu-rolle-text { display: grid; gap: 1px; min-width: 0; }
+.bu-rolle-text small { font-size: 12px; color: var(--leise); }
+.bu-rolle-text small.mint { color: var(--mint); }
+.achtung-punkt { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--rot); color: #fff; font-weight: 800; font-size: 14px; flex: none; box-shadow: 0 0 0 4px rgba(255,107,107,.2); animation: puls 2s ease-in-out infinite; }
+@keyframes puls { 50% { box-shadow: 0 0 0 7px rgba(255,107,107,.08); } }
+.bu-rolle .achtung-punkt { position: absolute; top: 8px; right: 8px; }
+.kachel-achtung { position: absolute; top: 10px; left: 10px; z-index: 1; }
+.achtung-hinweis { display: flex; gap: 12px; align-items: center; }
+.achtung-hinweis > div { flex: 1; display: grid; gap: 2px; }
+.achtung-hinweis small { font-size: 12px; opacity: .85; }
+.achtung-hinweis .mini { margin: 0; color: var(--mint); border-color: rgba(62,230,168,.4); }
+.chip.rot-chip.an { background: rgba(255,107,107,.16); border-color: rgba(255,107,107,.5); color: var(--rot); }
+.bu-ergebnis { margin: 6px 0; }
+.bu-bilder { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.bu-bild { display: grid; gap: 4px; justify-items: center; text-align: center; padding: 8px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); font-size: 12px; line-height: 1.25; transition: border-color .15s, background .15s; }
+.bu-bild.an { border-color: var(--amber); background: rgba(255,181,71,.10); }
+.fb-bild { width: 100%; max-width: 110px; height: auto; border-radius: 8px; background: rgba(0,0,0,.3); }
+.bu-frage { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--rand); font-size: 14px; }
+.bu-frage .chip { padding: 5px 12px; }
+.bu-ursache { border: 1px solid var(--rand); border-radius: 14px; padding: 12px; margin: 10px 0; background: var(--flaeche); }
+.bu-ursache-kopf { display: flex; gap: 12px; align-items: center; }
+.bu-ursache-kopf .fb-bild { width: 84px; flex: none; }
+.bu-ursache-kopf > div { display: grid; gap: 2px; }
+.bu-ursache-kopf small { font-size: 12px; }
+.bu-loesungen { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.bu-loesungen li { display: flex; gap: 10px; align-items: flex-start; }
+.bu-haken { width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--mint); color: #062018; font-size: 13px; font-weight: 800; flex: none; display: grid; place-items: center; transition: background .15s; }
+.bu-haken.an { background: var(--mint); }
+.bu-punkt { width: 22px; text-align: center; color: var(--leise); flex: none; }
+.bu-aend { display: inline-block; margin-top: 2px; font-size: 12px; color: var(--amber); }
+.bu-aend strong { color: var(--text); }
+.feld { display: grid; gap: 4px; margin: 10px 0; font-size: 13px; color: var(--leise); }
+.feld input { padding: 11px 12px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; font-size: 15px; }
+.feld input:focus, textarea:focus { outline: none; border-color: rgba(62,230,168,.6); }
+
+/* ---- Ansichtswechsel und gemeinsame Bausteine ---- */
+.ansicht-rein { animation: ansicht-rein .28s cubic-bezier(.2,.8,.2,1); }
+.ansicht-rein.voll { height: 100%; }
+@keyframes ansicht-rein { from { opacity: 0; transform: translateY(8px); } }
+.wechsel-rein { animation: blende .22s ease; }
+.wechsel { animation: wechsel .25s ease; }
+@keyframes wechsel { from { opacity: .2; transform: translateX(6px); } }
+.unter-tabs { margin-bottom: 16px; }
+.mobil .unter-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 14px; padding: 0 16px 4px; scroll-snap-type: x proximity; scroll-padding-inline: 16px; }
+.mobil .unter-tabs::-webkit-scrollbar { display: none; }
+.mobil .unter-tabs .chip { scroll-snap-align: start; }
+.chip { transition: background .15s, border-color .15s, color .15s, transform .1s; }
+.chip:active, .knopf:active, .rund:active { transform: scale(.96); }
+.knopf, .rund, .wahl, .mini { transition: filter .15s, background .15s, transform .1s; }
+.zahl-punkt { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--mint); color: #062018; font-size: 11px; font-weight: 800; }
+.zahl-punkt.amber-punkt { background: var(--amber); color: #2a1a00; }
+.leer-karte { display: grid; justify-items: center; text-align: center; gap: 6px; padding: 34px 20px; }
+.gross-icon { font-size: 40px; animation: schweben 3s ease-in-out infinite; }
+@keyframes schweben { 50% { transform: translateY(-5px); } }
+.farbtupfer { width: 28px; height: 28px; border-radius: 50%; flex: none; border: 2px solid rgba(255,255,255,.18); box-shadow: inset 0 -4px 8px rgba(0,0,0,.25); }
+.zeilen-knopf { width: 100%; text-align: left; align-items: center; }
+.zeilen-knopf:hover { background: var(--flaeche-hover); }
+.zeilen-knopf span { display: grid; }
+.such-feld { width: 100%; max-width: 420px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; }
+.such-feld:focus { outline: none; border-color: rgba(62,230,168,.6); }
+.datei-knopf { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.toast.mit-knopf { display: flex; align-items: center; gap: 12px; }
+.toast .mini { margin: 0; }
+.dialog textarea[readonly] { font-size: 13px; }
+.nav-oben { overflow-x: auto; scrollbar-width: none; }
+.nav-oben::-webkit-scrollbar { display: none; }
+@media (max-width: 1240px) { .nav-oben .nav-punkt { padding: 8px 10px; } }
+@media (max-width: 1080px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
+.nav-unten .nav-punkt { transition: color .15s, background .15s; border-radius: 14px; }
+.nav-unten .nav-punkt.aktiv .nav-icon { animation: tipp .3s ease; }
+@keyframes tipp { 40% { transform: scale(1.2); } }
+.such-knopf { margin-left: 4px; }
+.mobil .such-knopf { margin-left: 0; }
+.mobil .kopf { gap: 8px; padding: 10px 12px; }
+.mobil .marke { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mobil .speicher { font-size: 0; }
+.mobil .speicher::before { font-size: 14px; }
+.speicher.fehler::before { content: "● "; color: var(--rot); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* ---- Hilfe ---- */
+.hi-tabs { margin-bottom: 16px; }
+.hi-raster { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.mobil .hi-raster { grid-template-columns: 1fr; gap: 12px; }
+.hi-bild-karte { position: relative; }
+.p1s-bild, .trockner-bild { width: 100%; height: auto; display: block; }
+.p1s-punkt { cursor: pointer; outline: none; }
+.p1s-flaeche { fill: rgba(62,230,168,0); transition: fill .2s; }
+.p1s-ring { fill: #0b1512; stroke: var(--mint); stroke-width: 1.6; transition: fill .2s, r .2s; }
+.p1s-punkt text { fill: var(--mint); font-size: 11px; font-weight: 700; pointer-events: none; transition: fill .2s; }
+.p1s-punkt:hover .p1s-flaeche, .p1s-punkt:focus .p1s-flaeche { fill: rgba(62,230,168,.12); }
+.p1s-punkt.an .p1s-flaeche { fill: rgba(62,230,168,.18); }
+.p1s-punkt.an .p1s-ring { fill: var(--mint); animation: ring-puls 1.8s ease-in-out infinite; }
+.p1s-punkt.an text { fill: #062018; }
+@keyframes ring-puls { 50% { stroke-width: 5; stroke-opacity: .35; } }
+.tr-wert { fill: var(--mint); font-size: 14px; font-weight: 700; font-family: ui-monospace, monospace; }
+.hi-info h2 { margin: 2px 0 6px; }
+.hi-info h3 { margin-top: 16px; }
+.hi-nr { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--mint); color: #062018; font-weight: 800; }
+.hi-live { display: flex; justify-content: space-between; gap: 10px; padding: 10px 14px; border-radius: 12px; background: var(--mint-weich); border: 1px solid rgba(62,230,168,.3); font-size: 14px; }
+.hi-live span { color: var(--leise); }
+.hi-einst { display: grid; gap: 8px; }
+.hi-einst > div { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.2); border: 1px solid var(--rand); font-size: 14px; }
+.hi-einst .leise { font-size: 13px; }
+.info-zeile.kopfzeile { background: rgba(255,255,255,.03); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.hi-sprung .chip { min-width: 36px; justify-content: center; padding: 6px 10px; }
+.hi-tr-info { display: grid; gap: 4px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(0,0,0,.25); border: 1px solid var(--rand); font-size: 14px; min-height: 76px; }
+.tr-tabelle { display: grid; gap: 6px; }
+.tr-zeile { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rand); }
+.tr-zeile small { grid-column: 1 / -1; font-size: 12px; }
+.tr-werte { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tr-werte b { font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 8px; background: var(--amber-weich); color: var(--amber); white-space: nowrap; }
+.tr-rollen { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
+.tr-rolle { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 14px; background: rgba(0,0,0,.18); border: 1px solid var(--rand); text-align: left; }
+.tr-rolle:hover { background: var(--flaeche-hover); }
+.tr-rolle svg { width: 38px; height: 38px; flex: none; }
+.tr-rolle > span:nth-child(2) { flex: 1; display: grid; min-width: 0; }
+.tr-rolle small { color: var(--leise); font-size: 12px; }
+.fb-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: start; }
+.mobil .fb-raster { grid-template-columns: 1fr; }
+.fb-karte { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); overflow: hidden; transition: border-color .2s; }
+.fb-karte.auf { border-color: rgba(255,181,71,.45); }
+.fb-kopf { width: 100%; display: flex; gap: 12px; align-items: center; padding: 10px; text-align: left; }
+.fb-kopf .fb-bild { width: 84px; flex: none; }
+.fb-kopf > span { display: grid; gap: 2px; }
+.fb-kopf small { font-size: 12px; }
+.fb-details { padding: 0 14px 14px; }
+.kal-wahl { margin-bottom: 14px; }
+.kal-kopf { display: flex; gap: 14px; align-items: center; }
+.kal-bild { width: 120px; height: auto; flex: none; border-radius: 12px; background: rgba(0,0,0,.3); }
+.mobil .kal-bild { width: 92px; }
+.kal-liste { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; }
+.kal-liste.fehler li::marker { color: var(--rot); }
+
+/* ---- Werkstatt ---- */
+.ws-kopfzeile { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+.ws-kopfzeile p { margin: 0; max-width: 760px; }
+.mobil .ws-kopfzeile { flex-direction: column; align-items: stretch; }
+.ws-liste { display: grid; gap: 10px; }
+.ws-auftrag { display: flex; gap: 14px; align-items: flex-start; padding: 14px; }
+.ws-nr { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--mint-weich); color: var(--mint); font-weight: 800; flex: none; }
+.ws-text { flex: 1; min-width: 0; display: grid; gap: 4px; justify-items: start; }
+.ws-text small { font-size: 13px; }
+.ws-knoepfe { display: flex; gap: 6px; flex: none; }
+.mobil .ws-auftrag { flex-wrap: wrap; }
+.mobil .ws-knoepfe { width: 100%; justify-content: flex-end; }
+.ws-ersatz { align-items: center; gap: 6px; }
+.ws-ersatz .chip { font-size: 12px; padding: 5px 10px; }
+.ws-einkauf, .ws-wartung { display: flex; gap: 14px; align-items: center; padding: 12px 14px; }
+.ws-einkauf > div, .ws-wartung > .ws-text { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.ws-einkauf.dringend, .ws-wartung.dringend { border-color: rgba(255,107,107,.45); background: linear-gradient(90deg, rgba(255,107,107,.08), var(--flaeche)); }
+.ws-icon { width: 28px; text-align: center; font-size: 20px; flex: none; }
+.ws-balken, .ne-balken { height: 6px; border-radius: 3px; background: rgba(255,255,255,.07); overflow: hidden; width: 100%; margin: 4px 0; }
+.ws-balken span, .ne-balken span { display: block; height: 100%; border-radius: 3px; background: var(--mint); animation: balken-wachsen .6s cubic-bezier(.2,.8,.2,1); transform-origin: left; }
+.ws-balken span.amber, .ne-balken span.amber { background: var(--amber); }
+.ws-balken span.rot, .ne-balken span.rot { background: var(--rot); }
+@keyframes balken-wachsen { from { transform: scaleX(0); } }
+.ws-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.mobil .ws-raster { grid-template-columns: 1fr; }
+.ws-modell { display: grid; gap: 10px; padding: 12px; align-content: start; }
+.mobil .ws-modell { grid-template-columns: 96px 1fr; }
+.mobil .ws-modell .ws-modell-knoepfe { grid-column: 1 / -1; }
+.ws-foto { aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,.3); display: grid; place-items: center; font-size: 34px; }
+.ws-foto img { width: 100%; height: 100%; object-fit: cover; animation: blende .3s ease; }
+.ws-modell.fehl .ws-foto { box-shadow: inset 0 0 0 2px rgba(255,107,107,.4); }
+.ws-modell-text { display: grid; gap: 3px; min-width: 0; }
+.ws-modell-text strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-modell-text small { font-size: 12px; }
+.ws-modell-knoepfe { display: flex; gap: 8px; align-items: center; }
+.ws-modell-knoepfe .knopf { flex: 1; }
+.ws-zwei { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.mobil .ws-zwei { grid-template-columns: 1fr; gap: 12px; }
+.ws-saeulen { display: flex; gap: 10px; align-items: flex-end; height: 200px; padding-top: 10px; }
+.ws-saeule { flex: 1; display: grid; grid-template-rows: auto 1fr auto; gap: 4px; height: 100%; text-align: center; font-size: 12px; }
+.ws-saeule strong { font-size: 12px; }
+.ws-saeule small { color: var(--leise); }
+.ws-saeule-bahn { display: flex; flex-direction: column-reverse; border-radius: 8px; background: rgba(255,255,255,.04); overflow: hidden; }
+.ws-saeule-bahn span { display: block; animation: saeule .7s cubic-bezier(.2,.8,.2,1); transform-origin: bottom; }
+.ws-saeule-bahn .fil, .ws-legende i.fil { background: var(--mint); }
+.ws-saeule-bahn .strom, .ws-legende i.strom { background: var(--amber); }
+@keyframes saeule { from { transform: scaleY(0); } }
+.ws-legende { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--leise); }
+.ws-legende i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* ---- Nerd ---- */
+.ne-seite .stats { grid-template-columns: repeat(6, 1fr); }
+.mobil .ne-seite .stats { grid-template-columns: repeat(3, 1fr); }
+.mobil .ne-seite .stats .stat { display: flex; padding: 10px 12px; }
+.mobil .ne-seite .stats .stat strong { font-size: 18px; }
+.ne-balken-liste { display: grid; gap: 10px; }
+.ne-balken-zeile { display: grid; grid-template-columns: minmax(0, 1fr) 1.2fr auto; gap: 10px; align-items: center; font-size: 13px; }
+.ne-balken-zeile > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ne-balken-zeile small { color: var(--leise); white-space: nowrap; }
+.ne-phasen { display: flex; gap: 12px; height: 150px; align-items: flex-end; }
+.ne-phase { flex: 1; display: grid; grid-template-rows: 1fr auto auto; height: 100%; text-align: center; gap: 4px; }
+.ne-phase small { font-size: 11px; color: var(--leise); }
+.ne-phase-bahn { display: flex; align-items: flex-end; border-radius: 8px; background: rgba(255,255,255,.04); overflow: hidden; }
+.ne-phase-bahn span { width: 100%; background: linear-gradient(var(--rot), rgba(255,107,107,.5)); animation: saeule .7s cubic-bezier(.2,.8,.2,1); transform-origin: bottom; }
+.ne-gesund { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--rand); }
+.ne-gesund:last-child { border-bottom: none; }
+.ne-gesund > div { flex: 1; display: grid; gap: 2px; }
+.ne-gesund small { font-size: 12px; }
+.ne-gesund b { font-size: 14px; white-space: nowrap; }
+.ne-gesund .punkt { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: rgba(255,255,255,.06); color: var(--leise); flex: none; }
+.ne-gesund.gut .punkt { background: var(--mint-weich); color: var(--mint); }
+.ne-gesund.schlecht .punkt { background: rgba(255,107,107,.16); color: var(--rot); }
+.ne-heiz { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--rand); }
+.ne-heiz-wert { font-size: 26px; font-weight: 700; color: var(--mint); }
+.ne-heiz-wert.amber { color: var(--amber); }
+.ne-mini-saeulen { display: flex; gap: 3px; align-items: flex-end; height: 44px; }
+.ne-mini-saeulen span { flex: 1; background: rgba(62,230,168,.5); border-radius: 2px 2px 0 0; animation: saeule .6s ease; transform-origin: bottom; }
+
+/* ---- Suche ---- */
+.such-schleier { z-index: 24; }
+.such-box { position: absolute; z-index: 25; top: 70px; left: 50%; transform: translateX(-50%); width: min(640px, calc(100% - 32px)); max-height: calc(100% - 100px); display: flex; flex-direction: column;
+  border-radius: 20px; background: rgba(14,22,19,.97); border: 1px solid rgba(62,230,168,.3); box-shadow: 0 24px 60px rgba(0,0,0,.6); animation: such-rein .2s cubic-bezier(.2,.8,.2,1); overflow: hidden; }
+@keyframes such-rein { from { opacity: 0; transform: translate(-50%, -10px) scale(.98); } }
+.mobil .such-box { top: 12px; max-height: calc(100% - 24px); }
+.such-kopf { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--rand); }
+.such-kopf input { flex: 1; min-width: 0; background: none; border: none; color: var(--text); font: inherit; font-size: 17px; padding: 8px 0; outline: none; }
+.such-ergebnisse { overflow-y: auto; overscroll-behavior: contain; padding: 6px 8px 12px; }
+.such-gruppe h4 { margin: 12px 8px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--leise); font-weight: 600; }
+.such-treffer { width: 100%; display: flex; gap: 12px; align-items: center; padding: 9px 10px; border-radius: 12px; text-align: left; animation: blende .15s ease; }
+.such-treffer:hover, .such-treffer:focus, .such-treffer.erst { background: var(--flaeche-hover); outline: none; }
+.such-treffer > span:last-child { display: grid; min-width: 0; }
+.such-treffer strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.such-treffer small { font-size: 12px; }
+.such-icon { width: 28px; text-align: center; font-size: 18px; flex: none; }
+.such-passend { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 0 10px 8px 50px; }
+.such-passend .chip { font-size: 12px; padding: 4px 10px; }
+.such-leer { padding: 22px 12px; text-align: center; font-size: 14px; }
+
+/* ---- Mehr-Menü (Handy) ---- */
+.mehr-schleier { z-index: 4; }
+.mehr-sheet { position: absolute; z-index: 5; left: 0; right: 0; bottom: 0; padding: 4px 16px calc(84px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  border-radius: 22px 22px 0 0; background: rgba(14,22,19,.98); border-top: 1px solid var(--rand); animation: hoch .25s cubic-bezier(.2,.8,.2,1); }
+.mehr-sheet .griff { grid-column: 1 / -1; margin-bottom: 6px; }
+.mehr-punkt { position: relative; display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 16px; background: var(--flaeche); border: 1px solid var(--rand); text-align: left; }
+.mehr-punkt > span:first-child { font-size: 22px; }
+.mehr-punkt.aktiv { background: var(--mint-weich); border-color: rgba(62,230,168,.45); color: var(--mint); }
+.mehr-punkt .zahl-punkt { position: absolute; top: 8px; right: 8px; }
+.suche-punkt { grid-column: 1 / -1; }
+.mobil .nav-unten { z-index: 6; }
+
+/* ---- Sicherungs-Balken ---- */
+.bu-balken.blau { background: linear-gradient(90deg, rgba(92,200,255,.18), rgba(92,200,255,.05)); border-bottom-color: rgba(92,200,255,.4); }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -1592,12 +2368,13 @@ const DruckerAnsicht = {
       this._drVerlaufFehler = e.message || String(e);
     }
     this._drVerlaufLaedt = false;
-    if (this._ansicht === "drucker") this._zeichnen();
+    if (!this._modus && !this._ddOffen) this._zeichnen();
     this._drFotosLaden();
+    this._buNachLaden();
   },
   async _drFotosLaden() {
     this._drFotos = this._drFotos || {};
-    for (const d of (this._drVerlauf || []).slice(0, 12)) {
+    for (const d of this._buAlle().slice(0, 30)) {
       const f = fotoName(d);
       if (!f || f in this._drFotos) continue;
       this._drFotos[f] = null;
@@ -1611,7 +2388,7 @@ const DruckerAnsicht = {
   },
 
   _drVerlaufHtml() {
-    const liste = this._drVerlauf;
+    const liste = this._drVerlauf ? this._buAlle() : null;
     let inhalt;
     if (!liste) inhalt = `<div class="leise klein">Lade Druckverlauf …</div>`;
     else if (this._drVerlaufFehler) inhalt = `<div class="hinweis amber">Die Liste „3D-Drucke“ konnte nicht gelesen werden: ${esc(this._drVerlaufFehler)}</div>`;
@@ -1622,11 +2399,13 @@ const DruckerAnsicht = {
         const f = fotoName(d);
         const foto = f && this._drFotos && this._drFotos[f];
         const extra = (this._daten.drucke || {})[d.uid] || {};
-        const [st, farbe] = d.status === "finish" ? ["fertig", "mint"] : d.status === "failed" ? ["fehlgeschlagen", "rot"] : d.status === "laeuft" ? ["ohne Abschluss", "amber"] : [d.status, "leise"];
+        const g = extra.gebucht;
+        const [st, farbe] = g ? (g.ergebnis === "fehl" ? ["Fehldruck", "rot"] : g.ergebnis === "anders" ? ["abgebrochen", "leise"] : ["verbucht", "mint"])
+          : d.status === "finish" ? ["fertig", "amber"] : d.status === "failed" ? ["abgebrochen", "rot"] : d.status === "laeuft" ? ["läuft / ohne Abschluss", "amber"] : [d.status, "leise"];
         return `<button class="dr-druck" data-aktion="dr-druck" data-uid="${esc(d.uid)}">
           <span class="ld-bild" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="">` : "🖼️"}</span>
           <span class="dr-druck-text"><strong>${esc(d.name)}</strong>
-            <small>${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g` : ""}${d.duese_mm ? ` · ${zahl(d.duese_mm, 1)} mm Düse` : ""}</small>
+            <small>${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g` : ""}${d.duese_mm ? ` · ${zahl(d.duese_mm, 1)} mm Düse` : ""}${g ? ` · ${esc((this._daten.rollen.find((r) => r.id === g.rolle) || {}).name || "")}` : ""}${d.hand ? " · von Hand" : ""}</small>
             ${extra.kommentar ? `<small class="dr-kommentar">💬 ${esc(extra.kommentar)}</small>` : ""}</span>
           <span class="pille ${farbe}">${st}</span>
         </button>`;
@@ -1634,11 +2413,11 @@ const DruckerAnsicht = {
       ${liste.length > 8 ? `<button class="mini mint-rand" data-aktion="dr-alle">${this._drAlle ? "Weniger zeigen" : `Alle ${liste.length} Drucke zeigen`}</button>` : ""}`;
     }
     return `<div class="dr-karte"><div class="dr-kamera-kopf"><h3 class="dr-titel">🗂️ Druckverlauf</h3>
-      <button class="chip" data-aktion="dr-neu-laden">↻ Aktualisieren</button></div>${inhalt}</div>`;
+      <span class="chips"><button class="chip" data-aktion="bu-hand">＋ Nachtragen</button><button class="chip" data-aktion="dr-neu-laden">↻ Aktualisieren</button></span></div>${inhalt}</div>`;
   },
 
   _drDialogHtml() {
-    const d = (this._drVerlauf || []).find((x) => x.uid === this._drOffen);
+    const d = this._buAlle().find((x) => x.uid === this._drOffen);
     if (!d) return "";
     const extra = (this._daten.drucke || {})[d.uid] || {};
     const f = fotoName(d);
@@ -1656,10 +2435,30 @@ const DruckerAnsicht = {
         ${zeile("Düse / Bett", d.duese_c ? `${zahl(d.duese_c)} °C / ${zahl(d.bett_c)} °C` : null)}
         ${zeile("Düse", d.duese_mm ? `${zahl(d.duese_mm, 1)} mm` : null)}
       </div>
+      ${this._drBuchungHtml(d, extra)}
       <h3>Kommentar</h3>
       <textarea id="dr-kommentar" rows="4" placeholder="z. B. warum abgebrochen, was du gelernt hast …">${esc(extra.kommentar || "")}</textarea>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Schließen</button>
         <button class="knopf" data-aktion="dr-kommentar-speichern">Speichern</button></div>`;
+  },
+
+  _drBuchungHtml(d, extra) {
+    const g = extra.gebucht;
+    if (!g) {
+      return BU_ENDE.includes(d.status) ? `<div class="hinweis amber oben-abstand">Noch nicht verbucht${extra.ignoriert ? " (übersprungen)" : ""}.
+        <button class="mini" data-aktion="bu-start" data-uid="${esc(d.uid)}">Jetzt verbuchen</button></div>` : "";
+    }
+    const rolle = this._daten.rollen.find((r) => r.id === g.rolle);
+    const k = g.kosten || {};
+    const kosten = (k.filament || 0) + (k.strom || 0);
+    const fehl = extra.fehl;
+    return `<h3>Verbucht</h3><div class="info-liste">
+      <div class="info-zeile"><span>Rolle</span><strong>${esc(rolle ? rolle.name : "gelöscht")}</strong></div>
+      <div class="info-zeile"><span>Abgezogen</span><strong>${zahl(g.g, 1)} g${g.wechsel ? ` + ${zahl(g.wechsel.g, 2)} g Reststück` : ""}</strong></div>
+      <div class="info-zeile"><span>Ergebnis</span><strong>${g.ergebnis === "fehl" ? "Fehldruck" : g.ergebnis === "anders" ? "anders überlegt" : "geglückt"}</strong></div>
+      ${kosten ? `<div class="info-zeile"><span>Kosten</span><strong>${zahl(kosten, 2)} €${k.kwh != null ? ` (${zahl(k.kwh, 3)} kWh)` : ""}</strong></div>` : ""}
+      ${fehl ? `<div class="info-zeile"><span>Ursachen</span><strong>${esc((fehl.ursachen || []).map((id) => (fehlerbild(id) || {}).name).filter(Boolean).join(", ") || "–")}</strong></div>` : ""}
+    </div><button class="mini" data-aktion="bu-rueckgaengig" data-uid="${esc(d.uid)}">Buchung rückgängig machen</button>`;
   },
 
   // ---- Steckdose schalten (immer mit Nachfrage) --------------------------
@@ -1745,11 +2544,3229 @@ const DruckerAnsicht = {
   },
 };
 // ---------------------------------------------------------------------------
+// Verbuchen: nach jedem Druck fragen, welche Rolle benutzt wurde, und den
+// Verbrauch abziehen (Druck + Anfangslinie + Extruder-Fahrten, beim Rollenwechsel
+// das Reststück von der alten Rolle). Abbruch: Fehldruck oder anders überlegt.
+// Fehldruck: Fragenkatalog → Ursachen → Änderungen, rotes Ausrufezeichen an der Rolle.
+// ---------------------------------------------------------------------------
+
+const BU_ENDE = ["finish", "failed"];
+
+const BuchenAnsicht = {
+  // Alle Drucke: Liste aus Home Assistant + von Hand nachgetragene
+  _buAlle() {
+    const hand = Object.entries(this._daten.drucke || {}).filter(([, x]) => x.hand).map(([uid, x]) => ({
+      uid, titel: x.hand.name, name: x.hand.name, zeit: new Date(x.hand.start).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }),
+      gewicht: x.hand.gewicht, laenge: null, duese_c: null, bett_c: null, duese_mm: null, start: x.hand.start, ende: x.hand.start,
+      status: x.hand.status || "finish", fortschritt: x.hand.status === "failed" ? x.hand.fortschritt : 100, hand: true,
+    }));
+    return [...(this._drVerlauf || []), ...hand].sort((a, b) => (b.start || "").localeCompare(a.start || ""));
+  },
+  _buExtra(uid) { return (this._daten.drucke || {})[uid] || {}; },
+  _buOffene() {
+    if (!this._daten || !this._drVerlauf) return [];
+    const ab = this._daten.buchen_ab || "";
+    return this._buAlle().filter((d) => {
+      const x = this._buExtra(d.uid);
+      return BU_ENDE.includes(d.status) && !x.gebucht && !x.ignoriert && !d.hand && !d.erledigt && (d.ende || d.start || "") >= ab;
+    });
+  },
+
+  // Druckstatus beobachten: nach dem Ende den Verlauf neu laden (Automation schreibt mit Verzögerung)
+  _buHassNeu() {
+    if (!this._daten) return;
+    const s = this._drW && this._drW("status");
+    if (s && s !== this._buStatus) {
+      const vorher = this._buStatus;
+      this._buStatus = s;
+      if (vorher && ["running", "pause", "prepare"].includes(vorher) && BU_ENDE.includes(s)) {
+        [20000, 60000, 120000].forEach((t) => setTimeout(() => this._drVerlaufLaden(), t));
+      }
+    }
+  },
+
+  // Nach dem Laden des Verlaufs: einmal pro Sitzung von selbst nachfragen
+  _buNachLaden() {
+    const offen = this._buOffene();
+    if (!offen.length || this._modus || this._dialog) return;
+    this._buGezeigt = this._buGezeigt || new Set();
+    const d = offen.find((x) => !this._buGezeigt.has(x.uid));
+    if (!d) return;
+    this._buGezeigt.add(d.uid);
+    if (d.status === "failed") return;   // Abbruch: erst über den roten Balken fragen
+    this._buStarten(d.uid);
+    this._zeichnen();
+  },
+
+  // Balken oben: Abbruch rot, fertige Drucke mint
+  _buBalkenHtml() {
+    const offen = this._buOffene();
+    if (!offen.length || this._ansicht === "system") return "";
+    const d = offen[offen.length - 1];
+    const weitere = offen.length > 1 ? ` <span class="bu-mehr">+${offen.length - 1} weitere</span>` : "";
+    if (d.status === "failed") {
+      return `<div class="bu-balken rot" data-einmal="bu-${esc(d.uid)}" role="alert">
+        <span class="bu-text">⛔ <strong>${esc(d.name)}</strong> wurde abgebrochen${d.fortschritt != null ? ` (bei ${zahl(d.fortschritt)} %)` : ""}. Fehldruck oder anders überlegt?${weitere}</span>
+        <span class="bu-knoepfe"><button class="knopf rot-knopf klein-knopf" data-aktion="bu-start" data-uid="${esc(d.uid)}" data-ergebnis="fehl">Fehldruck</button>
+        <button class="knopf leise klein-knopf" data-aktion="bu-start" data-uid="${esc(d.uid)}" data-ergebnis="anders">Anders überlegt</button></span></div>`;
+    }
+    return `<div class="bu-balken" data-einmal="bu-${esc(d.uid)}">
+      <span class="bu-text">✅ <strong>${esc(d.name)}</strong> ist fertig${d.gewicht != null ? ` (${zahl(d.gewicht, 1)} g)` : ""}. Verbrauch verbuchen?${weitere}</span>
+      <span class="bu-knoepfe"><button class="knopf klein-knopf" data-aktion="bu-start" data-uid="${esc(d.uid)}">Verbuchen</button></span></div>`;
+  },
+
+  // ---- Dialog ----
+  _buStarten(uid, ergebnis) {
+    const d = this._buAlle().find((x) => x.uid === uid);
+    if (!d) return;
+    const vor = this._buVorschlaege(d);
+    this._bu = {
+      uid, ergebnis: ergebnis || (d.status === "failed" ? "fehl" : "ok"),
+      fortschritt: d.status === "failed" ? (d.fortschritt != null ? d.fortschritt : 50) : 100,
+      rolleId: vor[0] ? vor[0].rolle.id : null, schritt: "buchen", wann: null, bilder: [], extra: {}, waehlen: false, strom: "laedt", uebernehmen: {},
+    };
+    this._bu.wann = wannAusFortschritt(this._bu.fortschritt);
+    this._dialog = "bu";
+    this._buStromLaden(d);
+  },
+
+  // Material aus der Düsentemperatur raten (im Eintrag festgehalten)
+  _buMaterialRaten(d) {
+    const t = d.duese_c;
+    if (!t) return null;
+    if (t <= 232) return ["PLA", "TPU"];
+    if (t <= 258) return ["PETG", "ABS"];
+    return ["ASA", "ABS", "PC"];
+  },
+  _buBedarf(d, rolle, fortschritt) {
+    const e = this._daten.einstellungen;
+    const anteil = Math.max(0, Math.min(100, fortschritt)) / 100;
+    const korr = (rolle && e.korrektur[rolle.material]) || 1;
+    const druck = (d.gewicht || 0) * anteil * korr;
+    return { druck, fix: e.linie_g + e.extruder_g, summe: druck + e.linie_g + e.extruder_g, korr };
+  },
+  _buVorschlaege(d) {
+    const mats = this._buMaterialRaten(d);
+    const letzte = this._daten.letzte_rolle;
+    const bedarf = (d.gewicht || 0) + 0.5;
+    return this._daten.rollen.map((r) => {
+      let p = 0;
+      const gruende = [];
+      if (r.id === letzte) { p += 4; gruende.push("zuletzt benutzt"); }
+      if (mats) { if (mats.includes(r.material)) { p += 3; gruende.push(`${zahl(d.duese_c)} °C passt zu ${r.material}`); } else p -= 3; }
+      if (r.rest_g != null) { if (r.rest_g >= bedarf) p += 1; else { p -= 4; gruende.push("zu wenig Rest"); } }
+      if (r.probiert) p += 0.5;
+      return { rolle: r, p, gruende };
+    }).sort((a, b) => b.p - a.p).slice(0, 3);
+  },
+
+  async _buStromLaden(d) {
+    const id = this._drId && this._drId("monat", true);
+    const bu = this._bu;
+    if (!id || !d.start || !d.ende || d.hand) { bu.strom = null; return; }
+    try {
+      const vorher = new Date(new Date(d.start).getTime() - 60000).toISOString();
+      const nachher = new Date(new Date(d.ende).getTime() + 60000).toISOString();
+      const r = await this._hass.callWS({ type: "history/history_during_period", start_time: vorher, end_time: nachher, entity_ids: [id], minimal_response: true, no_attributes: true });
+      const werte = ((r && r[id]) || []).map((x) => Number(x.s != null ? x.s : x.state)).filter((x) => !isNaN(x));
+      let kwh = null;
+      if (werte.length >= 2) {
+        // Monatswechsel: Zähler fällt auf 0 → Anteile addieren
+        kwh = 0;
+        for (let i = 1; i < werte.length; i++) kwh += werte[i] >= werte[i - 1] ? werte[i] - werte[i - 1] : werte[i];
+      }
+      bu.strom = kwh != null ? { kwh, eur: kwh * this._daten.einstellungen.strompreis } : null;
+    } catch (e) {
+      bu.strom = null;
+    }
+    if (this._bu === bu && this._dialog === "bu") { const k = this.shadowRoot.getElementById("bu-kosten"); if (k) k.innerHTML = this._buKostenHtml(); }
+  },
+
+  _buKostenHtml() {
+    const bu = this._bu, d = this._buAlle().find((x) => x.uid === bu.uid);
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const b = this._buBedarf(d, rolle, bu.fortschritt);
+    const fil = rolle && rolle.preis_kg ? (b.summe / 1000) * rolle.preis_kg : null;
+    const strom = bu.strom === "laedt" ? "lädt …" : bu.strom ? `${zahl(bu.strom.kwh, 3)} kWh · ${zahl(bu.strom.eur, 2)} €` : "keine Messung";
+    const gesamt = (fil || 0) + (bu.strom && bu.strom.eur ? bu.strom.eur : 0);
+    return `<div class="info-zeile"><span>Filament</span><strong>${fil != null ? `${zahl(fil, 2)} €` : `<span class="leise">Preis/kg fehlt</span>`}</strong></div>
+      <div class="info-zeile"><span>Strom (Steckdose)</span><strong>${strom}</strong></div>
+      <div class="info-zeile"><span>Dieser Druck</span><strong>${gesamt ? `${zahl(gesamt, 2)} €` : "–"}</strong></div>`;
+  },
+
+  _buDialogHtml() {
+    const bu = this._bu;
+    const d = bu && this._buAlle().find((x) => x.uid === bu.uid);
+    if (!d) return "";
+    if (bu.schritt === "fragen") return this._buFragenHtml(d);
+    if (bu.schritt === "loesungen") return this._buLoesungenHtml(d);
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const vor = this._buVorschlaege(d);
+    const b = this._buBedarf(d, rolle, bu.fortschritt);
+    const e = this._daten.einstellungen;
+    const alt = this._daten.letzte_rolle && this._daten.letzte_rolle !== bu.rolleId ? this._daten.rollen.find((r) => r.id === this._daten.letzte_rolle) : null;
+    const f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+    const rest = rolle && rolle.rest_g != null ? rolle.rest_g - b.summe : null;
+    const kachel = (r, gruende) => `<button class="bu-rolle ${r.id === bu.rolleId ? "an" : ""}" data-aktion="bu-rolle" data-id="${esc(r.id)}">
+        ${spuleSvg(r)}<span class="bu-rolle-text"><strong>${esc(r.name)}</strong><small>${esc(r.hersteller)} · ${r.rest_g != null ? `${zahl(r.rest_g)} g` : "nicht gewogen"}</small>
+        ${gruende && gruende.length ? `<small class="mint">${esc(gruende.join(" · "))}</small>` : ""}</span>${r.achtung ? `<span class="achtung-punkt" title="Rolle beobachten">!</span>` : ""}</button>`;
+    const andere = this._daten.rollen.slice().sort((a, c) => a.name.localeCompare(c.name, "de"));
+    return `<div class="bu-kopf">
+        <span class="ld-bild">${foto ? `<img src="${esc(foto)}" alt="">` : "🖨️"}</span>
+        <div><h2>${esc(d.name)}</h2><p class="leise klein">${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g laut Slicer` : ""}</p></div>
+      </div>
+      ${d.status === "failed" || bu.ergebnis !== "ok" ? `<div class="chips bu-ergebnis">
+        <button class="chip ${bu.ergebnis === "fehl" ? "an rot-chip" : ""}" data-aktion="bu-ergebnis" data-id="fehl">⛔ Fehldruck</button>
+        <button class="chip ${bu.ergebnis === "anders" ? "an" : ""}" data-aktion="bu-ergebnis" data-id="anders">🤷 Anders überlegt</button>
+        <button class="chip ${bu.ergebnis === "ok" ? "an" : ""}" data-aktion="bu-ergebnis" data-id="ok">✅ Doch fertig</button></div>
+        <p class="leise klein">${bu.ergebnis === "anders" ? "Zählt nicht in die Fehlerquote. Das verbrauchte Material wird trotzdem abgezogen." : bu.ergebnis === "fehl" ? "Danach stelle ich dir ein paar Fragen zur Ursache." : ""}</p>
+        <div class="mod-regler"><div class="r-kopf"><span>Gedruckt bis</span><strong id="bu-wert-fortschritt">${zahl(bu.fortschritt)} %</strong></div>
+          <div class="regler-zeile"><input type="range" min="0" max="100" step="1" value="${bu.fortschritt}" data-bu="fortschritt"></div></div>` : ""}
+      <h3>Welche Rolle war drin?</h3>
+      <div class="bu-rollen">${vor.map((v) => kachel(v.rolle, v.gruende)).join("")}</div>
+      ${bu.waehlen ? `<label class="auswahl breit-auswahl"><span>Andere Rolle</span><select data-bu="rolle">${andere.map((r) => `<option value="${esc(r.id)}" ${r.id === bu.rolleId ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}</option>`).join("")}</select></label>`
+        : `<button class="mini mint-rand" data-aktion="bu-waehlen">Andere Rolle wählen</button>`}
+      <div id="bu-rechnung" class="info-liste oben-abstand">${this._buRechnungHtml(d, rolle, b, alt, rest)}</div>
+      <h3>Kosten</h3>
+      <div id="bu-kosten" class="info-liste">${this._buKostenHtml()}</div>
+      <div class="knopf-reihe oben-abstand">
+        <button class="knopf leise" data-aktion="bu-ignorieren">Nicht verbuchen</button>
+        <button class="knopf" data-aktion="bu-buchen" ${rolle ? "" : "disabled"}>${bu.ergebnis === "fehl" ? "Verbuchen und Ursache suchen" : "Verbuchen"}</button>
+      </div>`;
+  },
+
+  _buRechnungHtml(d, rolle, b, alt, rest) {
+    const e = this._daten.einstellungen;
+    return `${d.gewicht == null ? `<div class="info-zeile"><span class="amber">Gewicht fehlt im Eintrag</span><strong>0 g</strong></div>` : `<div class="info-zeile"><span>Druck${this._bu.fortschritt < 100 ? ` (${zahl(this._bu.fortschritt)} %)` : ""}${b.korr !== 1 ? ` × ${zahl(b.korr, 2)} Abgleich` : ""}</span><strong>${zahl(b.druck, 1)} g</strong></div>`}
+      <div class="info-zeile"><span>Anfangslinie + 3× Extruder</span><strong>${zahl(e.linie_g + e.extruder_g, 2)} g</strong></div>
+      <div class="info-zeile"><span><strong class="tx">Von ${esc(rolle ? rolle.name : "–")} ab</strong></span><strong>${zahl(b.summe, 1)} g</strong></div>
+      ${alt ? `<div class="info-zeile"><span>🔁 Rollenwechsel: Reststück von ${esc(alt.name)}</span><strong>${zahl(e.wechsel_g, 2)} g</strong></div>` : ""}
+      ${rest != null ? `<div class="info-zeile"><span>Danach auf der Rolle</span><strong class="${rest < 0 ? "rot" : ""}">${rest < 0 ? "reicht rechnerisch nicht (bitte wiegen)" : `${zahl(rest)} g`}</strong></div>` : ""}`;
+  },
+
+  _buRechnungNeu() {
+    const bu = this._bu, d = this._buAlle().find((x) => x.uid === bu.uid);
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const b = this._buBedarf(d, rolle, bu.fortschritt);
+    const alt = this._daten.letzte_rolle && this._daten.letzte_rolle !== bu.rolleId ? this._daten.rollen.find((r) => r.id === this._daten.letzte_rolle) : null;
+    const el = this.shadowRoot.getElementById("bu-rechnung");
+    if (el) el.innerHTML = this._buRechnungHtml(d, rolle, b, alt, rolle && rolle.rest_g != null ? rolle.rest_g - b.summe : null);
+    const k = this.shadowRoot.getElementById("bu-kosten");
+    if (k) k.innerHTML = this._buKostenHtml();
+  },
+
+  _buBuchen() {
+    const bu = this._bu, d = this._buAlle().find((x) => x.uid === bu.uid);
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    if (!d || !rolle) return;
+    if (this._buExtra(d.uid).gebucht) { this._toast("Dieser Druck ist schon verbucht."); this._dialog = null; return; }   // doppelt getippt
+    const e = this._daten.einstellungen;
+    const b = this._buBedarf(d, rolle, bu.fortschritt);
+    let wechsel = null;
+    const alt = this._daten.letzte_rolle && this._daten.letzte_rolle !== rolle.id ? this._daten.rollen.find((r) => r.id === this._daten.letzte_rolle) : null;
+    if (alt) {
+      wechsel = { rolle: alt.id, g: e.wechsel_g };
+      if (alt.rest_g != null) alt.rest_g = Math.max(0, alt.rest_g - e.wechsel_g);
+    }
+    if (rolle.rest_g != null) rolle.rest_g = Math.max(0, rolle.rest_g - b.summe);
+    rolle.verbraucht_g = (rolle.verbraucht_g || 0) + b.summe;
+    const fil = rolle.preis_kg ? (b.summe / 1000) * rolle.preis_kg : null;
+    const strom = bu.strom && bu.strom !== "laedt" ? bu.strom : null;
+    this._daten.drucke[d.uid] = {
+      ...this._buExtra(d.uid),
+      gebucht: { am: new Date().toISOString(), rolle: rolle.id, g: b.summe, druck_g: b.druck, fix_g: b.fix, wechsel, ergebnis: bu.ergebnis, fortschritt: bu.fortschritt,
+        kosten: { filament: fil, kwh: strom ? strom.kwh : null, strom: strom ? strom.eur : null } },
+      name: d.name, start: d.start, ende: d.ende,
+    };
+    this._daten.letzte_rolle = rolle.id;
+    let text = `${zahl(b.summe, 1)} g von ${rolle.name} abgezogen${wechsel ? `, ${zahl(wechsel.g, 2)} g Reststück von ${alt.name}` : ""}.`;
+    if (bu.ergebnis === "ok" && rolle.achtung) {
+      delete rolle.achtung;
+      text += " Druck geglückt, das rote Ausrufezeichen ist weg.";
+    }
+    this._speichern();
+    if (bu.ergebnis === "fehl") { bu.schritt = "fragen"; this._toast(text); return; }
+    this._dialog = null;
+    this._bu = null;
+    this._toast(text);
+    setTimeout(() => this._buNachLaden(), 3000);
+  },
+
+  _buRueckgaengig(uid) {
+    const x = this._buExtra(uid), g = x.gebucht;
+    if (!g) return;
+    const rolle = this._daten.rollen.find((r) => r.id === g.rolle);
+    if (rolle) { if (rolle.rest_g != null) rolle.rest_g += g.g; rolle.verbraucht_g = Math.max(0, (rolle.verbraucht_g || 0) - g.g); }
+    if (g.wechsel) { const alt = this._daten.rollen.find((r) => r.id === g.wechsel.rolle); if (alt && alt.rest_g != null) alt.rest_g += g.wechsel.g; }
+    delete x.gebucht;
+    delete x.fehl;
+    this._speichern();
+    this._toast(`Buchung zurückgenommen, ${zahl(g.g, 1)} g wieder gutgeschrieben.`);
+  },
+
+  // ---- Fehldruck: Fragen ----
+  _buFragenHtml(d) {
+    const bu = this._bu;
+    return `<h2>Was ist passiert?</h2><p class="leise klein">${esc(d.name)} · ${zahl(bu.fortschritt)} % gedruckt</p>
+      <h3>Wann ging es schief?</h3>
+      <div class="chips">${FEHL_FRAGEN.wann.map((w) => `<button class="chip ${bu.wann === w.id ? "an" : ""}" data-aktion="bu-wann" data-id="${w.id}">${w.name}</button>`).join("")}</div>
+      ${bu.wann ? `<p class="leise klein">${esc(FEHL_FRAGEN.wann.find((w) => w.id === bu.wann).hinweis)}</p>` : ""}
+      <h3>Wie sieht es aus? <span class="leise klein">(mehrere möglich)</span></h3>
+      <div class="bu-bilder">${FEHLERBILDER.map((f) => `<button class="bu-bild ${bu.bilder.includes(f.id) ? "an" : ""}" data-aktion="bu-bild" data-id="${f.id}">${FB_ZEICHNUNG[f.id] || ""}<span>${esc(f.name)}</span></button>`).join("")}</div>
+      <h3>Noch drei kurze Fragen</h3>
+      ${FEHL_FRAGEN.extra.map((q) => `<div class="bu-frage"><span>${esc(q.frage)}</span><span class="chips">
+        ${["ja", "nein", "?"].map((a) => `<button class="chip ${bu.extra[q.id] === a ? "an" : ""}" data-aktion="bu-extra" data-id="${q.id}" data-a="${a}">${a === "?" ? "weiß nicht" : a}</button>`).join("")}</span></div>`).join("")}
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="bu-fertig">Überspringen</button>
+        <button class="knopf" data-aktion="bu-auswerten">Ursachen anzeigen</button></div>`;
+  },
+
+  _buUrsachen() {
+    const bu = this._bu;
+    const liste = [...bu.bilder];
+    FEHL_FRAGEN.extra.forEach((q) => { const a = bu.extra[q.id]; if (a === "nein" && q.nein && !liste.includes(q.nein)) liste.push(q.nein); });
+    if (!liste.length) {
+      // Nichts ausgewählt: aus dem Zeitpunkt die häufigste Ursache nehmen
+      liste.push(bu.wann === "erste" || bu.wann === "frueh" ? "haftung" : bu.wann === "spaet" ? "verstopft" : "spaghetti");
+    }
+    return liste.map(fehlerbild).filter(Boolean);
+  },
+
+  _buLoesungenHtml(d) {
+    const bu = this._bu;
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const ursachen = this._buUrsachen();
+    return `<h2>Mögliche Ursachen</h2><p class="leise klein">Für ${esc(rolle ? rolle.name : "die Rolle")}. Haken bei den Werten, die ich in die Rolle übernehmen soll.</p>
+      ${ursachen.map((u) => `<div class="bu-ursache"><div class="bu-ursache-kopf">${FB_ZEICHNUNG[u.id] || ""}<div><strong>${esc(u.name)}</strong><small class="leise">${esc(u.ursachen.join(" · "))}</small></div></div>
+        <ul class="bu-loesungen">${u.loesungen.map((l, i) => {
+          const a = l.aenderung && rolle ? aenderungRechnen(rolle, l.aenderung) : null;
+          const key = `${u.id}-${i}`;
+          return `<li>${a ? `<button class="bu-haken ${bu.uebernehmen[key] ? "an" : ""}" data-aktion="bu-haken" data-id="${key}" aria-label="übernehmen">${bu.uebernehmen[key] ? "✓" : ""}</button>` : `<span class="bu-punkt">•</span>`}
+            <span>${esc(l.text)}${a ? ` <span class="bu-aend">${esc(a.feld.name)}: ${zahl(a.alt, a.feld.nk || 0)} → <strong>${zahl(a.neu, a.feld.nk || 0)}</strong> ${esc(a.feld.e)}</span>` : ""}</span></li>`;
+        }).join("")}</ul></div>`).join("")}
+      <div class="hinweis rot-hinweis">Die Rolle bekommt ein rotes <strong>!</strong>, bis ein Druck mit ihr wieder klappt.</div>
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="bu-zurueck">Zurück</button>
+        <button class="knopf" data-aktion="bu-fehl-speichern">${Object.values(bu.uebernehmen).some(Boolean) ? "Übernehmen und markieren" : "Rolle markieren"}</button></div>`;
+  },
+
+  _buFehlSpeichern() {
+    const bu = this._bu;
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const ursachen = this._buUrsachen();
+    const geaendert = [];
+    if (rolle) {
+      ursachen.forEach((u) => u.loesungen.forEach((l, i) => {
+        if (!bu.uebernehmen[`${u.id}-${i}`] || !l.aenderung) return;
+        const a = aenderungRechnen(rolle, l.aenderung);
+        if (!a) return;
+        rolle.eigen = { ...(rolle.eigen || {}), [a.k]: a.neu };
+        geaendert.push(`${a.feld.name} ${zahl(a.neu, a.feld.nk || 0)} ${a.feld.e}`.trim());
+      }));
+      rolle.achtung = { seit: new Date().toISOString(), druck: bu.uid, grund: ursachen.map((u) => u.name).join(", "), geaendert };
+    }
+    const x = this._daten.drucke[bu.uid] || (this._daten.drucke[bu.uid] = {});
+    x.fehl = { wann: bu.wann, bilder: bu.bilder, extra: bu.extra, ursachen: ursachen.map((u) => u.id), geaendert };
+    this._speichern();
+    this._dialog = null;
+    this._bu = null;
+    this._toast(geaendert.length ? `Gespeichert: ${geaendert.join(", ")}. Rolle ist rot markiert.` : "Gespeichert. Die Rolle ist rot markiert, bis ein Druck klappt.");
+  },
+
+  // ---- Druck von Hand nachtragen ----
+  _buHandHtml() {
+    const h = this._buHand;
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    return `<h2>Druck nachtragen</h2><p class="leise klein">Wenn die Automation einen Druck nicht erfasst hat, z. B. weil die Bambu-Cloud nicht erreichbar war.</p>
+      <label class="feld"><span>Name</span><input id="bu-hand-name" value="${esc(h.name)}" placeholder="z. B. Kabelhalter"></label>
+      <div class="mod-regler"><div class="r-kopf"><span>Gewicht laut Slicer</span><strong id="bu-wert-hand-g">${zahl(h.gewicht, 1)} g</strong></div>
+        <div class="regler-zeile"><input type="range" min="0" max="500" step="0.5" value="${h.gewicht}" data-bu="hand-g"></div></div>
+      <div class="chips"><button class="chip ${h.status === "finish" ? "an" : ""}" data-aktion="bu-hand-status" data-id="finish">Fertig</button>
+        <button class="chip ${h.status === "failed" ? "an" : ""}" data-aktion="bu-hand-status" data-id="failed">Abgebrochen</button></div>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
+        <button class="knopf" data-aktion="bu-hand-ok">Weiter zum Verbuchen</button></div>`;
+  },
+
+  _buKlick(a, el) {
+    const bu = this._bu;
+    switch (a) {
+      case "bu-start": this._buStarten(el.dataset.uid, el.dataset.ergebnis); break;
+      case "bu-rolle": bu.rolleId = el.dataset.id; break;
+      case "bu-waehlen": bu.waehlen = true; break;
+      case "bu-ergebnis": bu.ergebnis = el.dataset.id; if (bu.ergebnis === "ok") bu.fortschritt = 100; break;
+      case "bu-buchen": this._buBuchen(); break;
+      case "bu-ignorieren":
+        this._daten.drucke[bu.uid] = { ...this._buExtra(bu.uid), ignoriert: true };
+        this._speichern(); this._dialog = null; this._bu = null;
+        this._toast("Wird nicht verbucht. Im Druckverlauf kannst du es später nachholen.");
+        return;
+      case "bu-wann": bu.wann = el.dataset.id; break;
+      case "bu-bild": bu.bilder = bu.bilder.includes(el.dataset.id) ? bu.bilder.filter((x) => x !== el.dataset.id) : [...bu.bilder, el.dataset.id]; break;
+      case "bu-extra": bu.extra[el.dataset.id] = el.dataset.a; break;
+      case "bu-auswerten": bu.schritt = "loesungen"; this._sheetScroll = 0; break;
+      case "bu-zurueck": bu.schritt = "fragen"; break;
+      case "bu-haken": bu.uebernehmen[el.dataset.id] = !bu.uebernehmen[el.dataset.id]; break;
+      case "bu-fehl-speichern": this._buFehlSpeichern(); return;
+      case "bu-fertig": this._dialog = null; this._bu = null; break;
+      case "bu-rueckgaengig": this._buRueckgaengig(el.dataset.uid); break;
+      case "bu-hand": this._buHand = { name: "", gewicht: 10, status: "finish" }; this._dialog = "bu-hand"; break;
+      case "bu-hand-status": this._buHand.status = el.dataset.id; break;
+      case "bu-hand-ok": {
+        const name = (this.shadowRoot.getElementById("bu-hand-name").value || "").trim() || "Druck von Hand";
+        const uid = `hand-${Date.now()}`;
+        this._daten.drucke[uid] = { hand: { name, gewicht: this._buHand.gewicht, start: new Date().toISOString(), status: this._buHand.status, fortschritt: 50 } };
+        this._speichern();
+        this._buStarten(uid);
+        break;
+      }
+      case "bu-achtung-weg": {
+        const r = this._daten.rollen.find((x) => x.id === el.dataset.id);
+        if (r) { delete r.achtung; this._speichern(); this._toast("Markierung entfernt."); }
+        break;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+
+  _buEingabe(t) {
+    const k = t.dataset && t.dataset.bu;
+    if (!k) return false;
+    if (k === "fortschritt") {
+      this._bu.fortschritt = Number(t.value);
+      const w = this.shadowRoot.getElementById("bu-wert-fortschritt");
+      if (w) w.textContent = `${zahl(this._bu.fortschritt)} %`;
+      this._buRechnungNeu();
+    }
+    if (k === "hand-g") {
+      this._buHand.gewicht = Number(t.value);
+      const w = this.shadowRoot.getElementById("bu-wert-hand-g");
+      if (w) w.textContent = `${zahl(this._buHand.gewicht, 1)} g`;
+    }
+    if (k === "rolle") { this._bu.rolleId = t.value; this._buRechnungNeu(); }
+    return true;
+  },
+  _buAenderung(t) {
+    const k = t.dataset && t.dataset.bu;
+    if (!k) return false;
+    if (k === "rolle") { this._bu.rolleId = t.value; this._zeichnen(); }
+    if (k === "fortschritt") this._bu.wann = wannAusFortschritt(this._bu.fortschritt);
+    return true;
+  },
+
+  // Für Rollen-Detail: letzter verbuchter Druck dieser Rolle
+  _buLetzterDruck(rolleId) {
+    let best = null;
+    for (const [uid, x] of Object.entries(this._daten.drucke || {})) {
+      if (x.gebucht && x.gebucht.rolle === rolleId && (!best || x.gebucht.am > best.x.gebucht.am)) best = { uid, x };
+    }
+    if (!best) return null;
+    const d = this._buAlle().find((v) => v.uid === best.uid);
+    return { uid: best.uid, name: (d && d.name) || best.x.name || "Druck", d, x: best.x };
+  },
+};
+// ---------------------------------------------------------------------------
+// Hilfe: P1S-Zeichnung mit Bereichen, Sovol-Trockner, Fehlerbilder, Kalibrierung
+// ---------------------------------------------------------------------------
+
+const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"]];
+// Welche Rollenwerte zu welchem Bereich der Zeichnung gehören
+const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "max_vol"], luefter: ["luefter_min", "luefter_max"],
+  riemen: ["v_aussen", "v_innen", "v_fuellung"], bett: ["bett"], spule: ["tr_temp", "tr_dauer"] };
+
+const HilfeAnsicht = {
+  _hiZustand() {
+    if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", kalRolle: null, kalWert: null };
+    return this._hi;
+  },
+
+  _hiHtml() {
+    const h = this._hiZustand();
+    const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml() : this._hiDruckerHtml();
+    return `<div class="hi-seite" data-einmal="hi-${h.tab}">
+      <div class="chips hi-tabs unter-tabs">${HI_TABS.map(([id, n]) => `<button class="chip ${h.tab === id ? "an" : ""}" data-aktion="hi-tab" data-id="${id}">${n}</button>`).join("")}</div>
+      ${inhalt}</div>`;
+  },
+
+  // Rolle, deren Werte in der Hilfe gezeigt werden: zuletzt verbucht, sonst die erste probierte
+  _hiRolle() {
+    const d = this._daten;
+    return d.rollen.find((r) => r.id === d.letzte_rolle) || d.rollen.find((r) => r.probiert) || d.rollen[0];
+  },
+
+  _hiDruckerHtml() {
+    const h = this._hi;
+    return `<div class="hi-raster">
+      <div class="dr-karte hi-bild-karte"><h3 class="dr-titel">Bambu Lab P1S · ${this._mobil ? "tippe auf eine Nummer" : "fahre mit der Maus über die Nummern"}</h3>${p1sSvg(h.p1s)}</div>
+      <div id="hi-info" class="dr-karte hi-info">${this._hiP1sInfoHtml()}</div>
+    </div>`;
+  },
+  _hiP1sInfoHtml() {
+    const b = P1S_BEREICHE.find((x) => x.id === this._hi.p1s) || P1S_BEREICHE[0];
+    let live = "";
+    if (b.live && this._drW) {
+      const w = this._drW(b.live);
+      if (w != null) live = `<div class="hi-live"><span>Gerade am Drucker</span><strong>${esc(DR_SCHRITTE[w] || w)}${b.einheit && !isNaN(Number(w)) ? ` ${b.einheit}` : ""}</strong></div>`;
+    }
+    const r = this._hiRolle();
+    const felder = (HI_FELDER[b.id] || []).map((k) => FELDER.find((f) => f.k === k)).filter(Boolean);
+    const werte = r && felder.length ? `<div class="info-liste oben-abstand"><div class="info-zeile kopfzeile"><span>Bei ${esc(r.name)}</span><span></span></div>
+      ${felder.map((f) => { const w = wert(r, f.k); return `<div class="info-zeile"><span>${esc(f.name)}</span><strong class="${w.quelle === "vorschlag" ? "amber" : ""}">${w.v == null ? "–" : `${zahl(w.v, f.nk || 0)} ${f.e}`}</strong></div>`; }).join("")}
+      ${b.id === "bett" ? `<div class="info-zeile"><span>Druckplatte</span><strong>${esc(wert(r, "platte").v || "–")}</strong></div>` : ""}</div>` : "";
+    return `<div class="hi-nr">${b.n}</div><h2>${esc(b.name)}</h2><p>${esc(b.text)}</p>${live}
+      <h3>Einstellungen, die hier wirken</h3>
+      <div class="hi-einst">${b.einst.map(([n, t]) => `<div><strong>${esc(n)}</strong><span class="leise">${esc(t)}</span></div>`).join("")}</div>${werte}
+      <div class="chips oben-abstand hi-sprung">${P1S_BEREICHE.map((x) => `<button class="chip ${x.id === b.id ? "an" : ""}" data-aktion="hi-p1s" data-id="${x.id}">${x.n}</button>`).join("")}</div>`;
+  },
+
+  _hiTrocknerHtml() {
+    const h = this._hi;
+    const b = TROCKNER_BEREICHE.find((x) => x.id === h.tr) || TROCKNER_BEREICHE[0];
+    const rollen = this._daten.rollen.slice().sort((a, c) => (wert(c, "tr_temp").v || 0) - (wert(a, "tr_temp").v || 0));
+    return `<div class="hi-raster">
+      <div class="dr-karte hi-bild-karte"><h3 class="dr-titel">Sovol Filament-Trockner · ${this._mobil ? "tippe auf die Felder" : "fahre über die Felder"}</h3>${trocknerSvg(h.tr)}
+        <div id="hi-tr-info" class="hi-tr-info"><strong>${TROCKNER_BEREICHE.indexOf(b) + 1} · ${esc(b.name)}</strong><span>${esc(b.text)}</span></div></div>
+      <div class="dr-karte"><h3 class="dr-titel">Richtwerte je Material</h3>
+        <div class="tr-tabelle">${TROCKNEN_TABELLE.map((t) => `<div class="tr-zeile"><strong>${esc(t.m)}</strong>
+          <span class="tr-werte"><b>${t.temp} °C</b><b>${t.h} h</b><b>&lt; ${t.ziel} %</b></span>
+          <small class="leise">Feucht, wenn: ${esc(t.zeichen)}. ${esc(t.lagern)}</small></div>`).join("")}</div></div>
+    </div>
+    <div class="dr-karte oben-abstand"><h3 class="dr-titel">Deine Rollen</h3><div class="tr-rollen">${rollen.map((r) => {
+      const t = wert(r, "tr_temp").v, d = wert(r, "tr_dauer").v, f = wert(r, "tr_feuchte").v;
+      return `<button class="tr-rolle" data-aktion="oeffnen-filament" data-id="${esc(r.id)}">${spuleSvg(r)}<span><strong>${esc(r.name)}</strong><small>${esc(r.hersteller)}</small></span>
+        <span class="tr-werte"><b>${t != null ? `${zahl(t)} °C` : "–"}</b><b>${d != null ? `${zahl(d, 1)} h` : "–"}</b><b>${f != null ? `&lt; ${zahl(f)} %` : "–"}</b></span></button>`;
+    }).join("")}</div></div>`;
+  },
+
+  _hiFehlerHtml() {
+    const h = this._hi;
+    const r = this._hiRolle();
+    return `<p class="leise">Typische Fehlerbilder mit Ursachen und was du änderst. Tippe auf ein Bild für die Lösungen${r ? `, die Werte beziehen sich auf ${esc(r.name)}` : ""}.</p>
+      <div class="fb-raster">${FEHLERBILDER.map((f) => {
+        const auf = h.fehler === f.id;
+        return `<div class="fb-karte ${auf ? "auf" : ""}" data-klapp="fb-${f.id}">
+          <button class="fb-kopf" data-aktion="hi-fehler" data-id="${f.id}">${FB_ZEICHNUNG[f.id] || ""}<span><strong>${esc(f.name)}</strong><small class="leise">${esc(f.kurz)}</small></span></button>
+          ${auf ? `<div class="fb-details"><div class="leise klein">Ursachen: ${esc(f.ursachen.join(" · "))}</div>
+            <ul class="bu-loesungen">${f.loesungen.map((l) => { const a = l.aenderung && r ? aenderungRechnen(r, l.aenderung) : null;
+              return `<li><span class="bu-punkt">•</span><span>${esc(l.text)}${a ? ` <span class="bu-aend">${esc(a.feld.name)}: ${zahl(a.alt, a.feld.nk || 0)} → <strong>${zahl(a.neu, a.feld.nk || 0)}</strong> ${esc(a.feld.e)}</span>` : ""}</span></li>`; }).join("")}</ul></div>` : ""}
+        </div>`;
+      }).join("")}</div>`;
+  },
+
+  _hiKalHtml() {
+    const h = this._hi;
+    const k = KALIBRIERUNGEN.find((x) => x.id === h.kal) || KALIBRIERUNGEN[0];
+    const f = FELDER.find((x) => x.k === k.feld);
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const r = rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+    const aktuell = wert(r, k.feld).v;
+    const w = h.kalWert != null ? h.kalWert : aktuell;
+    const kal = (r.kalibriert || {})[k.feld];
+    return `<div class="chips kal-wahl unter-tabs">${KALIBRIERUNGEN.map((x) => `<button class="chip ${x.id === k.id ? "an" : ""}" data-aktion="hi-kal" data-id="${x.id}">${x.icon} ${esc(x.name)}</button>`).join("")}</div>
+      <div class="hi-raster">
+        <div class="dr-karte" data-einmal="kal-${k.id}"><div class="kal-kopf">${k.bild}<div><h2>${esc(k.name)}</h2><p class="leise">${esc(k.wozu)}</p></div></div>
+          <h3>So geht's</h3><ol class="kal-liste">${k.so.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+          <h3>Worauf achten</h3><ul class="kal-liste">${k.achten.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>
+          <h3>Typische Fehler</h3><ul class="kal-liste fehler">${k.fehler.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>
+        <div class="dr-karte"><h3 class="dr-titel">Ergebnis eintragen</h3>
+          <label class="auswahl breit-auswahl"><span>Rolle</span><select data-hi="rolle">${rollen.map((x) => `<option value="${esc(x.id)}" ${x.id === r.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.hersteller)}</option>`).join("")}</select></label>
+          <div class="mod-regler"><div class="r-kopf"><span>${esc(f.name)}</span><strong id="hi-kal-wert">${w == null ? "–" : `${zahl(w, f.nk || 0)} ${f.e}`}</strong></div>
+            <div class="regler-zeile"><button class="rund" data-aktion="hi-kal-schritt" data-d="-1">−</button><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${w == null ? f.min : w}" data-hi="kal-wert"><button class="rund" data-aktion="hi-kal-schritt" data-d="1">+</button></div></div>
+          <p class="leise klein">Bisher: ${aktuell == null ? "–" : `${zahl(aktuell, f.nk || 0)} ${f.e}`} (${wert(r, k.feld).quelle === "vorschlag" ? "Vorschlag" : "dein Wert"})${kal ? ` · kalibriert am ${new Date(kal).toLocaleDateString("de-DE")}` : ""}</p>
+          <button class="knopf breit" data-aktion="hi-kal-speichern">In ${esc(r.name)} speichern</button></div>
+      </div>`;
+  },
+
+  // Mausbewegung über der Zeichnung: Info sofort wechseln, ohne alles neu zu zeichnen
+  _hiNachZeichnen() {
+    const svg = this.shadowRoot.querySelector(".p1s-bild, .trockner-bild");
+    if (!svg || svg._hiBereit) return;
+    svg._hiBereit = true;
+    svg.addEventListener("mouseover", (e) => {
+      const g = e.target.closest && e.target.closest(".p1s-punkt");
+      if (!g || this._mobil) return;
+      this._hiZeigen(g.dataset.aktion, g.dataset.id);
+    });
+  },
+  _hiZeigen(art, id) {
+    const h = this._hi;
+    if (art === "hi-p1s") { if (h.p1s === id) return; h.p1s = id; } else { if (h.tr === id) return; h.tr = id; }
+    this.shadowRoot.querySelectorAll(".p1s-punkt").forEach((g) => g.classList.toggle("an", g.dataset.id === id));
+    if (art === "hi-p1s") {
+      const box = this.shadowRoot.getElementById("hi-info");
+      if (box) { box.innerHTML = this._hiP1sInfoHtml(); box.classList.remove("wechsel"); void box.offsetWidth; box.classList.add("wechsel"); }
+      if (this._mobil && box) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } else {
+      const b = TROCKNER_BEREICHE.find((x) => x.id === id);
+      const box = this.shadowRoot.getElementById("hi-tr-info");
+      if (box && b) { box.innerHTML = `<strong>${TROCKNER_BEREICHE.indexOf(b) + 1} · ${esc(b.name)}</strong><span>${esc(b.text)}</span>`; box.classList.remove("wechsel"); void box.offsetWidth; box.classList.add("wechsel"); }
+    }
+  },
+
+  _hiKlick(a, el) {
+    const h = this._hiZustand();
+    switch (a) {
+      case "hi-tab": h.tab = el.dataset.id; break;
+      case "hi-p1s": case "hi-tr": this._hiZeigen(a, el.dataset.id); return;
+      case "hi-fehler": {
+        const id = el.dataset.id;
+        this._klappen(`fb-${id}`, h.fehler === id, () => { h.fehler = h.fehler === id ? null : id; });
+        return;
+      }
+      case "hi-kal": h.kal = el.dataset.id; h.kalWert = null; break;
+      case "hi-kal-schritt": {
+        const k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
+        const r = this._daten.rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+        const alt = h.kalWert != null ? h.kalWert : (wert(r, k.feld).v ?? f.min);
+        h.kalWert = Math.min(f.max, Math.max(f.min, Math.round((alt + Number(el.dataset.d) * f.step) / f.step) * f.step));
+        this._hiKalWertZeigen();
+        return;
+      }
+      case "hi-kal-speichern": {
+        const k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
+        const r = this._daten.rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+        const w = h.kalWert != null ? h.kalWert : wert(r, k.feld).v;
+        if (w == null) return;
+        r.eigen = { ...(r.eigen || {}), [k.feld]: w };
+        r.kalibriert = { ...(r.kalibriert || {}), [k.feld]: new Date().toISOString() };
+        h.kalWert = null;
+        this._speichern();
+        this._toast(`${f.name} ${zahl(w, f.nk || 0)} ${f.e} bei ${r.name} gespeichert.`);
+        return;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+  _hiKalWertZeigen() {
+    const h = this._hi, k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
+    const s = this.shadowRoot.getElementById("hi-kal-wert");
+    if (s) s.textContent = `${zahl(h.kalWert, f.nk || 0)} ${f.e}`;
+    const i = this.shadowRoot.querySelector('[data-hi="kal-wert"]');
+    if (i) i.value = h.kalWert;
+  },
+  _hiEingabe(t) {
+    const k = t.dataset && t.dataset.hi;
+    if (!k) return false;
+    if (k === "kal-wert") { this._hi.kalWert = Number(t.value); this._hiKalWertZeigen(); }
+    return true;
+  },
+  _hiAenderung(t) {
+    const k = t.dataset && t.dataset.hi;
+    if (!k) return false;
+    if (k === "rolle") { this._hi.kalRolle = t.value; this._hi.kalWert = null; this._zeichnen(); }
+    return true;
+  },
+};
+// ---------------------------------------------------------------------------
+// Werkstatt: Warteschlange mit Bestandsprüfung, Einkaufsliste, Modell-Bibliothek,
+// Fehldrucke, Wartungsplan mit Verschleißteilen, Kosten je Druck und Monat
+// ---------------------------------------------------------------------------
+
+const WS_TABS = [["schlange", "📋 Warteschlange"], ["einkauf", "🛒 Einkauf"], ["bibliothek", "📚 Bibliothek"], ["fehl", "💥 Fehldrucke"], ["wartung", "🔧 Wartung"], ["kosten", "💶 Kosten"]];
+const WS_EINSTELLUNGEN = [
+  { k: "strompreis", name: "Strompreis", e: "€/kWh", min: 0.1, max: 0.8, step: 0.01, nk: 2 },
+  { k: "linie_g", name: "Anfangslinie je Druck", e: "g", min: 0, max: 2, step: 0.05, nk: 2 },
+  { k: "extruder_g", name: "3 Extruder-Fahrten je Druck", e: "g", min: 0, max: 1, step: 0.05, nk: 2 },
+  { k: "wechsel_g", name: "Reststück beim Rollenwechsel", e: "g", min: 0, max: 1, step: 0.05, nk: 2 },
+  { k: "mindest_g", name: "Nachkaufen je Farbe unter", e: "g", min: 0, max: 1000, step: 50 },
+  { k: "mindest_material_g", name: "Nachkaufen je Material unter", e: "g", min: 0, max: 3000, step: 100 },
+];
+const WS_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+
+// Druckname ohne Endung und Plattennummer, damit gleiche Modelle zusammenfallen
+function modellSchluessel(name) {
+  return normText(String(name || "").replace(/\.(gcode|3mf|stl)$/gi, "").replace(/[_-]?plate[_ ]?\d+$/i, "")) || "druck";
+}
+function tageSeit(iso) { return iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : null; }
+
+const WerkstattAnsicht = {
+  _wsZustand() {
+    if (!this._ws) this._ws = { tab: "schlange", neu: null };
+    return this._ws;
+  },
+
+  _wsHtml() {
+    const w = this._wsZustand();
+    const zahlen = { schlange: this._daten.warteschlange.length, einkauf: this._wsEinkauf().length, wartung: this._wsWartung().filter((a) => a.faellig).length };
+    const inhalt = { einkauf: () => this._wsEinkaufHtml(), bibliothek: () => this._wsBibliothekHtml(), fehl: () => this._wsFehlHtml(), wartung: () => this._wsWartungHtml(), kosten: () => this._wsKostenHtml() }[w.tab] || (() => this._wsSchlangeHtml());
+    return `<div class="ws-seite">
+      <div class="chips unter-tabs" role="tablist">${WS_TABS.map(([id, n]) => `<button class="chip ${w.tab === id ? "an" : ""}" data-aktion="ws-tab" data-id="${id}">${n}${zahlen[id] ? ` <span class="zahl-punkt ${id === "wartung" ? "amber-punkt" : ""}">${zahlen[id]}</span>` : ""}</button>`).join("")}</div>
+      <div class="ws-inhalt wechsel-rein" data-einmal="ws-${w.tab}">${inhalt()}</div></div>`;
+  },
+
+  // ---- Warteschlange ----
+  _wsBestand() {
+    // Aufträge der Reihe nach von den Rollen abziehen: späterer Auftrag sieht, was übrig bleibt
+    const e = this._daten.einstellungen, rest = {};
+    return this._daten.warteschlange.map((a) => {
+      const r = this._daten.rollen.find((x) => x.id === a.rolleId);
+      const bedarf = (a.gewicht || 0) + e.linie_g + e.extruder_g;
+      if (!r) return { a, r: null, stufe: "ohne", bedarf };
+      if (r.rest_g == null) return { a, r, stufe: "ungewogen", bedarf };
+      const vorher = r.id in rest ? rest[r.id] : r.rest_g;
+      rest[r.id] = vorher - bedarf;
+      const stufe = !a.gewicht ? "unbekannt" : vorher >= bedarf * 1.1 ? "ok" : vorher >= bedarf ? "knapp" : "fehlt";
+      const ersatz = stufe === "fehlt" || stufe === "knapp" ? this._daten.rollen.filter((x) => x !== r && x.material === r.material && x.rest_g != null && x.rest_g >= bedarf * 1.1)
+        .sort((x, y) => (farbfamilie(y) === farbfamilie(r)) - (farbfamilie(x) === farbfamilie(r)) || x.rest_g - y.rest_g).slice(0, 3) : [];
+      return { a, r, stufe, bedarf, vorher, danach: vorher - bedarf, ersatz };
+    });
+  },
+  _wsSchlangeHtml() {
+    const liste = this._wsBestand();
+    const text = { ok: ["✓ reicht", "mint"], knapp: ["knapp", "amber"], fehlt: ["reicht nicht", "rot"], ungewogen: ["Rolle nicht gewogen", "amber"], unbekannt: ["Gewicht unbekannt", "leise"], ohne: ["keine Rolle gewählt", "amber"] };
+    return `<div class="ws-kopfzeile"><p class="leise">Was als Nächstes gedruckt wird. Die Bestandsprüfung rechnet die Aufträge der Reihe nach von den Rollen ab.</p>
+      <button class="knopf" data-aktion="ws-neu">＋ Auftrag</button></div>
+      ${!liste.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📋</span><strong>Die Warteschlange ist leer</strong>
+        <span class="leise">Füge Aufträge hier hinzu, aus dem 3D-Modell-Viewer oder mit „Nochmal drucken“ in der Bibliothek.</span></div>` : ""}
+      <div class="ws-liste">${liste.map((x, i) => {
+        const [st, farbe] = text[x.stufe];
+        return `<div class="ws-auftrag dr-karte" data-einmal="ws-a-${esc(x.a.id)}">
+          <div class="ws-nr">${i + 1}</div>
+          <div class="ws-text"><strong>${esc(x.a.name)}</strong>
+            <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${x.a.zeit ? ` · ${esc(x.a.zeit)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}</small>
+            <span class="pille ${farbe}">${st}${x.vorher != null && x.a.gewicht ? (x.danach < 0 ? ` · es fehlen ${zahl(-x.danach)} g` : ` · danach ${zahl(x.danach)} g`) : ""}</span>
+            ${x.ersatz && x.ersatz.length ? `<div class="chips ws-ersatz"><span class="leise klein">Reicht stattdessen:</span>${x.ersatz.map((r) => `<button class="chip" data-aktion="ws-rolle" data-id="${esc(x.a.id)}" data-rolle="${esc(r.id)}">${esc(r.name)} · ${zahl(r.rest_g)} g</button>`).join("")}</div>` : ""}
+            ${x.a.notiz ? `<small class="leise">📝 ${esc(x.a.notiz)}</small>` : ""}</div>
+          <div class="ws-knoepfe">
+            <button class="rund" data-aktion="ws-hoch" data-id="${esc(x.a.id)}" ${i === 0 ? "disabled" : ""} aria-label="Nach oben">↑</button>
+            <button class="rund" data-aktion="ws-runter" data-id="${esc(x.a.id)}" ${i === liste.length - 1 ? "disabled" : ""} aria-label="Nach unten">↓</button>
+            <button class="rund" data-aktion="ws-bearbeiten" data-id="${esc(x.a.id)}" aria-label="Bearbeiten">✎</button>
+            <button class="rund" data-aktion="ws-weg" data-id="${esc(x.a.id)}" aria-label="Entfernen">✓</button>
+          </div></div>`;
+      }).join("")}</div>`;
+  },
+  _wsAuftragNeu(werte) {
+    const voll = this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => b.rest_g - a.rest_g)[0] || this._daten.rollen[0] || {};
+    this._wsZustand().neu = { id: null, name: "", gewicht: 20, rolleId: this._daten.letzte_rolle || voll.id, notiz: "", ...werte };
+    this._dialog = "ws-auftrag";
+  },
+  _wsAuftragDialogHtml() {
+    const n = this._ws.neu;
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    return `<h2>${n.id ? "Auftrag bearbeiten" : "Neuer Auftrag"}</h2>
+      <label class="feld"><span>Was wird gedruckt?</span><input id="ws-name" value="${esc(n.name)}" placeholder="z. B. Kabelhalter" maxlength="80"></label>
+      <div class="mod-regler"><div class="r-kopf"><span>Filament</span><strong id="ws-gewicht">${zahl(n.gewicht, 1)} g</strong></div>
+        <div class="regler-zeile"><button class="rund" data-aktion="ws-g" data-d="-5">−5</button><input type="range" min="0" max="1000" step="0.5" value="${n.gewicht}" data-ws="gewicht"><button class="rund" data-aktion="ws-g" data-d="5">+5</button></div></div>
+      <label class="auswahl breit-auswahl"><span>Rolle</span><select data-ws="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${r.id === n.rolleId ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : ""}</option>`).join("")}</select></label>
+      <label class="feld"><span>Notiz (optional)</span><input id="ws-notiz" value="${esc(n.notiz)}" maxlength="140"></label>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf" data-aktion="ws-speichern">${n.id ? "Speichern" : "Hinzufügen"}</button></div>`;
+  },
+  // Aus dem STL-/G-Code-Viewer: Name, Gewicht und gewählte Rolle übernehmen
+  _wsAusModell() {
+    const m = this._mod;
+    if (!m || m.laedt) return;
+    let g = null;
+    if (m.art === "gcode") g = m.gcode && m.gcode.info.gramm;
+    else if (m.kenn) { const r = this._modRolle(); g = gewichtSchaetzen(m.kenn, materialInfo(r ? r.material : "PLA").dichte, { duese: m.duese, waende: m.waende, fuellung: m.fuellung }).gramm; }
+    this._daten.warteschlange.push({ id: `a-${Date.now().toString(36)}`, name: m.name.replace(/\.(gcode\.3mf|gcode|3mf|stl)$/i, ""), gewicht: g ? Math.round(g * 10) / 10 : null,
+      zeit: m.art === "gcode" ? m.gcode.info.zeit || null : null, rolleId: m.rolleId, notiz: "", am: new Date().toISOString(), quelle: m.art });
+    this._speichern();
+    this._toast(`„${m.name}“ steht jetzt in der Warteschlange (Platz ${this._daten.warteschlange.length}).`);
+  },
+
+  // ---- Einkaufsliste ----
+  _wsEinkauf() {
+    const d = this._daten, e = d.einstellungen, liste = [];
+    const gruppen = {};
+    for (const r of d.rollen) {
+      if (r.rest_g == null) continue;
+      const k = `${r.material}|${farbfamilie(r)}`;
+      (gruppen[k] = gruppen[k] || { material: r.material, farbe: farbfamilie(r), g: 0, rollen: [] });
+      gruppen[k].g += r.rest_g; gruppen[k].rollen.push(r);
+    }
+    for (const x of Object.values(gruppen)) {
+      if (x.g < e.mindest_g) liste.push({ art: "farbe", titel: `${x.material} ${x.farbe}`, text: `nur noch ${zahl(x.g)} g (${x.rollen.map((r) => r.name).join(", ")})`, hex: x.rollen[0].hex, dringend: x.g < e.mindest_g / 2 });
+    }
+    const mats = {};
+    for (const r of d.rollen) if (r.rest_g != null) mats[r.material] = (mats[r.material] || 0) + r.rest_g;
+    for (const [m, g] of Object.entries(mats)) if (g < e.mindest_material_g) liste.push({ art: "material", titel: `${m} allgemein`, text: `insgesamt nur noch ${zahl(g)} g ${m}`, dringend: g < e.mindest_material_g / 2 });
+    for (const t of d.inventar) {
+      if (wenigBestand(t) || (t.menge === 0)) liste.push({ art: "teil", titel: teilName(t), text: `${t.menge} Stk${t.min ? `, Mindestbestand ${t.min}` : ""}`, id: t.id, dringend: t.menge === 0, icon: kategorie(t.kat).icon });
+    }
+    const h = this._drZ ? this._drZ("stunden") : null;
+    if (h != null) for (const t of this._wsTeile()) {
+      const genutzt = h - (t.eingebaut_h || 0);
+      if (genutzt >= t.lebensdauer_h * 0.9) liste.push({ art: "verschleiss", titel: t.name, text: `${zahl(genutzt)} von ~${zahl(t.lebensdauer_h)} Druckstunden`, dringend: genutzt >= t.lebensdauer_h, icon: "⚙️" });
+    }
+    return liste.sort((a, b) => b.dringend - a.dringend);
+  },
+  _wsEinkaufHtml() {
+    const l = this._wsEinkauf(), e = this._daten.einstellungen;
+    const ungewogen = this._daten.rollen.filter((r) => r.rest_g == null).length;
+    return `<div class="ws-kopfzeile"><p class="leise">Filament unter ${zahl(e.mindest_g)} g je Farbe oder ${zahl(e.mindest_material_g)} g je Material, Teile unter dem Mindestbestand und abgenutzte Verschleißteile. Grenzen änderst du unter 💶 Kosten.</p>
+      ${l.length ? `<button class="knopf leise" data-aktion="ws-kopieren">📋 Liste kopieren</button>` : ""}</div>
+      ${!l.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">✅</span><strong>Nichts nachzukaufen</strong><span class="leise">Alle Farben, Materialien und Teile sind über den Grenzen.</span></div>` : ""}
+      <div class="ws-liste">${l.map((x) => `<div class="ws-einkauf dr-karte ${x.dringend ? "dringend" : ""}">
+        ${x.hex ? `<span class="farbtupfer" style="background:${esc(x.hex)}"></span>` : `<span class="ws-icon">${x.icon || "🧵"}</span>`}
+        <div><strong>${esc(x.titel)}</strong><small class="leise">${esc(x.text)}</small></div>
+        ${x.dringend ? `<span class="pille rot">dringend</span>` : ""}
+        ${x.id ? `<button class="mini" data-aktion="such-teil" data-id="${esc(x.id)}">Öffnen</button>` : ""}</div>`).join("")}</div>
+      ${ungewogen ? `<p class="leise klein oben-abstand">${ungewogen} Rollen sind nicht gewogen und fehlen in der Rechnung.</p>` : ""}`;
+  },
+  _wsEinkaufText() {
+    return "Einkaufsliste 3D-Drucker\n" + this._wsEinkauf().map((x) => `- ${x.titel}: ${x.text}${x.dringend ? " (dringend)" : ""}`).join("\n");
+  },
+
+  // ---- Modell-Bibliothek ----
+  _wsModelle() {
+    const gruppen = new Map();
+    for (const d of this._buAlle()) {
+      if (d.status === "laeuft") continue;
+      const k = modellSchluessel(d.name);
+      const x = this._buExtra(d.uid);
+      const g = gruppen.get(k) || { name: d.name, drucke: [], ok: 0, fehl: 0 };
+      g.drucke.push(d);
+      const erg = x.gebucht ? x.gebucht.ergebnis : d.status === "finish" ? "ok" : null;
+      if (erg === "ok") g.ok++; else if (erg === "fehl") g.fehl++;
+      if (!g.rolle && x.gebucht) g.rolle = x.gebucht.rolle;
+      gruppen.set(k, g);
+    }
+    return [...gruppen.values()].sort((a, b) => (b.drucke[0].start || "").localeCompare(a.drucke[0].start || ""));
+  },
+  _wsBibliothekHtml() {
+    const modelle = this._wsModelle();
+    const q = this._ws.suche || "";
+    const zeige = q ? modelle.filter((m) => suchPunkte(q, m.name)) : modelle;
+    return `<div class="ws-kopfzeile"><input class="such-feld" data-ws="suche" value="${esc(q)}" placeholder="Modell suchen …" aria-label="Modell suchen"></div>
+      ${!modelle.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📚</span><strong>Noch keine Modelle</strong><span class="leise">Jeder Druck aus dem Druckverlauf landet hier, gleiche Modelle werden zusammengefasst.</span></div>` : ""}
+      <div class="ws-raster" id="ws-bib">${zeige.map((m) => this._wsModellKarte(m)).join("") || (modelle.length ? `<p class="leise">Kein Modell passt zu „${esc(q)}“.</p>` : "")}</div>`;
+  },
+  _wsModellKarte(m) {
+    const d = m.drucke[0], f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+    const r = this._daten.rollen.find((x) => x.id === m.rolle);
+    const quote = m.ok + m.fehl ? Math.round((m.ok / (m.ok + m.fehl)) * 100) : null;
+    return `<div class="ws-modell dr-karte">
+      <div class="ws-foto" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="" loading="lazy">` : `<span>🧊</span>`}</div>
+      <div class="ws-modell-text"><strong title="${esc(m.name)}">${esc(m.name)}</strong>
+        <small class="leise">${m.drucke.length}× gedruckt · zuletzt ${esc(d.zeit || "–")}</small>
+        <small class="leise">${d.gewicht != null ? `${zahl(d.gewicht, 1)} g` : "–"}${r ? ` · ${esc(r.name)}` : ""}${quote != null ? ` · ${quote} % geglückt` : ""}</small></div>
+      <div class="ws-modell-knoepfe"><button class="knopf klein-knopf" data-aktion="ws-nochmal" data-uid="${esc(d.uid)}">↻ Nochmal drucken</button>
+        <button class="mini" data-aktion="zum-druck" data-uid="${esc(d.uid)}">Details</button></div></div>`;
+  },
+
+  // ---- Fehldrucke ----
+  _wsFehldrucke() {
+    return this._buAlle().filter((d) => { const g = this._buExtra(d.uid).gebucht; return g && g.ergebnis === "fehl"; });
+  },
+  _wsFehlHtml() {
+    const l = this._wsFehldrucke();
+    if (!l.length) return `<div class="leer-karte dr-karte"><span class="gross-icon">🎉</span><strong>Keine Fehldrucke</strong><span class="leise">Wird ein abgebrochener Druck als Fehldruck verbucht, landet er hier mit Endfoto und Ursache.</span></div>`;
+    return `<p class="leise">${l.length} Fehldrucke mit Endfoto, Ursache und was geändert wurde.</p>
+      <div class="ws-raster">${l.map((d) => {
+        const x = this._buExtra(d.uid), f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+        const r = this._daten.rollen.find((y) => y.id === x.gebucht.rolle);
+        const ursachen = ((x.fehl && x.fehl.ursachen) || []).map((id) => fehlerbild(id)).filter(Boolean);
+        return `<div class="ws-modell dr-karte fehl">
+          <div class="ws-foto" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="" loading="lazy">` : `<span>💥</span>`}</div>
+          <div class="ws-modell-text"><strong>${esc(d.name)}</strong>
+            <small class="leise">${esc(d.zeit || "")} · bei ${zahl(x.gebucht.fortschritt)} %${r ? ` · ${esc(r.name)}` : ""}</small>
+            ${ursachen.length ? `<small>🩺 ${esc(ursachen.map((u) => u.name).join(", "))}</small>` : `<small class="leise">Ursache nicht angegeben</small>`}
+            ${x.fehl && x.fehl.geaendert && x.fehl.geaendert.length ? `<small class="mint">Geändert: ${esc(x.fehl.geaendert.join(", "))}</small>` : ""}</div>
+          <div class="ws-modell-knoepfe"><button class="mini" data-aktion="zum-druck" data-uid="${esc(d.uid)}">Details</button></div></div>`;
+      }).join("")}</div>`;
+  },
+
+  // ---- Wartung ----
+  _wsTeile() {
+    const w = this._daten.wartung;
+    return w.teile || ERSATZTEILE_STANDARD.map((t) => ({ ...t }));
+  },
+  _wsWartung() {
+    const h = this._drZ ? this._drZ("stunden") : null;
+    const auf = this._daten.wartung.aufgaben || {};
+    return WARTUNG_AUFGABEN.map((a) => {
+      const z = auf[a.id];
+      if (!z) return { a, neu: true, faellig: false, anteil: 0 };
+      const seitH = h != null && z.h != null ? h - z.h : null;
+      const seitT = tageSeit(z.am);
+      const anteil = Math.max(seitH != null ? seitH / a.alle_h : 0, seitT / a.alle_tage);
+      return { a, z, seitH, seitT, anteil, faellig: anteil >= 1 };
+    }).sort((x, y) => y.anteil - x.anteil);
+  },
+  _wsWartungHtml() {
+    const h = this._drZ ? this._drZ("stunden") : null;
+    const liste = this._wsWartung();
+    const teile = this._wsTeile();
+    const balken = (anteil) => `<div class="ws-balken"><span style="width:${Math.min(100, Math.round(anteil * 100))}%" class="${anteil >= 1 ? "rot" : anteil >= 0.8 ? "amber" : ""}"></span></div>`;
+    return `<div class="ws-kopfzeile"><p class="leise">Fällig nach Druckstunden oder Tagen, je nachdem was zuerst kommt. ${h != null ? `Der Drucker hat ${zahl(h)} Betriebsstunden.` : "Betriebsstunden gerade nicht abrufbar, gezählt wird nach Tagen."}</p></div>
+      <div class="ws-liste">${liste.map((x) => `<div class="ws-wartung dr-karte ${x.faellig ? "dringend" : ""}">
+        <div class="ws-text"><strong>${esc(x.a.name)}</strong><small class="leise">${esc(x.a.text)}</small>
+          ${x.neu ? `<small class="amber">Noch nicht erfasst. Tippe auf „Erledigt“, wenn du es zuletzt gemacht hast, dann zählt es ab heute.</small>`
+            : `${balken(x.anteil)}<small class="leise">Zuletzt vor ${zahl(x.seitT)} Tagen${x.seitH != null ? ` und ${zahl(x.seitH)} Druckstunden` : ""} · alle ${x.a.alle_h} h oder ${x.a.alle_tage} Tage</small>`}</div>
+        <button class="knopf ${x.faellig ? "" : "leise"} klein-knopf" data-aktion="ws-erledigt" data-id="${x.a.id}">✓ Erledigt</button></div>`).join("")}</div>
+      <h3>⚙️ Verschleißteile</h3>
+      <div class="ws-liste">${teile.map((t) => {
+        const genutzt = h != null ? Math.max(0, h - (t.eingebaut_h || 0)) : null;
+        const anteil = genutzt != null ? genutzt / t.lebensdauer_h : 0;
+        return `<div class="ws-wartung dr-karte ${anteil >= 1 ? "dringend" : ""}"><div class="ws-text"><strong>${esc(t.name)}</strong>
+          ${genutzt != null ? `${balken(anteil)}<small class="leise">${zahl(genutzt)} von ~${zahl(t.lebensdauer_h)} Druckstunden${t.getauscht_am ? ` · getauscht am ${new Date(t.getauscht_am).toLocaleDateString("de-DE")}` : " · seit Inbetriebnahme"}</small>` : `<small class="leise">Richtwert ~${zahl(t.lebensdauer_h)} Druckstunden</small>`}</div>
+          <button class="knopf leise klein-knopf" data-aktion="ws-getauscht" data-id="${t.id}" ${h == null ? "disabled" : ""}>Getauscht</button></div>`;
+      }).join("")}</div>`;
+  },
+
+  // ---- Kosten ----
+  _wsKosten() {
+    const monate = {};
+    const drucke = [];
+    for (const [uid, x] of Object.entries(this._daten.drucke || {})) {
+      const g = x.gebucht;
+      if (!g) continue;
+      const k = g.kosten || {};
+      const datum = x.start || g.am;
+      const m = (datum || "").slice(0, 7);
+      const eintrag = { uid, name: x.name || (x.hand && x.hand.name) || "Druck", datum, g: g.g, fil: k.filament, strom: k.strom, kwh: k.kwh, ergebnis: g.ergebnis };
+      drucke.push(eintrag);
+      const mo = (monate[m] = monate[m] || { fil: 0, strom: 0, kwh: 0, n: 0, g: 0, ohnePreis: 0 });
+      mo.fil += k.filament || 0; mo.strom += k.strom || 0; mo.kwh += k.kwh || 0; mo.n++; mo.g += g.g || 0;
+      if (k.filament == null) mo.ohnePreis++;
+    }
+    return { monate, drucke: drucke.sort((a, b) => (b.datum || "").localeCompare(a.datum || "")) };
+  },
+  _wsKostenHtml() {
+    const { monate, drucke } = this._wsKosten();
+    const e = this._daten.einstellungen;
+    const schluessel = Object.keys(monate).sort().slice(-6);
+    const max = Math.max(0.01, ...schluessel.map((k) => monate[k].fil + monate[k].strom));
+    const ohnePreis = this._daten.rollen.filter((r) => !r.preis_kg).length;
+    const eur = (v) => (v == null ? "–" : `${zahl(v, 2)} €`);
+    return `<div class="ws-zwei">
+      <div class="dr-karte"><h3 class="dr-titel">Kosten je Monat</h3>
+        ${schluessel.length ? `<div class="ws-saeulen">${schluessel.map((k) => { const m = monate[k], s = m.fil + m.strom;
+          return `<div class="ws-saeule" title="${m.n} Drucke · ${zahl(m.g)} g · ${zahl(m.kwh, 2)} kWh"><strong>${zahl(s, 2)} €</strong>
+            <div class="ws-saeule-bahn"><span class="fil" style="height:${(m.fil / max) * 100}%"></span><span class="strom" style="height:${(m.strom / max) * 100}%"></span></div>
+            <small>${WS_MONATE[Number(k.slice(5, 7)) - 1]} ${k.slice(2, 4)}</small></div>`; }).join("")}</div>
+          <div class="ws-legende"><span><i class="fil"></i>Filament</span><span><i class="strom"></i>Strom</span></div>`
+          : `<p class="leise">Noch keine verbuchten Drucke. Kosten entstehen beim Verbuchen nach jedem Druck.</p>`}
+        ${ohnePreis ? `<div class="hinweis amber klein">${ohnePreis} Rollen haben keinen Preis, ihr Filament zählt mit 0 €. Preis eintragen: Rolle öffnen › Infos.</div>` : ""}
+        ${drucke.length ? `<h3>Letzte Drucke</h3><div class="info-liste">${drucke.slice(0, 8).map((d) => `<button class="info-zeile zeilen-knopf" data-aktion="zum-druck" data-uid="${esc(d.uid)}"><span>${esc(d.name)}<small class="norm">${d.datum ? new Date(d.datum).toLocaleDateString("de-DE") : ""} · ${zahl(d.g, 1)} g${d.kwh != null ? ` · ${zahl(d.kwh, 2)} kWh` : ""}</small></span><strong>${eur((d.fil || 0) + (d.strom || 0))}</strong></button>`).join("")}</div>` : ""}
+      </div>
+      <div class="dr-karte"><h3 class="dr-titel">Einstellungen</h3>
+        ${WS_EINSTELLUNGEN.map((f) => `<div class="mod-regler"><div class="r-kopf"><span>${esc(f.name)}</span><strong id="ws-e-${f.k}">${zahl(e[f.k], f.nk || 0)} ${f.e}</strong></div>
+          <input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${e[f.k]}" data-ws="e-${f.k}"></div>`).join("")}
+        <p class="leise klein">Zusatzposten werden bei jedem Verbuchen abgezogen, das Reststück beim Rollenwechsel von der alten Rolle.</p></div></div>`;
+  },
+
+  // ---- Ereignisse ----
+  _wsKlick(a, el) {
+    const w = this._wsZustand(), q = this._daten.warteschlange;
+    const idx = el.dataset.id ? q.findIndex((x) => x.id === el.dataset.id) : -1;
+    switch (a) {
+      case "ws-tab": w.tab = el.dataset.id; if (w.tab === "bibliothek" || w.tab === "fehl") this._wsFotos(); break;
+      case "ws-neu": this._wsAuftragNeu(); break;
+      case "ws-bearbeiten": if (idx < 0) return; this._wsAuftragNeu({ ...q[idx] }); break;
+      case "ws-g": { const n = w.neu; n.gewicht = Math.max(0, Math.min(1000, (n.gewicht || 0) + Number(el.dataset.d))); this._wsGewichtZeigen(); return; }
+      case "ws-speichern": {
+        const n = w.neu;
+        n.name = (this.shadowRoot.getElementById("ws-name").value || "").trim();
+        n.notiz = (this.shadowRoot.getElementById("ws-notiz").value || "").trim();
+        if (!n.name) { this._toast("Bitte einen Namen eingeben."); return; }
+        if (n.id) { const i = q.findIndex((x) => x.id === n.id); if (i >= 0) q[i] = { ...q[i], ...n }; }
+        else q.push({ ...n, id: `a-${Date.now().toString(36)}`, am: new Date().toISOString(), quelle: "hand" });
+        w.neu = null; this._dialog = null; this._speichern();
+        break;
+      }
+      case "ws-hoch": case "ws-runter": {
+        const j = idx + (a === "ws-hoch" ? -1 : 1);
+        if (idx < 0 || j < 0 || j >= q.length) return;
+        [q[idx], q[j]] = [q[j], q[idx]];
+        this._speichern();
+        break;
+      }
+      case "ws-weg": {
+        if (idx < 0) return;
+        const [weg] = q.splice(idx, 1);
+        this._wsLetzterWeg = { a: weg, i: idx };
+        this._speichern();
+        this._toastMitKnopf(`„${weg.name}“ entfernt.`, "Rückgängig", "ws-zurueck");
+        return;
+      }
+      case "ws-zurueck": {
+        const z = this._wsLetzterWeg;
+        if (z && !q.some((x) => x.id === z.a.id)) { q.splice(Math.min(z.i, q.length), 0, z.a); this._speichern(); }
+        this._wsLetzterWeg = null; this._toastText = null;
+        break;
+      }
+      case "ws-rolle": if (idx < 0) return; q[idx].rolleId = el.dataset.rolle; this._speichern(); break;
+      case "ws-aus-modell": this._wsAusModell(); return;
+      case "ws-nochmal": {
+        const d = this._buAlle().find((x) => x.uid === el.dataset.uid);
+        if (!d) return;
+        const g = this._buExtra(d.uid).gebucht;
+        q.push({ id: `a-${Date.now().toString(36)}`, name: d.name, gewicht: d.gewicht, rolleId: (g && g.rolle) || this._daten.letzte_rolle, notiz: "", am: new Date().toISOString(), quelle: "bibliothek" });
+        this._speichern();
+        this._toast(`„${d.name}“ steht in der Warteschlange (Platz ${q.length}).`);
+        return;
+      }
+      case "ws-kopieren": this._kopieren(this._wsEinkaufText(), "Einkaufsliste kopiert."); return;
+      case "ws-erledigt": {
+        const h = this._drZ("stunden");
+        this._daten.wartung.aufgaben = { ...(this._daten.wartung.aufgaben || {}), [el.dataset.id]: { h, am: new Date().toISOString() } };
+        this._speichern();
+        const t = WARTUNG_AUFGABEN.find((x) => x.id === el.dataset.id);
+        this._toast(`${t ? t.name : "Wartung"} erledigt, die Zählung beginnt neu.`);
+        return;
+      }
+      case "ws-getauscht": {
+        const h = this._drZ("stunden");
+        if (h == null) return;
+        const teile = this._wsTeile();
+        const t = teile.find((x) => x.id === el.dataset.id);
+        if (!t) return;
+        t.eingebaut_h = h; t.getauscht_am = new Date().toISOString();
+        this._daten.wartung.teile = teile;
+        this._speichern();
+        this._toast(`${t.name}: Zähler steht wieder auf 0.`);
+        return;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+  _wsGewichtZeigen() {
+    const n = this._ws.neu;
+    const s = this.shadowRoot.getElementById("ws-gewicht"); if (s) s.textContent = `${zahl(n.gewicht, 1)} g`;
+    const i = this.shadowRoot.querySelector('[data-ws="gewicht"]'); if (i) i.value = n.gewicht;
+  },
+  _wsFotos() { if (this._drVerlauf) this._drFotosLaden(); },
+  _wsEingabe(t) {
+    const k = t.dataset && t.dataset.ws;
+    if (!k) return false;
+    const w = this._wsZustand();
+    if (k === "gewicht") { w.neu.gewicht = Number(t.value); this._wsGewichtZeigen(); }
+    else if (k === "suche") {
+      w.suche = t.value;
+      const box = this.shadowRoot.getElementById("ws-bib");
+      const m = this._wsModelle(), zeige = w.suche ? m.filter((x) => suchPunkte(w.suche, x.name)) : m;
+      if (box) box.innerHTML = zeige.map((x) => this._wsModellKarte(x)).join("") || `<p class="leise">Kein Modell passt zu „${esc(w.suche)}“.</p>`;
+    } else if (k.startsWith("e-")) {
+      const f = WS_EINSTELLUNGEN.find((x) => x.k === k.slice(2));
+      this._daten.einstellungen[f.k] = Number(t.value);
+      const s = this.shadowRoot.getElementById(`ws-e-${f.k}`); if (s) s.textContent = `${zahl(Number(t.value), f.nk || 0)} ${f.e}`;
+    }
+    return true;
+  },
+  _wsAenderung(t) {
+    const k = t.dataset && t.dataset.ws;
+    if (!k) return false;
+    if (k === "rolle") this._ws.neu.rolleId = t.value;
+    else if (k.startsWith("e-")) this._speichern();
+    return true;
+  },
+};
+// ---------------------------------------------------------------------------
+// Nerd-Menü: Statistik, Fehlerquoten, wann Drucke scheitern, Schätzung gegen
+// Waage (Korrekturfaktor), eigene Werte gegen Vorschläge, Gesundheit des Druckers
+// ---------------------------------------------------------------------------
+
+const NE_TABS = [["statistik", "📊 Statistik"], ["abgleich", "⚖️ Schätzung vs. Waage"], ["werte", "🎛️ Deine Werte"], ["gesundheit", "❤️ Gesundheit"]];
+const NE_VERGLEICH = ["duese", "duese_erste", "bett", "luefter_max", "flow", "k", "max_vol", "v_aussen"];
+const NE_TAGESZEIT = [["Nacht", 0, 6], ["Morgen", 6, 12], ["Nachmittag", 12, 18], ["Abend", 18, 24]];
+
+// Zeitpunkt aus einem HA-Verlaufseintrag (komprimiert: lu in Sekunden)
+function verlaufZeit(x) {
+  if (x.lu != null) return x.lu * 1000;
+  return new Date(x.last_updated || x.last_changed || x.lc || 0).getTime();
+}
+// Aufheizvorgänge: Zieltemperatur springt hoch → Zeit, bis die Ist-Temperatur fast da ist
+function aufheizZeiten(ziel, ist, schwelle) {
+  const z = ziel.map((x) => ({ t: verlaufZeit(x), v: Number(x.s ?? x.state) })).filter((x) => !isNaN(x.v) && x.t);
+  const i = ist.map((x) => ({ t: verlaufZeit(x), v: Number(x.s ?? x.state) })).filter((x) => !isNaN(x.v) && x.t);
+  const erg = [];
+  for (let k = 1; k < z.length; k++) {
+    if (!(z[k - 1].v < schwelle && z[k].v >= schwelle)) continue;
+    const t0 = z[k].t, soll = z[k].v;
+    const start = [...i].reverse().find((x) => x.t <= t0);
+    const da = i.find((x) => x.t >= t0 && x.v >= soll - 3);
+    if (!da) continue;
+    const s = (da.t - t0) / 1000;
+    if (s > 3 && s < 1800) erg.push({ am: t0, s, soll, von: start ? start.v : null });
+  }
+  return erg;
+}
+
+const NerdAnsicht = {
+  _neZustand() {
+    if (!this._ne) this._ne = { tab: "statistik", abRolle: null, abWert: null, heiz: null };
+    return this._ne;
+  },
+  _neHtml() {
+    const n = this._neZustand();
+    const inhalt = { abgleich: () => this._neAbgleichHtml(), werte: () => this._neWerteHtml(), gesundheit: () => this._neGesundheitHtml() }[n.tab] || (() => this._neStatistikHtml());
+    return `<div class="ne-seite">
+      <div class="chips unter-tabs">${NE_TABS.map(([id, t]) => `<button class="chip ${n.tab === id ? "an" : ""}" data-aktion="ne-tab" data-id="${id}">${t}</button>`).join("")}</div>
+      <div class="wechsel-rein" data-einmal="ne-${n.tab}">${inhalt()}</div></div>`;
+  },
+
+  // Ein Datensatz je Druck: Ergebnis, Material, Rolle, Zeitpunkte
+  _neDrucke() {
+    return this._buAlle().filter((d) => d.status !== "laeuft").map((d) => {
+      const x = this._buExtra(d.uid), g = x.gebucht;
+      const ergebnis = g ? g.ergebnis : d.status === "finish" ? "ok" : d.status === "failed" ? "abbruch" : null;
+      const r = g ? this._daten.rollen.find((y) => y.id === g.rolle) : null;
+      const dauer = d.start && d.ende ? (new Date(d.ende) - new Date(d.start)) / 3600000 : null;
+      return { d, x, g, ergebnis, rolle: r, material: r ? r.material : null, dauer: dauer > 0 && dauer < 200 ? dauer : null,
+        wann: x.fehl && x.fehl.wann ? x.fehl.wann : g && g.ergebnis === "fehl" ? wannAusFortschritt(g.fortschritt) : null };
+    });
+  },
+
+  _neStatistikHtml() {
+    const l = this._neDrucke();
+    if (!l.length) return `<div class="leer-karte dr-karte"><span class="gross-icon">📊</span><strong>Noch keine Drucke</strong><span class="leise">Sobald Drucke aufgezeichnet und verbucht sind, erscheinen hier Zahlen.</span></div>`;
+    const ok = l.filter((x) => x.ergebnis === "ok").length, fehl = l.filter((x) => x.ergebnis === "fehl").length;
+    const stunden = l.reduce((s, x) => s + (x.dauer || 0), 0);
+    const gramm = l.reduce((s, x) => s + (x.g ? x.g.g : 0), 0);
+    const kwh = l.reduce((s, x) => s + (x.g && x.g.kosten && x.g.kosten.kwh ? x.g.kosten.kwh : 0), 0);
+    const quote = ok + fehl ? Math.round((ok / (ok + fehl)) * 100) : null;
+    const kachel = (w, t, k = "") => `<div class="stat ${k}"><strong>${w}</strong><span>${t}</span></div>`;
+    // Fehlerquote je Material und je Rolle
+    const gruppe = (schl) => {
+      const m = {};
+      for (const x of l) { const k = schl(x); if (!k || !(x.ergebnis === "ok" || x.ergebnis === "fehl")) continue; (m[k] = m[k] || { ok: 0, fehl: 0 })[x.ergebnis]++; }
+      return Object.entries(m).map(([k, v]) => ({ k, ...v, n: v.ok + v.fehl, q: v.fehl / (v.ok + v.fehl) })).sort((a, b) => b.q - a.q || b.n - a.n);
+    };
+    const balken = (zeilen, name) => zeilen.length ? `<div class="ne-balken-liste">${zeilen.slice(0, 8).map((z) => `<div class="ne-balken-zeile"><span>${esc(name(z.k))}</span>
+      <div class="ne-balken"><span style="width:${Math.max(2, Math.round(z.q * 100))}%" class="${z.q >= 0.3 ? "rot" : z.q >= 0.1 ? "amber" : ""}"></span></div><small>${Math.round(z.q * 100)} % · ${z.fehl}/${z.n}</small></div>`).join("")}</div>`
+      : `<p class="leise klein">Noch keine verbuchten Drucke.</p>`;
+    const rollenName = (id) => { const r = this._daten.rollen.find((x) => x.id === id); return r ? r.name : "gelöschte Rolle"; };
+    // Wann scheitern Drucke: Phase und Tageszeit
+    const fehlL = l.filter((x) => x.ergebnis === "fehl");
+    const phasen = FEHL_FRAGEN.wann.map((w) => ({ name: w.name, n: fehlL.filter((x) => x.wann === w.id).length }));
+    const maxP = Math.max(1, ...phasen.map((p) => p.n));
+    const tz = NE_TAGESZEIT.map(([name, von, bis]) => {
+      const imFenster = l.filter((x) => { if (!x.d.start || !(x.ergebnis === "ok" || x.ergebnis === "fehl")) return false; const h = new Date(x.d.start).getHours(); return h >= von && h < bis; });
+      const f = imFenster.filter((x) => x.ergebnis === "fehl").length;
+      return { name, n: imFenster.length, f, q: imFenster.length ? f / imFenster.length : 0 };
+    });
+    return `<section class="stats">
+        ${kachel(l.length, "Drucke")}${kachel(quote == null ? "–" : `${quote} %`, "geglückt", quote != null && quote < 80 ? "amber" : "")}
+        ${kachel(fehl, "Fehldrucke", fehl ? "rot" : "")}${kachel(`${zahl(stunden, 1)} h`, "Druckzeit")}
+        ${kachel(`${zahl(gramm / 1000, 2)} kg`, "verbraucht")}${kachel(`${zahl(kwh, 1)} kWh`, "Strom")}</section>
+      <div class="ws-zwei oben-abstand">
+        <div class="dr-karte"><h3 class="dr-titel">Fehlerquote je Material</h3>${balken(gruppe((x) => x.material), (k) => k)}
+          <h3>Fehlerquote je Rolle</h3>${balken(gruppe((x) => x.g && x.g.rolle), rollenName)}</div>
+        <div class="dr-karte"><h3 class="dr-titel">Wann Drucke scheitern</h3>
+          ${fehlL.length ? `<div class="ne-phasen">${phasen.map((p) => `<div class="ne-phase"><div class="ne-phase-bahn"><span style="height:${(p.n / maxP) * 100}%"></span></div><strong>${p.n}</strong><small>${esc(p.name)}</small></div>`).join("")}</div>`
+            : `<p class="leise klein">Noch keine Fehldrucke verbucht.</p>`}
+          <h3>Nach Tageszeit (Druckstart)</h3>
+          <div class="info-liste">${tz.map((t) => `<div class="info-zeile"><span>${t.name}</span><strong>${t.n ? `${t.n} ${t.n === 1 ? "Druck" : "Drucke"} · ${Math.round(t.q * 100)} % Fehldrucke` : "–"}</strong></div>`).join("")}</div>
+          ${this._neErkenntnisse(gruppe((x) => x.material), phasen, tz)}</div></div>`;
+  },
+  // Kurze Sätze aus den Zahlen, nur wenn genug Daten da sind
+  _neErkenntnisse(mats, phasen, tz) {
+    const s = [];
+    const schlecht = mats.find((m) => m.n >= 3 && m.q >= 0.25);
+    if (schlecht) s.push(`${schlecht.k} scheitert auffällig oft (${Math.round(schlecht.q * 100)} %). Ein Blick in Hilfe › Fehlerbilder und eine Kalibrierung lohnen sich.`);
+    const p = phasen.slice().sort((a, b) => b.n - a.n)[0];
+    if (p && p.n >= 2) s.push(`Die meisten Fehldrucke passieren „${p.name}“. ${FEHL_FRAGEN.wann.find((w) => w.name === p.name).hinweis}`);
+    const t = tz.filter((x) => x.n >= 3).sort((a, b) => b.q - a.q)[0];
+    if (t && t.q >= 0.3) s.push(`Drucke, die ${t.name === "Nacht" ? "nachts" : `am ${t.name}`} starten, scheitern öfter. Vielleicht kühlt der Raum ab oder niemand schaut beim ersten Layer zu.`);
+    return s.length ? `<div class="hinweis mint oben-abstand">💡 ${s.map(esc).join("<br>💡 ")}</div>` : "";
+  },
+
+  // ---- Schätzung gegen Waage ----
+  _neAbgleichHtml() {
+    const n = this._ne, d = this._daten;
+    const rollen = this._neRollen();
+    const r = this._neRolle();
+    const korr = d.einstellungen.korrektur || {};
+    const verlauf = (d.abgleich || []).slice(-8).reverse();
+    if (!r) return `<div class="hinweis amber">Wiege zuerst eine Rolle (Rolle öffnen › Rest), dann kann hier verglichen werden.</div>`;
+    const seit = this._neGebuchtSeit(r);
+    const brutto = n.abWert != null ? n.abWert : Math.round((r.rest_g || 0) + this._neSpuleG(r));
+    const netto = brutto - this._neSpuleG(r);
+    const echt = r.rest_g + seit.g - netto;   // tatsächlich verbraucht seit dem letzten Wiegen
+    const faktor = seit.druck_g > 0 ? (echt - seit.fix_g) / seit.druck_g : null;
+    return `<div class="ws-zwei">
+      <div class="dr-karte"><h3 class="dr-titel">Rolle nachwiegen</h3>
+        <p class="leise klein">Leg die Rolle mit Spule auf die Waage. Der Vergleich zeigt, ob die Gewichte aus dem Slicer zu deinem Verbrauch passen, und lernt daraus einen Korrekturfaktor je Material.</p>
+        <label class="auswahl breit-auswahl"><span>Rolle</span><select data-ne="rolle">${rollen.map((x) => `<option value="${esc(x.id)}" ${x.id === r.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.hersteller)}</option>`).join("")}</select></label>
+        <div class="mod-regler"><div class="r-kopf"><span>Waage zeigt (mit Spule)</span><strong id="ne-brutto">${zahl(brutto)} g</strong></div>
+          <div class="regler-zeile"><button class="rund" data-aktion="ne-schritt" data-d="-1">−1</button><input type="range" min="0" max="${Math.max(1500, (r.nenn_g || 1000) + 400)}" step="1" value="${brutto}" data-ne="brutto"><button class="rund" data-aktion="ne-schritt" data-d="1">+1</button></div></div>
+        <div id="ne-ergebnis">${this._neAbgleichErgebnis(r, seit, netto, echt, faktor)}</div>
+        <button class="knopf breit oben-abstand" data-aktion="ne-abgleich" ${seit.n ? "" : "disabled"}>Gewicht übernehmen und Faktor lernen</button>
+        ${seit.n ? "" : `<p class="leise klein">Seit dem letzten Wiegen wurde nichts von dieser Rolle verbucht, es gibt noch nichts zu vergleichen.</p>`}</div>
+      <div class="dr-karte"><h3 class="dr-titel">Korrekturfaktoren</h3>
+        <p class="leise klein">Damit wird das Slicer-Gewicht beim Verbuchen multipliziert. 1,00 = Slicer stimmt genau.</p>
+        <div class="info-liste">${[...new Set(d.rollen.map((x) => x.material))].map((m) => `<div class="info-zeile"><span>${esc(m)}</span><strong>${korr[m] ? zahl(korr[m], 3) : "1,000"}</strong></div>`).join("")}</div>
+        ${Object.keys(korr).length ? `<button class="knopf leise breit oben-abstand" data-aktion="ne-korr-weg">Faktoren zurücksetzen</button>` : ""}
+        ${verlauf.length ? `<h3>Letzte Abgleiche</h3><div class="info-liste">${verlauf.map((v) => `<div class="info-zeile"><span>${esc(v.name)}<small class="norm">${new Date(v.am).toLocaleDateString("de-DE")} · gebucht ${zahl(v.gebucht, 1)} g, echt ${zahl(v.echt, 1)} g</small></span><strong class="${Math.abs(v.faktor - 1) > 0.1 ? "amber" : ""}">× ${zahl(v.faktor, 3)}</strong></div>`).join("")}</div>` : ""}</div></div>`;
+  },
+  _neAbgleichErgebnis(r, seit, netto, echt, faktor) {
+    const abw = seit.g ? ((echt - seit.g) / seit.g) * 100 : 0;
+    return `<div class="info-liste oben-abstand">
+      <div class="info-zeile"><span>Zuletzt gewogen</span><strong>${r.gewogen_am ? new Date(r.gewogen_am).toLocaleDateString("de-DE") : "–"}</strong></div>
+      <div class="info-zeile"><span>Seitdem verbucht</span><strong>${seit.n} Drucke · ${zahl(seit.g, 1)} g</strong></div>
+      <div class="info-zeile"><span>Laut Waage verbraucht</span><strong class="${Math.abs(abw) > 10 ? "amber" : ""}">${zahl(echt, 1)} g${seit.g ? ` (${abw >= 0 ? "+" : ""}${zahl(abw)} %)` : ""}</strong></div>
+      <div class="info-zeile"><span>Rest neu</span><strong>${zahl(Math.max(0, netto))} g</strong></div>
+      <div class="info-zeile"><span>Faktor aus diesem Abgleich</span><strong>${faktor != null && faktor > 0 ? `× ${zahl(faktor, 3)}` : "–"}</strong></div></div>
+      ${echt < 0 ? `<div class="hinweis amber">Die Rolle wiegt mehr als erwartet. Stimmt das Spulengewicht?</div>` : ""}`;
+  },
+  // Nur gewogene Rollen lassen sich vergleichen
+  _neRollen() { return this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => a.name.localeCompare(b.name, "de")); },
+  _neRolle() {
+    const l = this._neRollen(), n = this._neZustand();
+    return l.find((x) => x.id === n.abRolle) || l.find((x) => x.id === this._daten.letzte_rolle) || l[0] || null;
+  },
+  _neSpuleG(r) {
+    const s = r.spule && this._daten.spulen.find((x) => x.id === r.spule);
+    return s ? s.g : r.spule_g != null ? r.spule_g : 0;
+  },
+  _neGebuchtSeit(r) {
+    const ab = r.gewogen_am || "";
+    let g = 0, druck_g = 0, fix_g = 0, n = 0;
+    for (const x of Object.values(this._daten.drucke || {})) {
+      const b = x.gebucht;
+      if (b && b.rolle === r.id && b.am > ab) { g += b.g; druck_g += b.druck_g || 0; fix_g += b.fix_g || 0; n++; }
+      if (b && b.wechsel && b.wechsel.rolle === r.id && b.am > ab) { g += b.wechsel.g; fix_g += b.wechsel.g; }
+    }
+    return { g, druck_g, fix_g, n };
+  },
+  _neAbgleichen() {
+    const n = this._ne, d = this._daten;
+    const r = this._neRolle();
+    if (!r || n.abWert == null) { this._toast("Bitte zuerst das Gewicht von der Waage einstellen."); return; }
+    const seit = this._neGebuchtSeit(r);
+    const netto = Math.max(0, n.abWert - this._neSpuleG(r));
+    const echt = r.rest_g + seit.g - netto;
+    let faktor = seit.druck_g > 0 ? (echt - seit.fix_g) / seit.druck_g : null;
+    if (faktor != null && (faktor < 0.5 || faktor > 1.6)) {
+      this._toast(`Faktor ${zahl(faktor, 2)} ist unplausibel (Spulengewicht oder Waage prüfen). Gewicht übernommen, Faktor nicht gelernt.`);
+      faktor = null;
+    }
+    d.abgleich = [...(d.abgleich || []), { am: new Date().toISOString(), rolle: r.id, name: r.name, material: r.material, gebucht: seit.g, echt, faktor: faktor || 1 }].slice(-60);
+    if (faktor != null) {
+      // Mittel der letzten Abgleiche dieses Materials, vorsichtig begrenzt
+      const f = d.abgleich.filter((v) => v.material === r.material && v.faktor).slice(-5).map((v) => v.faktor);
+      d.einstellungen.korrektur = { ...d.einstellungen.korrektur, [r.material]: Math.min(1.3, Math.max(0.7, f.reduce((s, v) => s + v, 0) / f.length)) };
+    }
+    r.rest_g = netto;
+    r.gewogen_am = new Date().toISOString();
+    n.abWert = null;
+    this._speichern();
+    if (faktor != null) this._toast(`${r.name}: ${zahl(netto)} g übernommen, Faktor für ${r.material} jetzt ${zahl(d.einstellungen.korrektur[r.material], 3)}.`);
+  },
+
+  // ---- Eigene Werte gegen Vorschläge ----
+  _neWerteHtml() {
+    const rollen = this._daten.rollen.filter((r) => r.eigen && Object.keys(r.eigen).length);
+    if (!rollen.length) return `<div class="leer-karte dr-karte"><span class="gross-icon">🎛️</span><strong>Noch keine eigenen Werte</strong><span class="leise">Wenn du nach einem Test Werte anpasst oder kalibrierst, siehst du hier, wo du vom Vorschlag abweichst.</span></div>`;
+    const mats = [...new Set(rollen.map((r) => r.material))];
+    const zeilen = mats.map((m) => {
+      const rs = rollen.filter((r) => r.material === m);
+      const felder = NE_VERGLEICH.map((k) => {
+        const f = FELDER.find((x) => x.k === k);
+        const diffs = rs.filter((r) => r.eigen[k] != null && r.vorschlag && r.vorschlag[k] != null).map((r) => r.eigen[k] - r.vorschlag[k]);
+        if (!diffs.length) return null;
+        const mittel = diffs.reduce((s, v) => s + v, 0) / diffs.length;
+        return Math.abs(mittel) < f.step / 2 ? null : { f, mittel, n: diffs.length };
+      }).filter(Boolean);
+      return { m, n: rs.length, felder };
+    });
+    return `<p class="leise">Wo deine eingestellten Werte im Schnitt vom Vorschlag abweichen. Weichst du immer in dieselbe Richtung ab, sind die Vorschläge für neue Rollen zu korrigieren.</p>
+      <div class="ws-raster">${zeilen.map((z) => `<div class="dr-karte"><h3 class="dr-titel">${esc(z.m)} · ${z.n} Rollen mit eigenen Werten</h3>
+        ${z.felder.length ? `<div class="info-liste">${z.felder.map((x) => `<div class="info-zeile"><span>${esc(x.f.name)}<small class="norm">bei ${x.n} Rollen</small></span><strong class="${x.mittel > 0 ? "amber" : "mint"}">${x.mittel > 0 ? "+" : ""}${zahl(x.mittel, x.f.nk || 0)} ${esc(x.f.e)}</strong></div>`).join("")}</div>`
+          : `<p class="leise klein">Deine Werte entsprechen den Vorschlägen.</p>`}</div>`).join("")}</div>
+      <h3>Je Rolle</h3>
+      <div class="info-liste">${rollen.map((r) => {
+        const anders = Object.keys(r.eigen).filter((k) => r.vorschlag && r.vorschlag[k] != null && r.eigen[k] !== r.vorschlag[k]);
+        return `<button class="info-zeile zeilen-knopf" data-aktion="oeffnen-filament" data-id="${esc(r.id)}"><span>${esc(r.name)}<small class="norm">${esc(r.hersteller)}${r.kalibriert ? " · kalibriert" : ""}</small></span><strong>${anders.length ? `${anders.length} Werte geändert` : "wie Vorschlag"}</strong></button>`;
+      }).join("")}</div>`;
+  },
+
+  // ---- Gesundheit ----
+  _neGesundheitHtml() {
+    const n = this._ne, w = (k) => this._drW(k), z = (k) => this._drZ(k);
+    const wlan = z("wlan") != null ? z("wlan") : (w("wlan") ? parseInt(w("wlan"), 10) : null);
+    const zeile = (name, wert, gut, text) => `<div class="ne-gesund ${gut === false ? "schlecht" : gut ? "gut" : ""}"><span class="punkt">${gut === false ? "!" : gut ? "✓" : "·"}</span><div><strong>${esc(name)}</strong><small class="leise">${esc(text)}</small></div><b>${esc(wert)}</b></div>`;
+    const h = n.heiz;
+    const mittel = (l) => (l.length ? l.reduce((s, x) => s + x.s, 0) / l.length : null);
+    const heizKarte = (titel, l, normal) => {
+      if (!l || !l.length) return `<div class="ne-heiz"><strong>${titel}</strong><small class="leise">Keine Aufheizvorgänge im Zeitraum gefunden.</small></div>`;
+      const m = mittel(l), alt = mittel(l.slice(0, Math.ceil(l.length / 2))), neu = mittel(l.slice(Math.floor(l.length / 2)));
+      const trend = l.length >= 4 && neu > alt * 1.2;
+      const maxS = Math.max(...l.map((x) => x.s));
+      return `<div class="ne-heiz"><strong>${titel}</strong><span class="ne-heiz-wert ${m > normal * 1.5 ? "amber" : ""}">${zahl(m)} s</span>
+        <div class="ne-mini-saeulen">${l.slice(-20).map((x) => `<span title="${new Date(x.am).toLocaleString("de-DE")}: ${zahl(x.s)} s auf ${zahl(x.soll)} °C" style="height:${Math.max(8, (x.s / maxS) * 100)}%"></span>`).join("")}</div>
+        <small class="leise">${l.length} Vorgänge · normal etwa ${normal} s${trend ? " · <b class='amber'>wird langsamer</b>" : ""}</small></div>`;
+    };
+    return `<div class="ws-zwei">
+      <div class="dr-karte"><h3 class="dr-titel">Zustand jetzt</h3>
+        ${zeile("Verbindung", w("online") === "on" ? "online" : w("online") === "off" ? "offline" : "–", w("online") === "on" ? true : w("online") === "off" ? null : null, "Drucker meldet sich bei Home Assistant")}
+        ${zeile("WLAN", wlan != null ? `${wlan} dBm` : "–", wlan == null ? null : wlan > -70, "Besser als −70 dBm ist gut, unter −80 dBm brechen Verbindungen ab")}
+        ${zeile("HMS-Meldungen", w("hms") === "on" ? "aktiv" : w("hms") === "off" ? "keine" : "–", w("hms") === "on" ? false : w("hms") === "off" ? true : null, "Fehlercodes des Druckers selbst")}
+        ${zeile("Firmware", w("firmware") === "on" ? "Update da" : w("firmware") === "off" ? "aktuell" : "–", w("firmware") === "on" ? false : w("firmware") === "off" ? true : null, "Updates bringen oft bessere Kalibrierung")}
+        ${zeile("Betriebsstunden", z("stunden") != null ? `${zahl(z("stunden"))} h` : "–", null, "Grundlage für den Wartungsplan")}
+        ${zeile("Wartung fällig", `${this._wsWartung().filter((x) => x.faellig).length}`, this._wsWartung().some((x) => x.faellig) ? false : true, "Siehe Werkstatt › Wartung")}</div>
+      <div class="dr-karte"><h3 class="dr-titel">Aufheizzeiten</h3>
+        <p class="leise klein">Wird das Aufheizen mit der Zeit langsamer, kann das auf ein schwächelndes Heizelement, einen losen Thermistor oder eine fehlende Silikonsocke hindeuten.</p>
+        ${!h ? `<button class="knopf breit" data-aktion="ne-heiz">Letzte 4 Tage auswerten</button>` : h.laedt ? `<div class="mod-laden-klein"><span class="dreher klein"></span> Lese Verlauf aus Home Assistant …</div>`
+          : h.fehler ? `<div class="hinweis amber">${esc(h.fehler)}</div><button class="knopf leise breit" data-aktion="ne-heiz">Nochmal versuchen</button>`
+          : `${heizKarte("Düse", h.duese, 90)}${heizKarte("Druckbett", h.bett, 120)}<button class="knopf leise breit oben-abstand" data-aktion="ne-heiz">Neu auswerten</button>`}</div></div>`;
+  },
+  async _neHeizLaden() {
+    const n = this._ne;
+    n.heiz = { laedt: true };
+    this._zeichnen();
+    const ids = ["duese", "duese_ziel", "bett", "bett_ziel"].map((k) => this._drId(k));
+    if (ids.some((x) => !x)) { n.heiz = { fehler: "Temperatursensoren des Druckers nicht gefunden." }; this._zeichnen(); return; }
+    try {
+      const start = new Date(Date.now() - 4 * 86400000).toISOString();
+      const r = await Promise.race([
+        this._hass.callWS({ type: "history/history_during_period", start_time: start, entity_ids: ids, minimal_response: true, no_attributes: true }),
+        new Promise((_, nein) => setTimeout(() => nein(new Error("Home Assistant hat nicht rechtzeitig geantwortet.")), 30000)),
+      ]);
+      const l = (id) => (r && r[id]) || [];
+      n.heiz = { duese: aufheizZeiten(l(ids[1]), l(ids[0]), 150), bett: aufheizZeiten(l(ids[3]), l(ids[2]), 40) };
+    } catch (e) {
+      n.heiz = { fehler: `Verlauf konnte nicht gelesen werden: ${e.message || e}` };
+    }
+    if (this._ansicht === "nerd") this._zeichnen();
+  },
+
+  // ---- Ereignisse ----
+  _neKlick(a, el) {
+    const n = this._neZustand();
+    switch (a) {
+      case "ne-tab": n.tab = el.dataset.id; break;
+      case "ne-schritt": {
+        const i = this.shadowRoot.querySelector('[data-ne="brutto"]');
+        if (!i) return;
+        i.value = Number(i.value) + Number(el.dataset.d);
+        this._neEingabe(i);
+        return;
+      }
+      case "ne-abgleich": this._neAbgleichen(); break;
+      case "ne-korr-weg": this._daten.einstellungen.korrektur = {}; this._speichern(); this._toast("Korrekturfaktoren zurückgesetzt."); return;
+      case "ne-heiz": this._neHeizLaden(); return;
+      default: return;
+    }
+    this._zeichnen();
+  },
+  _neEingabe(t) {
+    const k = t.dataset && t.dataset.ne;
+    if (!k) return false;
+    if (k === "brutto") {
+      const n = this._ne;
+      n.abWert = Number(t.value);
+      const r = this._neRolle();
+      if (!r) return true;
+      const s = this.shadowRoot.getElementById("ne-brutto"); if (s) s.textContent = `${zahl(n.abWert)} g`;
+      const seit = this._neGebuchtSeit(r), netto = n.abWert - this._neSpuleG(r), echt = r.rest_g + seit.g - netto;
+      const box = this.shadowRoot.getElementById("ne-ergebnis");
+      if (box) box.innerHTML = this._neAbgleichErgebnis(r, seit, netto, echt, seit.druck_g > 0 ? (echt - seit.fix_g) / seit.druck_g : null);
+    }
+    return true;
+  },
+  _neAenderung(t) {
+    const k = t.dataset && t.dataset.ne;
+    if (!k) return false;
+    if (k === "rolle") { this._ne.abRolle = t.value; this._ne.abWert = null; this._zeichnen(); }
+    return true;
+  },
+};
+// ---------------------------------------------------------------------------
+// Querschnitt: globale Suche mit Querverweisen, Sicherung (wöchentliche
+// Erinnerung, Herunterladen, Einspielen), Bambu-Studio-Profil, „Mehr“-Menü am Handy
+// ---------------------------------------------------------------------------
+
+const SICHERUNG_TAGE = 7;
+const IMPORT_MAX_BYTES = 20 * 1048576;
+
+// Filament-Profil für Bambu Studio (Datei › Importieren › Konfiguration importieren)
+function bambuProfil(r) {
+  const w = (k) => wert(r, k).v;
+  const s = (v) => [v == null ? "" : String(v)];
+  const platte = String(w("platte") || PLATTE_STANDARD);
+  const bett = w("bett");
+  const p = {
+    type: "filament", name: `${r.hersteller} ${r.name} (Werkstatt)`, from: "User", instantiation: "true",
+    inherits: `Generic ${["PLA", "PETG", "ABS", "ASA", "TPU", "PC"].includes(r.material) ? r.material : "PLA"} @BBL X1C`,
+    filament_settings_id: [`${r.hersteller} ${r.name} (Werkstatt)`],
+    filament_type: [r.material], filament_vendor: [r.hersteller],
+    default_filament_colour: [r.hex || ""],
+    filament_density: s(materialInfo(r.material).dichte),
+    nozzle_temperature_initial_layer: s(w("duese_erste")), nozzle_temperature: s(w("duese")),
+    fan_min_speed: s(w("luefter_min")), fan_max_speed: s(w("luefter_max")),
+    filament_flow_ratio: s(w("flow")), filament_max_volumetric_speed: s(w("max_vol")),
+    compatible_printers: ["Bambu Lab P1S 0.4 nozzle"],
+  };
+  if (w("k") != null) { p.pressure_advance = s(w("k")); p.enable_pressure_advance = ["1"]; }
+  if (r.preis_kg) p.filament_cost = s(r.preis_kg);
+  // Betttemperatur für die gewählte Platte (die anderen bleiben vom Basisprofil)
+  const plattenKey = /textured|pei/i.test(platte) ? "textured_plate_temp" : /engineer/i.test(platte) ? "eng_plate_temp" : /cool/i.test(platte) ? "cool_plate_temp" : "hot_plate_temp";
+  if (bett != null) { p[plattenKey] = s(bett); p[`${plattenKey}_initial_layer`] = s(bett); }
+  for (const k of Object.keys(p)) if (Array.isArray(p[k]) && p[k].length === 1 && p[k][0] === "") delete p[k];
+  return p;
+}
+
+// Prüft eine eingespielte Sicherung, bevor sie die Daten ersetzt
+function sicherungPruefen(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) throw new Error("Die Datei enthält keine Werkstatt-Daten.");
+  if (!Array.isArray(obj.rollen)) throw new Error("In der Datei fehlen die Filament-Rollen.");
+  if (obj.rollen.length > 2000) throw new Error("Zu viele Rollen, die Datei sieht nicht nach einer Sicherung aus.");
+  const kaputt = obj.rollen.findIndex((r) => !r || typeof r.id !== "string" || typeof r.name !== "string");
+  if (kaputt >= 0) throw new Error(`Rolle Nr. ${kaputt + 1} ist unvollständig (Name oder Kennung fehlt).`);
+  if (new Set(obj.rollen.map((r) => r.id)).size !== obj.rollen.length) throw new Error("Rollen-Kennungen sind doppelt.");
+  if (obj.inventar != null && !Array.isArray(obj.inventar)) throw new Error("Das Inventar in der Datei ist beschädigt.");
+  if (obj.spulen != null && !Array.isArray(obj.spulen)) throw new Error("Die Spulenliste in der Datei ist beschädigt.");
+  if ((obj.version || 1) > DATEN_VERSION) throw new Error("Die Sicherung stammt aus einer neueren Version. Bitte erst die Seite aktualisieren.");
+  return obj;
+}
+
+const ExtrasAnsicht = {
+  // ---- Globale Suche ----
+  _suchTreffer(q) {
+    if (!q || !q.trim()) return [];
+    const d = this._daten, l = [];
+    const add = (gruppe, punkte, x) => { if (punkte > 0) l.push({ gruppe, punkte, ...x }); };
+    for (const r of d.rollen) {
+      add("Filament", suchPunkte(q, `${r.name} ${r.hersteller} ${r.material} ${r.art || ""} ${r.farbe} ${farbfamilie(r)} ${r.farbcode || ""}`),
+        { icon: "🧵", titel: r.name, sub: `${r.hersteller} · ${r.rest_g != null ? `${zahl(r.rest_g)} g` : "nicht gewogen"}${r.achtung ? " · ❗" : ""}`, aktion: "oeffnen-filament", id: r.id, hex: r.hex });
+    }
+    for (const t of d.inventar) {
+      const p = suchPunkte(q, teilText(t).text);
+      add("Inventar", p, { icon: kategorie(t.kat).icon, titel: teilName(t), sub: `${kategorie(t.kat).einzahl} · ${t.menge ?? "?"} Stk${t.fach ? ` · Fach ${t.fach}` : ""}`, aktion: "such-teil", id: t.id,
+        passend: p > 0 ? passendeTeile(t, d.inventar).slice(0, 4) : [] });
+    }
+    if (this._drVerlauf) for (const m of this._wsModelle()) {
+      add("Drucke", suchPunkte(q, m.name), { icon: "🖨️", titel: m.name, sub: `${m.drucke.length}× gedruckt · zuletzt ${m.drucke[0].zeit || "–"}`, aktion: "zum-druck", uid: m.drucke[0].uid });
+    }
+    for (const f of FEHLERBILDER) add("Hilfe", suchPunkte(q, `${f.name} ${f.kurz} ${f.ursachen.join(" ")} fehler`) * 0.9, { icon: "🩺", titel: f.name, sub: f.kurz, aktion: "such-hilfe", tab: "fehler", id: f.id });
+    for (const b of P1S_BEREICHE) add("Hilfe", suchPunkte(q, `${b.name} ${b.text} p1s drucker`) * 0.8, { icon: "🖨️", titel: b.name, sub: "P1S-Zeichnung", aktion: "such-hilfe", tab: "drucker", id: b.id });
+    for (const k of KALIBRIERUNGEN) add("Hilfe", suchPunkte(q, `${k.name} ${k.wozu} kalibrieren kalibrierung`) * 0.85, { icon: k.icon, titel: k.name, sub: "Kalibrierung", aktion: "such-hilfe", tab: "kalibrierung", id: k.id });
+    for (const t of TROCKNEN_TABELLE) add("Hilfe", suchPunkte(q, `${t.m} trocknen trockner feucht`) * 0.8, { icon: "♨️", titel: `${t.m} trocknen`, sub: `${t.temp} °C · ${t.h} h`, aktion: "such-hilfe", tab: "trockner" });
+    for (const a of WARTUNG_AUFGABEN) add("Werkstatt", suchPunkte(q, `${a.name} ${a.text} wartung`) * 0.8, { icon: "🔧", titel: a.name, sub: "Wartung", aktion: "such-werkstatt", tab: "wartung" });
+    for (const n of NAVIGATION) add("Bereiche", suchPunkte(q, n.name) * 1.1, { icon: n.icon, titel: n.name, sub: "Bereich öffnen", aktion: "ansicht", id: n.id });
+    return l.sort((a, b) => b.punkte - a.punkte).slice(0, 40);
+  },
+  _suchErgebnisHtml() {
+    const q = this._sucheQ || "";
+    if (!q.trim()) return `<div class="such-leer leise">Suche nach Filament, Schrauben (z. B. „m3 10“), Drucken, Fehlerbildern oder Wartung. Tippfehler sind okay.</div>`;
+    const l = this._suchTreffer(q);
+    if (!l.length) return `<div class="such-leer leise">Nichts gefunden für „${esc(q)}“.</div>`;
+    const gruppen = [...new Set(l.map((x) => x.gruppe))];
+    let nr = 0;
+    return gruppen.map((g) => `<div class="such-gruppe"><h4>${esc(g)}</h4>${l.filter((x) => x.gruppe === g).slice(0, 8).map((x) => `
+      <button class="such-treffer ${nr++ === 0 ? "erst" : ""}" data-aktion="${x.aktion}" data-id="${esc(x.id || "")}" data-uid="${esc(x.uid || "")}" data-tab="${esc(x.tab || "")}">
+        ${x.hex ? `<span class="farbtupfer" style="background:${esc(x.hex)}"></span>` : `<span class="such-icon">${x.icon}</span>`}
+        <span><strong>${esc(x.titel)}</strong><small class="leise">${esc(x.sub)}</small></span></button>
+      ${x.passend && x.passend.length ? `<div class="such-passend"><span class="leise klein">passt dazu:</span>${x.passend.map((p) => `<button class="chip" data-aktion="such-teil" data-id="${esc(p.id)}">${kategorie(p.kat).icon} ${esc(teilName(p))} · ${p.menge ?? "?"} Stk</button>`).join("")}</div>` : ""}`).join("")}</div>`).join("");
+  },
+  _sucheHtml() {
+    if (!this._sucheOffen) return "";
+    return `<div class="schleier oben such-schleier" data-aktion="such-zu" data-einmal="such-schleier"></div>
+      <div class="such-box" role="dialog" aria-label="Suche" data-einmal="such-box">
+        <div class="such-kopf"><span>🔍</span><input id="global-suche" value="${esc(this._sucheQ || "")}" placeholder="Alles durchsuchen …" autocomplete="off" enterkeyhint="search"><button class="icon-knopf" data-aktion="such-zu" aria-label="Suche schließen">✕</button></div>
+        <div id="such-ergebnisse" class="such-ergebnisse">${this._suchErgebnisHtml()}</div></div>`;
+  },
+  _sucheOeffnen() {
+    this._sucheOffen = true; this._mehrOffen = false;
+    this._zeichnen();
+    const i = this.shadowRoot.getElementById("global-suche");
+    if (i) { i.focus(); i.select(); }
+  },
+
+  // ---- Sicherung ----
+  _sicherungFaellig() {
+    const e = this._daten && this._daten.einstellungen;
+    if (!e || this._ansicht === "system") return false;
+    const seit = tageSeit(e.sicherung_am || e.sicherung_start), spaeter = tageSeit(e.sicherung_spaeter);
+    return (seit == null || seit >= SICHERUNG_TAGE) && (spaeter == null || spaeter >= 2);
+  },
+  _sicherungBalkenHtml() {
+    if (!this._sicherungFaellig() || (this._drVerlauf && this._buOffene().length)) return "";
+    const am = this._daten.einstellungen.sicherung_am;
+    return `<div class="bu-balken blau" data-einmal="sicherung-balken">
+      <span class="bu-text">💾 ${am ? `Die letzte Sicherung ist ${zahl(tageSeit(am))} Tage alt.` : "Es gibt noch keine Sicherung auf deinem Gerät."} Jetzt herunterladen?</span>
+      <span class="bu-knoepfe"><button class="knopf klein-knopf" data-aktion="sich-laden">Herunterladen</button><button class="knopf leise klein-knopf" data-aktion="sich-spaeter">Später</button></span></div>`;
+  },
+  _sicherungLaden() {
+    const datum = new Date().toISOString().slice(0, 10);
+    const ok = this._dateiGeben(`filament-werkstatt-${datum}.json`, JSON.stringify(this._daten, null, 1), "application/json");
+    if (!ok) return;
+    this._daten.einstellungen.sicherung_am = new Date().toISOString();
+    this._speichern();
+    this._toast("Sicherung heruntergeladen. Bewahre sie z. B. in der Cloud auf.");
+  },
+  _dateiGeben(name, text, typ) {
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type: typ }));
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      this.shadowRoot.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return true;
+    } catch (e) {
+      this._toast(`Herunterladen geht hier nicht (${e.message || e}). Öffne die Seite im Browser.`);
+      return false;
+    }
+  },
+  async _sicherungEinlesen(datei) {
+    try {
+      if (!datei) return;
+      if (datei.size > IMPORT_MAX_BYTES) throw new Error("Die Datei ist zu groß für eine Sicherung.");
+      let obj;
+      try { obj = JSON.parse(await datei.text()); } catch (e) { throw new Error("Die Datei ist kein gültiges JSON."); }
+      this._import = { daten: sicherungPruefen(obj), name: datei.name };
+      this._dialog = "sich-import";
+    } catch (e) {
+      this._toast(e.message || String(e));
+      return;
+    }
+    this._zeichnen();
+  },
+  _importDialogHtml() {
+    const d = this._import.daten;
+    return `<h2>Sicherung einspielen?</h2>
+      <p class="leise">${esc(this._import.name)}${d.geaendert ? `, Stand ${new Date(d.geaendert).toLocaleString("de-DE")}` : ""}</p>
+      <div class="info-liste"><div class="info-zeile"><span>Rollen</span><strong>${d.rollen.length}</strong></div>
+        <div class="info-zeile"><span>Inventar-Teile</span><strong>${(d.inventar || []).length}</strong></div>
+        <div class="info-zeile"><span>Drucke mit Buchung</span><strong>${Object.values(d.drucke || {}).filter((x) => x.gebucht).length}</strong></div></div>
+      <div class="hinweis amber oben-abstand">Alle aktuellen Daten werden ersetzt. Der jetzige Stand wird vorher in Home Assistant zwischengespeichert.</div>
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf amber" data-aktion="sich-import-ok">Ersetzen</button></div>`;
+  },
+  async _importAusfuehren() {
+    const neu = this._import && this._import.daten;
+    if (!neu) return;
+    try {
+      await this._hass.callWS({ type: "frontend/set_user_data", key: SICHERUNG_KEY, value: this._daten });
+    } catch (e) {
+      this._toast("Zwischenspeichern fehlgeschlagen, Einspielen abgebrochen.");
+      return;
+    }
+    this._daten = migrieren(JSON.parse(JSON.stringify(neu)));
+    this._import = null; this._dialog = null; this._modus = null;
+    await this._speichernJetzt(true);
+    this._toast(`Sicherung eingespielt: ${this._daten.rollen.length} Rollen.`);
+  },
+  _sicherungKarteHtml() {
+    const e = this._daten ? this._daten.einstellungen : null;
+    return `<div class="karte system oben-abstand"><h2>Sicherung</h2>
+      <p class="leise">Die Daten liegen in Home Assistant und sind damit in dessen Backups. Zusätzlich kannst du eine Datei herunterladen und später wieder einspielen.</p>
+      ${e ? `<p class="klein">Letzte Sicherung: ${e.sicherung_am ? new Date(e.sicherung_am).toLocaleString("de-DE") : "noch keine"}</p>` : ""}
+      <div class="knopf-reihe"><button class="knopf" data-aktion="sich-laden" ${e ? "" : "disabled"}>💾 Herunterladen</button>
+        <label class="knopf leise datei-knopf">📂 Einspielen<input type="file" accept=".json,application/json" data-sys="import" hidden></label></div></div>`;
+  },
+
+  // ---- Hilfen ----
+  _toastMitKnopf(text, knopf, aktion) {
+    this._toastKnopf = { knopf, aktion };
+    this._toastText = text;
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => this._toastWeg(), 5000);
+    this._zeichnen();
+  },
+  async _kopieren(text, meldung) {
+    try {
+      await navigator.clipboard.writeText(text);
+      this._toast(meldung);
+    } catch (e) {
+      // Ohne Zwischenablage-Recht (z. B. http): Text zum Markieren anzeigen
+      this._kopierText = text;
+      this._dialog = "kopieren";
+      this._zeichnen();
+    }
+  },
+
+  _mehrHtml() {
+    if (!this._mehrOffen) return "";
+    return `<div class="schleier mehr-schleier" data-aktion="mehr-zu" data-einmal="mehr-schleier"></div>
+      <div class="mehr-sheet" data-einmal="mehr-sheet"><div class="griff"></div>
+        <button class="mehr-punkt suche-punkt" data-aktion="such-auf"><span>🔍</span><strong>Suchen</strong></button>
+        ${NAVIGATION.filter((n) => !NAV_UNTEN.includes(n.id)).map((n) => `<button class="mehr-punkt ${this._ansicht === n.id ? "aktiv" : ""}" data-aktion="ansicht" data-id="${n.id}"><span>${n.icon}</span><strong>${n.name}</strong>${n.id === "werkstatt" && this._daten && this._wsWartung().some((x) => x.faellig) ? `<span class="zahl-punkt amber-punkt">!</span>` : ""}</button>`).join("")}</div>`;
+  },
+
+  _exKlick(a, el) {
+    switch (a) {
+      case "such-auf": this._sucheOeffnen(); return true;
+      case "such-zu": this._sucheOffen = false; break;
+      case "such-teil": this._sucheOffen = false; this._mehrOffen = false; this._modus = null; this._ansicht = "inventar"; this._invKlick("inv-oeffnen", el); return true;
+      case "such-hilfe": {
+        this._sucheOffen = false; this._ansicht = "hilfe";
+        const h = this._hiZustand(); h.tab = el.dataset.tab;
+        if (el.dataset.id) { if (h.tab === "fehler") h.fehler = el.dataset.id; else if (h.tab === "drucker") h.p1s = el.dataset.id; else if (h.tab === "kalibrierung") h.kal = el.dataset.id; }
+        break;
+      }
+      case "such-werkstatt": this._sucheOffen = false; this._ansicht = "werkstatt"; this._wsZustand().tab = el.dataset.tab; break;
+      case "mehr": this._mehrOffen = !this._mehrOffen; break;
+      case "mehr-zu": this._mehrOffen = false; break;
+      case "sich-laden": this._sicherungLaden(); return true;
+      case "sich-spaeter": this._daten.einstellungen.sicherung_spaeter = new Date().toISOString(); this._speichern(); break;
+      case "sich-import-ok": this._importAusfuehren(); return true;
+      case "profil-export": {
+        const r = this._rolle();
+        if (!r) return true;
+        const name = `${r.hersteller}-${r.name}`.replace(/[^a-z0-9äöüß]+/gi, "_");
+        if (this._dateiGeben(`${name}.json`, JSON.stringify(bambuProfil(r), null, 2), "application/json")) this._toast("Profil gespeichert. In Bambu Studio: Datei › Importieren › Konfiguration importieren.");
+        return true;
+      }
+      case "kon-laden": this._konflikt = null; this._dialog = null; this._laden(); return true;
+      case "kon-behalten": this._konflikt = null; this._dialog = null; this._speichernJetzt(true); break;
+      case "toast-knopf": { const k = this._toastKnopf; this._toastKnopf = null; if (k && k.aktion.startsWith("ws-")) this._wsKlick(k.aktion, { dataset: {} }); return true; }
+      default: return false;
+    }
+    this._zeichnen();
+    return true;
+  },
+};
+// ---------------------------------------------------------------------------
+// 3D-Modelle: STL lesen, Maße/Volumen, Schnitte, Löcher, Schichten, G-Code
+// (alles ohne fremde Bibliotheken, läuft offline auf dem Pi)
+// ---------------------------------------------------------------------------
+
+const BETT_MM = 256;          // Bauraum P1S: 256 × 256 × 256 mm
+const STUETZ_WINKEL = 30;     // Überhang ab 30° zur Waagerechten (Bambu-Standard „Threshold angle“)
+const FILAMENT_QUERSCHNITT = Math.PI * 0.875 * 0.875;   // mm² bei 1,75 mm
+
+// ---- STL ------------------------------------------------------------------
+// Ergebnis: Float32Array mit 9 Zahlen je Dreieck (x1 y1 z1 x2 y2 z2 x3 y3 z3)
+function stlLesen(puffer) {
+  const dv = new DataView(puffer);
+  if (puffer.byteLength >= 84) {
+    const n = dv.getUint32(80, true);
+    if (84 + n * 50 === puffer.byteLength) {
+      if (typeof MOD_MAX_DREIECKE !== "undefined" && n > MOD_MAX_DREIECKE) throw new Error(`Das Modell hat ${n.toLocaleString("de-DE")} Dreiecke, das schafft der Browser nicht flüssig. Bitte im Slicer vereinfachen.`);
+      const v = new Float32Array(n * 9);
+      for (let i = 0; i < n; i++) {
+        const o = 84 + i * 50 + 12;
+        for (let k = 0; k < 9; k++) v[i * 9 + k] = dv.getFloat32(o + k * 4, true);
+      }
+      return v;
+    }
+  }
+  const text = new TextDecoder().decode(puffer);
+  if (!/^\s*solid/i.test(text) || !/vertex/i.test(text)) throw new Error("Das ist keine gültige STL-Datei.");
+  const zahlen = [];
+  const re = /vertex\s+([-+\d.eE]+)\s+([-+\d.eE]+)\s+([-+\d.eE]+)/g;
+  let m;
+  while ((m = re.exec(text))) zahlen.push(+m[1], +m[2], +m[3]);
+  if (!zahlen.length || zahlen.length % 9) throw new Error("Die STL-Datei ist unvollständig.");
+  return new Float32Array(zahlen);
+}
+
+function meshGrenzen(v) {
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < v.length; i += 3) for (let k = 0; k < 3; k++) {
+    if (v[i + k] < min[k]) min[k] = v[i + k];
+    if (v[i + k] > max[k]) max[k] = v[i + k];
+  }
+  return { min, max, groesse: [max[0] - min[0], max[1] - min[1], max[2] - min[2]] };
+}
+
+// Modell mittig aufs Bett stellen (Unterkante auf z = 0)
+function aufsBett(v) {
+  const g = meshGrenzen(v);
+  const dx = BETT_MM / 2 - (g.min[0] + g.max[0]) / 2, dy = BETT_MM / 2 - (g.min[1] + g.max[1]) / 2, dz = -g.min[2];
+  for (let i = 0; i < v.length; i += 3) { v[i] += dx; v[i + 1] += dy; v[i + 2] += dz; }
+  return v;
+}
+
+// Um 90° drehen (achse 0/1/2, richtung ±1)
+function drehen90(v, achse, richtung) {
+  const [a, b] = achse === 0 ? [1, 2] : achse === 1 ? [2, 0] : [0, 1];
+  for (let i = 0; i < v.length; i += 3) {
+    const p = v[i + a], q = v[i + b];
+    v[i + a] = -q * richtung; v[i + b] = p * richtung;
+  }
+  return aufsBett(v);
+}
+
+function meshKennwerte(v) {
+  let vol = 0, flaeche = 0;
+  for (let i = 0; i < v.length; i += 9) {
+    const ax = v[i], ay = v[i + 1], az = v[i + 2], bx = v[i + 3], by = v[i + 4], bz = v[i + 5], cx = v[i + 6], cy = v[i + 7], cz = v[i + 8];
+    vol += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
+    const ux = bx - ax, uy = by - ay, uz = bz - az, wx = cx - ax, wy = cy - ay, wz = cz - az;
+    flaeche += Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2;
+  }
+  return { volumen: Math.abs(vol), flaeche, dreiecke: v.length / 9 };
+}
+
+// Gewicht schätzen: Hülle (Wände) voll, Inneres mit Füllgrad
+function gewichtSchaetzen(kenn, dichte, { duese = 0.4, waende = 2, fuellung = 15 } = {}) {
+  const linie = duese * 1.05;
+  const huelle = Math.min(kenn.volumen, kenn.flaeche * waende * linie * 0.9);
+  const mm3 = huelle + (kenn.volumen - huelle) * (fuellung / 100);
+  return { gramm: (mm3 / 1000) * dichte, mm3, meter: mm3 / FILAMENT_QUERSCHNITT / 1000 };
+}
+
+// Flächen, die Stützen brauchen (Normale zeigt steiler als STUETZ_WINKEL nach unten, nicht auf dem Bett)
+function ueberhaenge(v) {
+  const grenze = -Math.cos((STUETZ_WINKEL * Math.PI) / 180);
+  const markiert = new Uint8Array(v.length / 9);
+  let flaeche = 0;
+  for (let t = 0, i = 0; i < v.length; i += 9, t++) {
+    const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2];
+    const wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    const zMin = Math.min(v[i + 2], v[i + 5], v[i + 8]);
+    if (nz / l < grenze && zMin > 0.3) { markiert[t] = 1; flaeche += l / 2; }
+  }
+  return { markiert, flaeche };
+}
+
+// ---- Schnitte ---------------------------------------------------------------
+// Dreiecke nach Höhe sortiert vorbereiten, damit viele Schnitte schnell gehen
+function schnittVorbereiten(v, achse = 2) {
+  const [a, b] = achse === 2 ? [0, 1] : achse === 0 ? [1, 2] : [2, 0];
+  const n = v.length / 9;
+  const lo = new Float32Array(n), hi = new Float32Array(n);
+  for (let t = 0; t < n; t++) {
+    const i = t * 9;
+    lo[t] = Math.min(v[i + achse], v[i + 3 + achse], v[i + 6 + achse]);
+    hi[t] = Math.max(v[i + achse], v[i + 3 + achse], v[i + 6 + achse]);
+  }
+  const reihe = Uint32Array.from({ length: n }, (_, i) => i).sort((x, y) => lo[x] - lo[y]);
+  return { v, achse, a, b, lo, hi, reihe };
+}
+
+// Schnitt bei Höhe h: geschlossene Linienzüge [[x,y], …] in den Achsen a/b
+function schneiden(s, h) {
+  const { v, achse, a, b, lo, hi, reihe } = s;
+  const strecken = [];
+  for (let k = 0; k < reihe.length; k++) {
+    const t = reihe[k];
+    if (lo[t] > h) break;
+    if (hi[t] < h || lo[t] === hi[t]) continue;
+    const i = t * 9, p = [];
+    for (let e = 0; e < 3; e++) {
+      const i1 = i + e * 3, i2 = i + ((e + 1) % 3) * 3;
+      const h1 = v[i1 + achse], h2 = v[i2 + achse];
+      if ((h1 <= h && h2 > h) || (h2 <= h && h1 > h)) {
+        const f = (h - h1) / (h2 - h1);
+        p.push([v[i1 + a] + (v[i2 + a] - v[i1 + a]) * f, v[i1 + b] + (v[i2 + b] - v[i1 + b]) * f]);
+      }
+    }
+    if (p.length === 2) strecken.push(p);
+  }
+  return streckenVerbinden(strecken);
+}
+
+function streckenVerbinden(strecken) {
+  const schl = (p) => `${Math.round(p[0] * 1000)},${Math.round(p[1] * 1000)}`;
+  const nach = new Map();
+  strecken.forEach((st, i) => {
+    for (const e of [0, 1]) {
+      const k = schl(st[e]);
+      if (!nach.has(k)) nach.set(k, []);
+      nach.get(k).push(i);
+    }
+  });
+  const benutzt = new Uint8Array(strecken.length);
+  const zuege = [];
+  for (let i = 0; i < strecken.length; i++) {
+    if (benutzt[i]) continue;
+    benutzt[i] = 1;
+    const zug = [strecken[i][0], strecken[i][1]];
+    const start = schl(zug[0]);
+    let ende = zug[1];
+    for (let schritte = 0; schritte < strecken.length; schritte++) {
+      const k = schl(ende);
+      if (k === start) break;
+      const kand = (nach.get(k) || []).find((j) => !benutzt[j]);
+      if (kand == null) break;
+      benutzt[kand] = 1;
+      const st = strecken[kand];
+      ende = schl(st[0]) === k ? st[1] : st[0];
+      zug.push(ende);
+    }
+    if (zug.length >= 4) { zug.pop(); zuege.push(zug); }
+  }
+  return zuege;
+}
+
+const flaecheZug = (z) => { let f = 0; for (let i = 0, j = z.length - 1; i < z.length; j = i++) f += (z[j][0] - z[i][0]) * (z[j][1] + z[i][1]); return f / 2; };
+function punktInZug(p, z) {
+  let drin = false;
+  for (let i = 0, j = z.length - 1; i < z.length; j = i++) {
+    if ((z[i][1] > p[1]) !== (z[j][1] > p[1]) && p[0] < ((z[j][0] - z[i][0]) * (p[1] - z[i][1])) / (z[j][1] - z[i][1]) + z[i][0]) drin = !drin;
+  }
+  return drin;
+}
+
+// Verschachtelung bestimmen: gerade Tiefe = Außenkontur, ungerade = Loch
+function zuegeOrdnen(zuege) {
+  return zuege.map((z, i) => {
+    let tiefe = 0;
+    for (let j = 0; j < zuege.length; j++) if (j !== i && punktInZug(z[0], zuege[j])) tiefe++;
+    // Außen gegen den Uhrzeigersinn, Löcher im Uhrzeigersinn (Material liegt dann immer links)
+    const f = flaecheZug(z);
+    const loch = tiefe % 2 === 1;
+    const zug = (loch ? f > 0 : f < 0) ? z.slice().reverse() : z;
+    return { zug, loch, tiefe };
+  });
+}
+
+// ---- Löcher erkennen ------------------------------------------------------
+// Kreisrunde Löcher entlang X, Y und Z finden (Ø, Tiefe, durchgehend oder Sackloch)
+function kreisPruefen(z) {
+  if (z.length < 8) return null;
+  let cx = 0, cy = 0;
+  z.forEach((p) => { cx += p[0]; cy += p[1]; });
+  cx /= z.length; cy /= z.length;
+  const r = z.map((p) => Math.hypot(p[0] - cx, p[1] - cy));
+  const rm = r.reduce((s, x) => s + x, 0) / r.length;
+  const abw = Math.max(...r.map((x) => Math.abs(x - rm)));
+  if (rm < 0.5 || rm > 30 || abw / rm > 0.08) return null;
+  // Radius aus der Fläche ist genauer als der Mittelwert der Ecken
+  const rf = Math.sqrt(Math.abs(flaecheZug(z)) / Math.PI);
+  return { cx, cy, r: (rf + rm) / 2 };
+}
+
+function strahlTrifft(v, achse, p, von, richtung, max, toleranz) {
+  // Gibt es Material entlang der Achse direkt hinter dem Lochende? (Strahl durch den Lochmittelpunkt)
+  const [a, b] = achse === 2 ? [0, 1] : achse === 0 ? [1, 2] : [2, 0];
+  for (let i = 0; i < v.length; i += 9) {
+    const ax = v[i + a], ay = v[i + b], bx = v[i + 3 + a], by = v[i + 3 + b], cx = v[i + 6 + a], cy = v[i + 6 + b];
+    const d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+    if (Math.abs(d) < 1e-12) continue;
+    const l1 = ((by - cy) * (p[0] - cx) + (cx - bx) * (p[1] - cy)) / d;
+    const l2 = ((cy - ay) * (p[0] - cx) + (ax - cx) * (p[1] - cy)) / d;
+    const l3 = 1 - l1 - l2;
+    if (l1 < 0 || l2 < 0 || l3 < 0) continue;
+    const h = l1 * v[i + achse] + l2 * v[i + 3 + achse] + l3 * v[i + 6 + achse];
+    const t = (h - von) * richtung;
+    if (t > -toleranz && t < max) return true;
+  }
+  return false;
+}
+
+function loecherFinden(v, grenzen) {
+  const gefunden = [];
+  for (const achse of [2, 0, 1]) {
+    const s = schnittVorbereiten(v, achse);
+    const lo = grenzen.min[achse], hi = grenzen.max[achse];
+    const hoehe = hi - lo;
+    if (hoehe < 0.5) continue;
+    const schritt = Math.max(0.15, Math.min(0.5, hoehe / 120));
+    const spuren = [];
+    for (let h = lo + schritt / 2; h < hi; h += schritt) {
+      for (const k of zuegeOrdnen(schneiden(s, h))) {
+        if (!k.loch) continue;
+        const kreis = kreisPruefen(k.zug);
+        if (!kreis) continue;
+        const spur = spuren.find((x) => x.offen && Math.hypot(x.cx - kreis.cx, x.cy - kreis.cy) < 0.3 && Math.abs(x.r - kreis.r) < 0.15 && h - x.bis < schritt * 1.6);
+        if (spur) { spur.bis = h; spur.rs.push(kreis.r); }
+        else spuren.push({ cx: kreis.cx, cy: kreis.cy, r: kreis.r, rs: [kreis.r], von: h, bis: h, offen: true });
+      }
+    }
+    for (const sp of spuren) {
+      const von = sp.von - schritt / 2, bis = sp.bis + schritt / 2;
+      const tiefe = bis - von;
+      if (tiefe < 0.6) continue;
+      const r = sp.rs.sort((x, y) => x - y)[Math.floor(sp.rs.length / 2)];
+      const unten = strahlTrifft(v, achse, [sp.cx, sp.cy], von, -1, schritt * 2, schritt * 0.6);
+      const oben = strahlTrifft(v, achse, [sp.cx, sp.cy], bis, 1, schritt * 2, schritt * 0.6);
+      if (unten && oben) continue;   // geschlossener Hohlraum, kein Loch
+      // Gleiches Loch über eine andere Achse schon gefunden? (nur bei Würfelformen möglich)
+      const mitte = [0, 0, 0];
+      const [a, b] = achse === 2 ? [0, 1] : achse === 0 ? [1, 2] : [2, 0];
+      mitte[a] = sp.cx; mitte[b] = sp.cy; mitte[achse] = (von + bis) / 2;
+      if (gefunden.some((g) => Math.hypot(g.mitte[0] - mitte[0], g.mitte[1] - mitte[1], g.mitte[2] - mitte[2]) < r)) continue;
+      // Öffnung: die Seite ohne Material dahinter; bei Sacklöchern liegt dort der Eingang
+      const durch = !unten && !oben;
+      const offenOben = !oben;
+      gefunden.push({
+        achse, durchmesser: r * 2, tiefe, durch,
+        mitte, von, bis, oeffnung: offenOben ? bis : von, richtung: offenOben ? 1 : -1,
+      });
+    }
+  }
+  return gefunden.sort((x, y) => y.durchmesser - x.durchmesser).map((l, i) => ({ ...l, nr: i + 1 }));
+}
+
+// Passende Teile aus dem Inventar für ein Loch
+function teileFuerLoch(loch, inventar) {
+  const d = loch.durchmesser, t = loch.tiefe;
+  const vorschlaege = [];
+  for (const teil of inventar) {
+    if (teil.kat === "einsatz" && teil.aussen) {
+      // Einschmelzgewinde: Loch etwa 0,1–1,1 mm kleiner als der Außendurchmesser, tief genug
+      const unter = teil.aussen - d;
+      if (unter >= 0.05 && unter <= 1.15 && (loch.durch || t + 0.2 >= teil.laenge)) {
+        vorschlaege.push({ teil, art: "einsatz", text: `Einschmelzen: Loch ${zahl(unter, 1)} mm kleiner als der Einsatz`, guete: Math.abs(unter - 0.6) + (loch.durch ? 0.5 : 0) });  // durchgehend: lieber Schraube
+      }
+    } else if (teil.kat === "schraube") {
+      const g = gewindeD(teil.gewinde);
+      const n = NORM[teil.gewinde] || {};
+      if (loch.durch && d >= g + 0.05 && d <= g + 0.9) {   // Durchgangsloch nur bei durchgehenden Löchern sinnvoll
+        // Durchgehend: Schraube sollte durch das Teil reichen (plus Mutter); Sackloch: nicht länger als das Loch
+        const passt = loch.durch ? teil.laenge >= t : teil.laenge <= t + 0.5;
+        const ziel = loch.durch ? t + (n.mutter_h || g * 0.8) : t;
+        vorschlaege.push({ teil, art: "durchgang", text: `Durchgangsloch für ${teil.gewinde} (Norm ${zahl(n.loch || g + 0.4, 1)} mm)${passt ? "" : loch.durch ? ", Schraube kürzer als das Loch" : ", Schraube länger als das Loch"}`, guete: Math.abs(d - (n.loch || g + 0.4)) + (passt ? 0 : 1) + Math.abs(teil.laenge - ziel) / 200 });
+      } else if (d >= g * 0.72 && d <= g * 0.95 && !loch.durch && teil.laenge <= t + 0.5) {
+        vorschlaege.push({ teil, art: "selbstschneidend", text: `Kernloch zum direkten Eindrehen (${teil.gewinde})`, guete: 1 + Math.abs(d - g * 0.85) + teil.laenge / 1000 });
+      }
+    } else if (teil.kat === "magnet" && teil.form === "rund" && teil.durchmesser) {
+      const spiel = d - teil.durchmesser;
+      if (spiel >= -0.05 && spiel <= 0.45 && !loch.durch && t + 0.15 >= teil.dicke) {
+        vorschlaege.push({ teil, art: "magnet", text: `Magnet mit ${zahl(spiel, 2)} mm Spiel`, guete: Math.abs(spiel - 0.15) });
+      }
+    }
+  }
+  // Je Art nur die besten Treffer, Schrauben nicht alle Längen einzeln aufzählen
+  vorschlaege.sort((x, y) => x.guete - y.guete);
+  const schrauben = vorschlaege.filter((x) => x.teil.kat === "schraube").slice(0, 3);
+  return [...vorschlaege.filter((x) => x.teil.kat !== "schraube").slice(0, 3), ...schrauben].sort((x, y) => x.guete - y.guete);
+}
+
+// ---- Schichten (vereinfachtes Slicen) -------------------------------------
+// Je Schicht: Außenwand, innere Wände (Versatz) und Füllung (Linien), zur Ansicht
+function zugVersetzen(zug, abstand) {
+  const n = zug.length, neu = [];
+  for (let i = 0; i < n; i++) {
+    const p0 = zug[(i - 1 + n) % n], p1 = zug[i], p2 = zug[(i + 1) % n];
+    let ax = p1[0] - p0[0], ay = p1[1] - p0[1], bx = p2[0] - p1[0], by = p2[1] - p1[1];
+    const la = Math.hypot(ax, ay) || 1, lb = Math.hypot(bx, by) || 1;
+    ax /= la; ay /= la; bx /= lb; by /= lb;
+    // Material liegt links: Normale nach links
+    let nx = -ay - by, ny = ax + bx;
+    const ln = Math.hypot(nx, ny) || 1;
+    nx /= ln; ny /= ln;
+    const cos = nx * -ay + ny * ax;
+    const f = abstand / Math.max(0.35, cos);
+    neu.push([p1[0] + nx * f, p1[1] + ny * f]);
+  }
+  // Außenkontur muss schrumpfen, Loch muss wachsen; kippt die Richtung, ist kein Platz mehr
+  const f0 = flaecheZug(zug), f1 = flaecheZug(neu);
+  if (f0 > 0 ? !(f1 > 0.2 && f1 < f0) : !(f1 < 0 && -f1 > -f0)) return null;
+  return neu;
+}
+
+function fuellLinien(konturen, abstand, winkel) {
+  const c = Math.cos(winkel), s = Math.sin(winkel);
+  const dreh = (p) => [p[0] * c + p[1] * s, -p[0] * s + p[1] * c];
+  const zurueck = (p) => [p[0] * c - p[1] * s, p[0] * s + p[1] * c];
+  const kanten = [];
+  let ymin = Infinity, ymax = -Infinity;
+  for (const z of konturen) {
+    const r = z.map(dreh);
+    for (let i = 0; i < r.length; i++) {
+      const p = r[i], q = r[(i + 1) % r.length];
+      kanten.push([p, q]);
+      ymin = Math.min(ymin, p[1]); ymax = Math.max(ymax, p[1]);
+    }
+  }
+  const linien = [];
+  for (let y = Math.ceil(ymin / abstand) * abstand; y < ymax; y += abstand) {
+    const xs = [];
+    for (const [p, q] of kanten) if ((p[1] > y) !== (q[1] > y)) xs.push(p[0] + ((y - p[1]) * (q[0] - p[0])) / (q[1] - p[1]));
+    xs.sort((x, w) => x - w);
+    for (let i = 0; i + 1 < xs.length; i += 2) if (xs[i + 1] - xs[i] > 0.2) linien.push([zurueck([xs[i], y]), zurueck([xs[i + 1], y])]);
+  }
+  return linien;
+}
+
+function schichtBerechnen(s, z, opt) {
+  const breite = opt.duese * 1.05;
+  const konturen = zuegeOrdnen(schneiden(s, z));
+  const aussen = [], innen = [], fuellung = [];
+  const innerste = [];
+  for (const k of konturen) {
+    aussen.push(k.zug);
+    let letzte = k.zug;
+    for (let w = 1; w < opt.waende; w++) {
+      const n = zugVersetzen(k.zug, breite * w);
+      if (!n) break;
+      innen.push(n);
+      letzte = n;
+    }
+    const f = zugVersetzen(k.zug, breite * opt.waende);
+    innerste.push(f || letzte);
+  }
+  if (opt.fuellung > 0 && innerste.length) {
+    const voll = opt.massiv;   // Boden/Deckel: dicht gefüllt
+    const abstand = voll ? breite : Math.max(breite, (breite * 2) / (opt.fuellung / 100));
+    const winkel = ((opt.nr % 2 ? 45 : -45) * Math.PI) / 180;
+    fuellung.push(...fuellLinien(innerste, abstand, winkel));
+  }
+  return { z, aussen, innen, fuellung };
+}
+
+// ---- G-Code ------------------------------------------------------------------
+const GCODE_ARTEN = {
+  "outer wall": "aussen", "inner wall": "innen", "sparse infill": "fuellung", "internal solid infill": "fuellung",
+  "top surface": "oben", "bottom surface": "unten", "bridge": "bruecke", "support": "stuetze", "support interface": "stuetze",
+  "overhang wall": "aussen", "gap infill": "innen", "skirt": "rand", "brim": "rand", "prime tower": "turm",
+  perimeter: "aussen", "external perimeter": "aussen", "solid infill": "fuellung", infill: "fuellung",
+};
+
+function gcodeLesen(text) {
+  const schichten = [];
+  let x = 0, y = 0, z = 0, e = 0, relE = false, relXYZ = false, art = "innen";
+  let schicht = null;
+  const info = {};
+  const neueSchicht = (hz) => { schicht = { z: hz, linien: [] }; schichten.push(schicht); };
+  const zeilen = text.split("\n");
+  for (let zi = 0; zi < zeilen.length; zi++) {
+    const zeile = zeilen[zi];
+    if (zeile.charCodeAt(0) === 59) {   // ;
+      const k = zeile.slice(1).trim();
+      const kl = k.toLowerCase();
+      if (kl.startsWith("feature:") || kl.startsWith("type:")) art = GCODE_ARTEN[kl.split(":")[1].trim()] || "innen";
+      else if (kl.startsWith("layer_change") || kl.startsWith("change_layer")) schicht = null;
+      else if (kl.startsWith("total filament weight")) info.gramm = parseFloat(k.split(":")[1]);
+      else if (kl.startsWith("total filament length")) info.mm = parseFloat(k.split(":")[1]);
+      else if (kl.startsWith("filament used [g]")) info.gramm = info.gramm || parseFloat(k.split("=")[1]);
+      else if (kl.includes("total estimated time")) info.zeit = k.slice(kl.indexOf("total estimated time")).split(/[:=]/)[1].split(";")[0].trim();
+      else if (kl.startsWith("model printing time") || kl.startsWith("estimated printing time")) info.zeit = info.zeit || k.split(/[:=]/).slice(1).join(":").split(";")[0].trim();
+      else if (kl.startsWith("filament_type") || kl.startsWith("filament type")) info.material = info.material || k.split(/[:=]/)[1].trim();
+      else if (kl.startsWith("nozzle_diameter")) info.duese = info.duese || parseFloat(k.split(/[:=]/)[1]);
+      else if (kl.startsWith("layer_height") && !info.schicht) info.schicht = parseFloat(k.split(/[:=]/)[1]);
+      continue;
+    }
+    const c = zeile.charCodeAt(0);
+    if (c !== 71 && c !== 77) continue;   // G / M
+    const befehl = zeile.split(";")[0].trim().split(/\s+/);
+    const cmd = befehl[0];
+    if (cmd === "M82") { relE = false; continue; }
+    if (cmd === "M83") { relE = true; continue; }
+    if (cmd === "G90") { relXYZ = false; relE = false; continue; }
+    if (cmd === "G91") { relXYZ = true; continue; }
+    if (cmd === "G92") { for (const p of befehl) if (p[0] === "E") e = parseFloat(p.slice(1)); continue; }
+    if (cmd !== "G0" && cmd !== "G1" && cmd !== "G2" && cmd !== "G3") continue;
+    let nx = x, ny = y, nz = z, ne = null;
+    for (let i = 1; i < befehl.length; i++) {
+      const p = befehl[i], w = parseFloat(p.slice(1));
+      if (p[0] === "X") nx = relXYZ ? x + w : w;
+      else if (p[0] === "Y") ny = relXYZ ? y + w : w;
+      else if (p[0] === "Z") nz = relXYZ ? z + w : w;
+      else if (p[0] === "E") ne = w;
+    }
+    const extrudiert = ne != null && (relE ? ne > 0 : ne > e);
+    if (ne != null) e = relE ? e + ne : ne;
+    if (extrudiert && (nx !== x || ny !== y)) {
+      if (!schicht || Math.abs(schicht.z - nz) > 1e-4) {
+        const vorhanden = schichten.length && Math.abs(schichten[schichten.length - 1].z - nz) < 1e-4 ? schichten[schichten.length - 1] : null;
+        if (vorhanden) schicht = vorhanden; else neueSchicht(nz);
+      }
+      schicht.linien.push(x, y, nx, ny, GCODE_ARTEN_NR[art] ?? 1);
+    }
+    x = nx; y = ny; z = nz;
+  }
+  return { schichten: schichten.filter((s) => s.linien.length), info };
+}
+const GCODE_ARTEN_LISTE = ["aussen", "innen", "fuellung", "oben", "unten", "bruecke", "stuetze", "rand", "turm"];
+const GCODE_ARTEN_NR = Object.fromEntries(GCODE_ARTEN_LISTE.map((a, i) => [a, i]));
+const LINIEN_FARBEN = {
+  aussen: [1, 0.55, 0.25], innen: [1, 0.85, 0.35], fuellung: [0.85, 0.3, 0.35], oben: [0.95, 0.35, 0.45], unten: [0.6, 0.5, 1],
+  bruecke: [0.45, 0.75, 1], stuetze: [0.3, 0.9, 0.55], rand: [0.6, 0.6, 0.6], turm: [0.5, 0.5, 0.7],
+};
+const LINIEN_NAMEN = { aussen: "Außenwand", innen: "Innere Wände", fuellung: "Füllung", oben: "Oberfläche", unten: "Boden", bruecke: "Brücke", stuetze: "Stützen", rand: "Rand", turm: "Reinigungsturm" };
+
+// ---- ZIP (für .gcode.3mf aus Bambu Studio) ------------------------------------
+async function zipDateien(puffer) {
+  const dv = new DataView(puffer);
+  let ende = -1;
+  for (let i = puffer.byteLength - 22; i >= Math.max(0, puffer.byteLength - 70000); i--) if (dv.getUint32(i, true) === 0x06054b50) { ende = i; break; }
+  if (ende < 0) throw new Error("Die Datei ist kein gültiges 3MF/ZIP.");
+  const anzahl = dv.getUint16(ende + 10, true);
+  let o = dv.getUint32(ende + 16, true);
+  const dateien = [];
+  for (let n = 0; n < anzahl; n++) {
+    if (dv.getUint32(o, true) !== 0x02014b50) break;
+    const methode = dv.getUint16(o + 10, true), groesse = dv.getUint32(o + 20, true);
+    const nameLen = dv.getUint16(o + 28, true), extraLen = dv.getUint16(o + 30, true), komLen = dv.getUint16(o + 32, true);
+    const lokal = dv.getUint32(o + 42, true);
+    const name = new TextDecoder().decode(new Uint8Array(puffer, o + 46, nameLen));
+    dateien.push({ name, methode, groesse, lokal });
+    o += 46 + nameLen + extraLen + komLen;
+  }
+  const lesen = async (d) => {
+    const nl = dv.getUint16(d.lokal + 26, true), el = dv.getUint16(d.lokal + 28, true);
+    const daten = new Uint8Array(puffer, d.lokal + 30 + nl + el, d.groesse);
+    if (d.methode === 0) return daten;
+    if (d.methode !== 8 || typeof DecompressionStream === "undefined") throw new Error("Dieser Browser kann die Datei nicht entpacken.");
+    const strom = new Blob([daten]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(strom).arrayBuffer());
+  };
+  return { dateien, lesen };
+}
+// ---------------------------------------------------------------------------
+// 3D-Modelle: eigene kleine WebGL-Bühne (drehen, zoomen, verschieben) und die
+// Ansicht mit Maßen, Gewicht, Löchern, Schichten und G-Code
+// ---------------------------------------------------------------------------
+
+// ---- Matrizen (4×4, spaltenweise wie in WebGL) ----------------------------
+const M4 = {
+  perspektive(fov, seiten, nah, fern) {
+    const f = 1 / Math.tan(fov / 2), nf = 1 / (nah - fern);
+    return [f / seiten, 0, 0, 0, 0, f, 0, 0, 0, 0, (fern + nah) * nf, -1, 0, 0, 2 * fern * nah * nf, 0];
+  },
+  blick(auge, ziel, oben) {
+    let zx = auge[0] - ziel[0], zy = auge[1] - ziel[1], zz = auge[2] - ziel[2];
+    let l = Math.hypot(zx, zy, zz); zx /= l; zy /= l; zz /= l;
+    let xx = oben[1] * zz - oben[2] * zy, xy = oben[2] * zx - oben[0] * zz, xz = oben[0] * zy - oben[1] * zx;
+    l = Math.hypot(xx, xy, xz) || 1; xx /= l; xy /= l; xz /= l;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    return [xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
+      -(xx * auge[0] + xy * auge[1] + xz * auge[2]), -(yx * auge[0] + yy * auge[1] + yz * auge[2]), -(zx * auge[0] + zy * auge[1] + zz * auge[2]), 1];
+  },
+  mal(a, b) {
+    const o = new Array(16);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k];
+      o[i * 4 + j] = s;
+    }
+    return o;
+  },
+  verschieben(x, y, z) { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1]; },
+  eins() { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; },
+};
+
+const MESH_VS = `attribute vec3 p; attribute vec3 n; attribute vec3 c;
+uniform mat4 mvp; uniform mat4 m; varying vec3 vn; varying vec3 vc; varying float vz;
+void main(){ vec4 w = m * vec4(p,1.0); vz = w.z; vn = mat3(m) * n; vc = c; gl_Position = mvp * vec4(p,1.0); }`;
+const MESH_FS = `precision mediump float; varying vec3 vn; varying vec3 vc; varying float vz; uniform float alpha; uniform float schnitt;
+void main(){ if (vz > schnitt) discard; vec3 n = normalize(vn); if (!gl_FrontFacing) n = -n;
+  float l = 0.38 + 0.5 * max(dot(n, normalize(vec3(0.45,-0.6,0.9))), 0.0) + 0.22 * max(dot(n, normalize(vec3(-0.7,0.5,0.3))), 0.0);
+  float rand = pow(1.0 - abs(n.z), 3.0) * 0.08;
+  gl_FragColor = vec4(vc * l + rand, alpha); }`;
+const LINIE_VS = `attribute vec3 p; attribute vec3 c; uniform mat4 mvp; uniform mat4 m; varying vec3 vc; varying float vz;
+void main(){ vec4 w = m * vec4(p,1.0); vz = w.z; vc = c; gl_Position = mvp * vec4(p,1.0); }`;
+const LINIE_FS = `precision mediump float; varying vec3 vc; varying float vz; uniform float alpha; uniform float hoehe; uniform float dunkel;
+void main(){ float f = (vz < hoehe - 0.001) ? dunkel : 1.0; gl_FragColor = vec4(vc * f, alpha); }`;
+
+class Buehne {
+  constructor() {
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "buehne-canvas";
+    const gl = this.canvas.getContext("webgl", { antialias: true, alpha: true, premultipliedAlpha: false });
+    this.gl = gl;
+    this.ok = !!gl;
+    this.objekte = new Map();
+    this.ziel = [BETT_MM / 2, BETT_MM / 2, 10];
+    this.abstand = 420; this.dreh = -0.9; this.neig = 0.65;
+    this.zeiger = new Map();
+    this.animationen = [];
+    if (!gl) return;
+    gl.getExtension("OES_element_index_uint");
+    this.pMesh = this._programm(MESH_VS, MESH_FS);
+    this.pLinie = this._programm(LINIE_VS, LINIE_FS);
+    this._ereignisse();
+    this._bett();
+  }
+
+  _programm(vs, fs) {
+    const gl = this.gl;
+    const sh = (typ, q) => { const s = gl.createShader(typ); gl.shaderSource(s, q); gl.compileShader(s); return s; };
+    const p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    const ort = {};
+    ["p", "n", "c"].forEach((a) => (ort[a] = gl.getAttribLocation(p, a)));
+    ["mvp", "m", "alpha", "schnitt", "hoehe", "dunkel"].forEach((u) => (ort[u] = gl.getUniformLocation(p, u)));
+    return { p, ort };
+  }
+
+  _puffer(daten) {
+    const gl = this.gl, b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, daten, gl.STATIC_DRAW);
+    return b;
+  }
+
+  // Dreiecke (9 Zahlen je Dreieck) mit flachen Normalen; farbe: [r,g,b] oder Float32Array je Ecke
+  mesh(name, v, farbe, opt = {}) {
+    if (!this.ok) return;
+    this.weg(name);
+    const n = new Float32Array(v.length), c = new Float32Array(v.length);
+    for (let i = 0; i < v.length; i += 9) {
+      const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2];
+      const wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
+      let nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+      const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+      for (let k = 0; k < 9; k += 3) { n[i + k] = nx; n[i + k + 1] = ny; n[i + k + 2] = nz; }
+    }
+    if (farbe instanceof Float32Array) c.set(farbe);
+    else for (let i = 0; i < c.length; i += 3) { c[i] = farbe[0]; c[i + 1] = farbe[1]; c[i + 2] = farbe[2]; }
+    this.objekte.set(name, { art: "mesh", p: this._puffer(v), n: this._puffer(n), c: this._puffer(c), anzahl: v.length / 3,
+      alpha: opt.alpha ?? 1, m: M4.eins(), sichtbar: true, reihe: opt.reihe ?? 1 });
+    this.neu();
+  }
+
+  // Linien (6 Zahlen je Strecke) mit Farbe je Ecke
+  linien(name, v, c, opt = {}) {
+    if (!this.ok) return;
+    this.weg(name);
+    this.objekte.set(name, { art: "linie", p: this._puffer(v), c: this._puffer(c), anzahl: v.length / 3, bis: v.length / 3,
+      alpha: opt.alpha ?? 1, m: M4.eins(), sichtbar: true, reihe: opt.reihe ?? 0, hoehe: 1e9, dunkel: opt.dunkel ?? 1 });
+    this.neu();
+  }
+
+  weg(name) {
+    const o = this.objekte.get(name);
+    if (!o) return;
+    [o.p, o.n, o.c].forEach((b) => b && this.gl.deleteBuffer(b));
+    this.objekte.delete(name);
+    this.neu();
+  }
+  setze(name, werte) { const o = this.objekte.get(name); if (o) { Object.assign(o, werte); this.neu(); } }
+
+  _bett() {
+    const B = BETT_MM, l = [], c = [];
+    const add = (x1, y1, x2, y2, f) => { l.push(x1, y1, 0, x2, y2, 0); c.push(...f, ...f); };
+    for (let i = 0; i <= B; i += 10) {
+      const f = i % 50 === 0 ? [0.2, 0.3, 0.27] : [0.12, 0.16, 0.15];
+      add(i, 0, i, B, f); add(0, i, B, i, f);
+    }
+    const r = [0.24, 0.9, 0.66];
+    add(0, 0, B, 0, r); add(B, 0, B, B, r); add(B, B, 0, B, r); add(0, B, 0, 0, r);
+    this.linien("bett-raster", new Float32Array(l), new Float32Array(c), { reihe: -1 });
+    const p = new Float32Array([0, 0, -0.05, B, 0, -0.05, B, B, -0.05, 0, 0, -0.05, B, B, -0.05, 0, B, -0.05]);
+    this.mesh("bett", p, [0.06, 0.08, 0.075], { reihe: -2 });
+  }
+
+  // ---- Kamera ----
+  _auge() {
+    const cp = Math.cos(this.neig);
+    return [this.ziel[0] + this.abstand * cp * Math.cos(this.dreh), this.ziel[1] + this.abstand * cp * Math.sin(this.dreh), this.ziel[2] + this.abstand * Math.sin(this.neig)];
+  }
+  _matrix() {
+    const w = this.canvas.width || 1, h = this.canvas.height || 1;
+    const p = M4.perspektive(0.7, w / h, Math.max(0.5, this.abstand / 200), this.abstand * 8 + 1000);
+    const v = M4.blick(this._auge(), this.ziel, Math.abs(Math.cos(this.neig)) < 1e-3 ? [0, 1, 0] : [0, 0, 1]);
+    return M4.mal(p, v);
+  }
+  ansicht(art, grenzen) {
+    if (grenzen) {
+      const g = grenzen;
+      this.ziel = [(g.min[0] + g.max[0]) / 2, (g.min[1] + g.max[1]) / 2, (g.min[2] + g.max[2]) / 2];
+      const r = Math.max(20, Math.hypot(...g.groesse) / 2);
+      this.abstand = Math.min(900, r / Math.sin(0.35) * 1.15);
+    }
+    if (art === "oben") { this.neig = 1.5707; this.dreh = -Math.PI / 2; }
+    else if (art === "vorne") { this.neig = 0.05; this.dreh = -Math.PI / 2; }
+    else if (art === "bett") { this.ziel = [BETT_MM / 2, BETT_MM / 2, 0]; this.abstand = 520; this.neig = 0.75; this.dreh = -1.1; }
+    else { this.neig = 0.6; this.dreh = -1.05; }
+    this.neu();
+  }
+
+  // Weltpunkt → Bildschirm (CSS-Pixel)
+  projizieren(p) {
+    const m = this._letzte || this._matrix();
+    const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+    const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+    if (w <= 0) return null;
+    const r = this.canvas.getBoundingClientRect();
+    return [((x / w + 1) / 2) * r.width, ((1 - y / w) / 2) * r.height];
+  }
+
+  // Bildschirmpunkt (CSS-Pixel) → Strahl {von, richtung} in Weltkoordinaten
+  strahl(px, py) {
+    const r = this.canvas.getBoundingClientRect();
+    const auge = this._auge();
+    const norm = (v) => { const l = Math.hypot(...v) || 1; return v.map((x) => x / l); };
+    const kreuz = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const f = norm([this.ziel[0] - auge[0], this.ziel[1] - auge[1], this.ziel[2] - auge[2]]);
+    const oben = Math.abs(Math.cos(this.neig)) < 1e-3 ? [0, 1, 0] : [0, 0, 1];
+    const re = norm(kreuz(f, oben)), ob = kreuz(re, f);
+    const t = Math.tan(0.35), x = (px / r.width) * 2 - 1, y = 1 - (py / r.height) * 2;
+    const seiten = r.width / Math.max(1, r.height);
+    return { von: auge, richtung: norm([0, 1, 2].map((i) => f[i] + re[i] * x * t * seiten + ob[i] * y * t)) };
+  }
+
+  // ---- Bedienung: ziehen = drehen, rechts/zwei Finger = verschieben, Rad/zwei Finger = zoomen ----
+  _ereignisse() {
+    const c = this.canvas;
+    c.addEventListener("contextmenu", (e) => e.preventDefault());
+    c.addEventListener("wheel", (e) => { e.preventDefault(); this.abstand = Math.min(1500, Math.max(8, this.abstand * Math.exp(e.deltaY * 0.0012))); this.neu(); }, { passive: false });
+    c.addEventListener("pointerdown", (e) => {
+      c.setPointerCapture(e.pointerId);
+      this.zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, schieben: e.button === 2 || e.shiftKey });
+    });
+    const ende = (e) => {
+      const z = this.zeiger.get(e.pointerId);
+      // Antippen (kaum bewegt, ein Finger) → für das Markieren von Löchern
+      if (z && e.type === "pointerup" && this.zeiger.size === 1 && !this._pinch && Math.hypot(e.clientX - z.x0, e.clientY - z.y0) < 6 && this.antippen) {
+        const r = c.getBoundingClientRect();
+        this.antippen(this.strahl(e.clientX - r.left, e.clientY - r.top));
+      }
+      this.zeiger.delete(e.pointerId); this._pinch = null;
+    };
+    c.addEventListener("pointerup", ende);
+    c.addEventListener("pointercancel", ende);
+    c.addEventListener("pointermove", (e) => {
+      const z = this.zeiger.get(e.pointerId);
+      if (!z) return;
+      const dx = e.clientX - z.x, dy = e.clientY - z.y;
+      if (this.zeiger.size === 2) {
+        const [a, b] = [...this.zeiger.values()];
+        z.x = e.clientX; z.y = e.clientY;
+        const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        if (this._pinch) {
+          this.abstand = Math.min(1500, Math.max(8, this.abstand * (this._pinch.d / d)));
+          this._schieben(mx - this._pinch.mx, my - this._pinch.my);
+        }
+        this._pinch = { d, mx, my };
+        this.neu();
+        return;
+      }
+      z.x = e.clientX; z.y = e.clientY;
+      if (z.schieben) this._schieben(dx, dy);
+      else { this.dreh -= dx * 0.008; this.neig = Math.min(1.5707, Math.max(-0.2, this.neig + dy * 0.008)); }
+      this.neu();
+    });
+  }
+  _schieben(dx, dy) {
+    const f = (this.abstand * 0.0016) * (800 / Math.max(300, this.canvas.clientHeight));
+    const rx = -Math.sin(this.dreh), ry = Math.cos(this.dreh);
+    const sn = Math.sin(this.neig);
+    this.ziel[0] -= (rx * dx) * f - (Math.cos(this.dreh) * sn * dy) * f;
+    this.ziel[1] -= (ry * dx) * f - (Math.sin(this.dreh) * sn * dy) * f;
+    this.ziel[2] += Math.cos(this.neig) * dy * f;
+  }
+
+  neu() {
+    if (this._wartet || !this.ok) return;
+    this._wartet = true;
+    requestAnimationFrame((t) => { this._wartet = false; this._zeichnen(t); });
+  }
+  animieren(fn) { this.animationen.push(fn); this.neu(); }
+
+  _zeichnen(zeit) {
+    const gl = this.gl, c = this.canvas;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = Math.round(c.clientWidth * dpr), h = Math.round(c.clientHeight * dpr);
+    if (!w || !h) return;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    this.animationen = this.animationen.filter((fn) => fn(zeit) !== false);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    const vp = this._matrix();
+    this._letzte = vp;
+    const liste = [...this.objekte.values()].filter((o) => o.sichtbar).sort((a, b) => (a.alpha < 1) - (b.alpha < 1) || a.reihe - b.reihe);
+    for (const o of liste) {
+      const pr = o.art === "mesh" ? this.pMesh : this.pLinie;
+      gl.useProgram(pr.p);
+      gl.uniformMatrix4fv(pr.ort.mvp, false, new Float32Array(M4.mal(vp, o.m)));
+      gl.uniformMatrix4fv(pr.ort.m, false, new Float32Array(o.m));
+      gl.uniform1f(pr.ort.alpha, o.alpha);
+      gl.depthMask(o.alpha >= 1);
+      const attr = (ort, b) => { if (ort < 0) return; gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.enableVertexAttribArray(ort); gl.vertexAttribPointer(ort, 3, gl.FLOAT, false, 0, 0); };
+      attr(pr.ort.p, o.p); attr(pr.ort.c, o.c);
+      if (o.art === "mesh") {
+        attr(pr.ort.n, o.n);
+        gl.uniform1f(pr.ort.schnitt, o.schnitt ?? 1e9);
+        gl.drawArrays(gl.TRIANGLES, 0, o.anzahl);
+      } else {
+        gl.uniform1f(pr.ort.hoehe, o.hoehe);
+        gl.uniform1f(pr.ort.dunkel, o.dunkel);
+        gl.drawArrays(gl.LINES, 0, Math.min(o.anzahl, o.bis));
+      }
+    }
+    gl.depthMask(true);
+    if (this.nachZeichnen) this.nachZeichnen();
+    if (this.animationen.length) this.neu();
+  }
+}
+
+// ---- Teile zum Einsetzen (einfach gezeichnet) -----------------------------
+function zylinderDreiecke(r, h, z0 = 0, teile = 40) {
+  const v = [];
+  for (let i = 0; i < teile; i++) {
+    const a1 = (i / teile) * Math.PI * 2, a2 = ((i + 1) / teile) * Math.PI * 2;
+    const x1 = Math.cos(a1) * r, y1 = Math.sin(a1) * r, x2 = Math.cos(a2) * r, y2 = Math.sin(a2) * r;
+    v.push(x1, y1, z0, x2, y2, z0, x2, y2, z0 + h, x1, y1, z0, x2, y2, z0 + h, x1, y1, z0 + h);
+    v.push(0, 0, z0 + h, x1, y1, z0 + h, x2, y2, z0 + h);
+    v.push(0, 0, z0, x2, y2, z0, x1, y1, z0);
+  }
+  return v;
+}
+// Teil entlang der lokalen z-Achse bauen: z = 0 ist die Lochöffnung, positiv geht ins Loch hinein
+function teilGeometrie(teil, loch) {
+  const teileFarben = [];
+  let v = [];
+  const farbe = (arr, f) => { for (let i = 0; i < arr.length; i += 3) teileFarben.push(...f); v = v.concat(arr); };
+  if (teil.kat === "einsatz") {
+    farbe(zylinderDreiecke(teil.aussen / 2, teil.laenge, 0), [0.84, 0.66, 0.2]);
+    farbe(zylinderDreiecke(gewindeD(teil.gewinde) / 2, teil.laenge + 0.02, -0.01, 24), [0.35, 0.26, 0.06]);
+  } else if (teil.kat === "schraube") {
+    const n = NORM[teil.gewinde] || NORM.M3;
+    farbe(zylinderDreiecke(n.kopf_d / 2, n.kopf_h, -n.kopf_h), [0.42, 0.46, 0.45]);
+    farbe(zylinderDreiecke(gewindeD(teil.gewinde) / 2, teil.laenge, 0, 24), [0.62, 0.66, 0.65]);
+  } else if (teil.kat === "magnet") {
+    const start = Math.max(0, loch.tiefe - teil.dicke);
+    farbe(zylinderDreiecke(teil.durchmesser / 2, teil.dicke / 2, start), [0.85, 0.25, 0.2]);
+    farbe(zylinderDreiecke(teil.durchmesser / 2, teil.dicke / 2, start + teil.dicke / 2), [0.2, 0.45, 0.85]);
+  }
+  return { v, farben: teileFarben };
+}
+// Lokale Koordinaten in die Welt drehen: lokale z-Achse zeigt ins Loch
+function insLoch(lokal, loch) {
+  const a = loch.achse, rein = -loch.richtung;
+  const [u, w] = a === 2 ? [0, 1] : a === 0 ? [1, 2] : [2, 0];
+  const out = new Float32Array(lokal.length);
+  for (let i = 0; i < lokal.length; i += 3) {
+    const p = [0, 0, 0];
+    p[u] = loch.mitte[u] + lokal[i];
+    p[w] = loch.mitte[w] + lokal[i + 1];
+    p[a] = loch.oeffnung + lokal[i + 2] * rein;
+    out[i] = p[0]; out[i + 1] = p[1]; out[i + 2] = p[2];
+  }
+  return out;
+}
+
+// ---- Zuletzt geöffnete Dateien (nur in diesem Browser) ----------------------
+const MOD_DB = {
+  async db() {
+    if (this._db) return this._db;
+    this._db = await new Promise((ok, fehler) => {
+      const r = indexedDB.open("filament-werkstatt", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("modelle", { keyPath: "name" });
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => fehler(r.error);
+    });
+    return this._db;
+  },
+  async alle() {
+    try {
+      const db = await this.db();
+      return await new Promise((ok) => {
+        const r = db.transaction("modelle").objectStore("modelle").getAll();
+        r.onsuccess = () => ok((r.result || []).sort((a, b) => b.datum - a.datum).map(({ name, datum, groesse }) => ({ name, datum, groesse })));
+        r.onerror = () => ok([]);
+      });
+    } catch (e) { return []; }
+  },
+  async holen(name) {
+    const db = await this.db();
+    return new Promise((ok) => { const r = db.transaction("modelle").objectStore("modelle").get(name); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); });
+  },
+  async speichern(name, daten) {
+    try {
+      const db = await this.db();
+      const tx = db.transaction("modelle", "readwrite");
+      tx.objectStore("modelle").put({ name, daten, datum: Date.now(), groesse: daten.byteLength });
+      await new Promise((ok) => (tx.oncomplete = ok));
+      const liste = await this.alle();
+      if (liste.length > 8) {
+        const tx2 = db.transaction("modelle", "readwrite");
+        liste.slice(8).forEach((x) => tx2.objectStore("modelle").delete(x.name));
+      }
+    } catch (e) { /* Speicher voll oder privat: dann eben nicht */ }
+  },
+  async loeschen(name) {
+    try { const db = await this.db(); db.transaction("modelle", "readwrite").objectStore("modelle").delete(name); } catch (e) { /* egal */ }
+  },
+};
+
+const STUETZEN = [
+  { id: "keine", name: "Keine" },
+  { id: "normal", name: "Normal" },
+  { id: "baum-schlank", name: "Baum schlank" },
+  { id: "baum-stark", name: "Baum stark" },
+  { id: "baum-hybrid", name: "Baum hybrid" },
+];
+const SCHICHT_BEREICH = { 0.2: [0.06, 0.14, 0.1], 0.4: [0.08, 0.28, 0.2], 0.6: [0.18, 0.42, 0.3], 0.8: [0.24, 0.56, 0.4] };
+
+const MOD_MAX_BYTES = 200 * 1048576;      // größere Dateien bringen Handys zum Absturz
+const MOD_MAX_DREIECKE = 3000000;
+
+const ModellAnsicht = {
+  _modHtml() {
+    this._modEinrichten();
+    const m = this._mod;
+    if (!m) return this._modLeerHtml();
+    if (m.laedt) return `<div class="dr-karte mod-laden"><span class="dreher"></span><div><h2>${esc(m.name)}</h2><p class="leise">${esc(m.laedt)}</p></div></div>`;
+    const tabs = m.art === "stl"
+      ? [["uebersicht", "Übersicht"], ["loecher", `Löcher${m.loecher ? ` (${m.loecher.length})` : ""}`], ["schichten", "Schichten"]]
+      : [["uebersicht", "Übersicht"], ["schichten", "Schichten"]];
+    return `<div class="mod-raster">
+      <div class="mod-huelle">
+      <button class="mod-plus" data-aktion="neu" aria-label="Datei öffnen" title="STL oder G-Code öffnen">+</button>
+      <div class="mod-buehne-karte dr-karte">
+        <div id="mod-buehne" class="mod-buehne"></div>
+        <div id="mod-marker" class="mod-marker"></div>
+        <div class="mod-leiste">
+          <span class="mod-name" title="${esc(m.name)}">${m.art === "stl" ? "🧊" : "🧾"} ${esc(m.name)}</span>
+          <button class="chip" data-aktion="mod-ansicht" data-id="iso">3D</button>
+          <button class="chip" data-aktion="mod-ansicht" data-id="oben">Oben</button>
+          <button class="chip" data-aktion="mod-ansicht" data-id="vorne">Vorne</button>
+          <button class="chip" data-aktion="mod-ansicht" data-id="bett">Bett</button>
+          <button class="chip mod-zu" data-aktion="mod-schliessen" aria-label="Modell schließen">✕</button>
+        </div>
+        ${m.tab === "schichten" && m.schichtZahl ? `<div class="mod-schicht-leiste">
+          <button class="rund" data-aktion="mod-schicht" data-d="-1" aria-label="Schicht tiefer">−</button>
+          <input type="range" min="1" max="${m.schichtZahl}" step="1" value="${m.schichtNr}" data-mod="schicht">
+          <button class="rund" data-aktion="mod-schicht" data-d="1" aria-label="Schicht höher">+</button>
+          <span id="mod-schicht-text" class="mod-schicht-text">${this._modSchichtText()}</span>
+        </div>` : ""}
+        ${m.markieren ? `<div class="mod-markier-hinweis" data-einmal="mod-markier">🎯 Tippe auf die Stelle, an der das Loch beginnt <button class="mini" data-aktion="mod-markieren">Abbrechen</button></div>` : ""}
+        <p class="mod-hilfe leise">${this._mobil ? "Ein Finger drehen · zwei Finger zoomen und schieben" : "Ziehen dreht · Rechtsklick oder Shift schiebt · Mausrad zoomt"}</p>
+      </div>
+      </div>
+      <aside class="mod-seite dr-karte">
+        <div class="tabs mod-tabs">${tabs.map(([id, n]) => `<button class="tab ${m.tab === id ? "an" : ""}" data-aktion="mod-tab" data-id="${id}">${n}</button>`).join("")}</div>
+        <div class="mod-inhalt">${m.tab === "loecher" ? this._modLoecherHtml() : m.tab === "schichten" ? this._modSchichtenHtml() : this._modUebersichtHtml()}</div>
+      </aside>
+    </div>`;
+  },
+
+  _modLeerHtml() {
+    const zuletzt = this._modZuletzt || [];
+    return `<div class="mod-leer">
+      <label class="ablage" data-ablage="1">
+        <input type="file" accept=".stl,.gcode,.3mf" data-mod="datei" hidden>
+        <span class="ablage-icon">🧊</span>
+        <strong>STL oder G-Code hierher ziehen</strong>
+        <span class="leise">oder tippen, um eine Datei zu wählen</span>
+        <span class="leise klein">.stl · .gcode · .gcode.3mf aus Bambu Studio</span>
+      </label>
+      ${zuletzt.length ? `<div class="dr-karte"><h3 class="dr-titel">🕘 Zuletzt geöffnet (nur auf diesem Gerät)</h3><div class="dr-verlauf">${zuletzt.map((z) => `
+        <div class="dr-druck mod-zuletzt"><button class="mod-zuletzt-knopf" data-aktion="mod-zuletzt" data-name="${esc(z.name)}"><span class="ld-bild">${/\.stl$/i.test(z.name) ? "🧊" : "🧾"}</span>
+          <span class="dr-druck-text"><strong>${esc(z.name)}</strong><small>${new Date(z.datum).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · ${zahl(z.groesse / 1048576, 1)} MB</small></span></button>
+          <button class="icon-knopf" data-aktion="mod-zuletzt-weg" data-name="${esc(z.name)}" aria-label="Aus der Liste entfernen">✕</button></div>`).join("")}</div></div>` : ""}
+    </div>`;
+  },
+
+  _modUebersichtHtml() {
+    const m = this._mod;
+    if (m.art === "gcode") return this._modGcodeUebersichtHtml();
+    const g = m.grenzen.groesse;
+    const zuGross = g.map((x) => x > BETT_MM + 0.01);
+    const passt = !zuGross.some(Boolean);
+    const rolle = this._modRolle();
+    const dichte = materialInfo(rolle ? rolle.material : "PLA").dichte;
+    const gew = gewichtSchaetzen(m.kenn, dichte, { duese: m.duese, waende: m.waende, fuellung: m.fuellung });
+    const rest = rolle && rolle.rest_g != null ? rolle.rest_g - gew.gramm : null;
+    const rollen = this._daten.rollen.slice().sort((a, b) => (b.rest_g ?? -1) - (a.rest_g ?? -1));
+    return `
+      <div class="mod-masse">${["X", "Y", "Z"].map((a, i) => `<div class="${zuGross[i] ? "rot" : ""}"><span>${a}</span><strong>${zahl(g[i], 1)}</strong><small>mm</small></div>`).join("")}</div>
+      <div class="hinweis ${passt ? "mint" : "rot-hinweis"}">${passt ? "✓ Passt aufs Druckbett (256 × 256 × 256 mm)" : `✕ Zu groß für den P1S: ${["X", "Y", "Z"].filter((_, i) => zuGross[i]).join(", ")} über 256 mm. Drehen hilft nur, wenn eine andere Seite kürzer ist.`}</div>
+      <div class="r-kopf oben-abstand"><span>Drehen (90°)</span></div>
+      <div class="chips mod-dreh">
+        <button class="chip" data-aktion="mod-drehen" data-achse="0">↻ um X</button>
+        <button class="chip" data-aktion="mod-drehen" data-achse="1">↻ um Y</button>
+        <button class="chip" data-aktion="mod-drehen" data-achse="2">↻ um Z</button>
+      </div>
+      <h3>⚖️ Gewicht und Rolle</h3>
+      <label class="auswahl breit-auswahl"><span>Rolle</span><select data-mod="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${rolle && r.id === rolle.id ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : " · nicht gewogen"}</option>`).join("")}</select></label>
+      ${this._modReglerHtml("fuellung", "Füllung", m.fuellung, 0, 100, 5, "%")}
+      ${this._modReglerHtml("waende", "Wände", m.waende, 1, 6, 1, "")}
+      <div id="mod-gewicht">${this._modGewichtHtml(gew, rest, rolle)}</div>
+      ${m.ueber && m.ueber.flaeche > 25 ? `<div class="hinweis amber">⚠️ Etwa ${zahl(m.ueber.flaeche / 100, 1)} cm² hängen über (steiler als ${STUETZ_WINKEL}°) und brauchen Stützen. <button class="mini" data-aktion="mod-tab" data-id="schichten">Ansehen</button></div>` : `<div class="hinweis">Keine nennenswerten Überhänge, Stützen sind voraussichtlich nicht nötig.</div>`}
+      <div class="info-liste oben-abstand">
+        <div class="info-zeile"><span>Volumen</span><strong>${zahl(m.kenn.volumen / 1000, 1)} cm³</strong></div>
+        <div class="info-zeile"><span>Oberfläche</span><strong>${zahl(m.kenn.flaeche / 100, 0)} cm²</strong></div>
+        <div class="info-zeile"><span>Dreiecke</span><strong>${zahl(m.kenn.dreiecke)}</strong></div>
+      </div>
+      <button class="knopf breit oben-abstand" data-aktion="ws-aus-modell">＋ In die Warteschlange</button>`;
+  },
+
+  _modGewichtHtml(gew, rest, rolle) {
+    return `<div class="ergebnis ${rest != null && rest < 0 ? "fehlt" : ""}">
+      <span class="leise klein">Geschätzt für ${esc(rolle ? rolle.material : "PLA")}</span>
+      <strong>≈ ${zahl(gew.gramm, gew.gramm < 10 ? 1 : 0)} g</strong>
+      <span class="klein">${zahl(gew.meter, 1)} m Filament</span>
+      ${rest == null ? `<span class="klein leise">Rolle nicht gewogen, Rest unbekannt.</span>` : rest >= 0 ? `<span class="klein">✓ Reicht. Danach bleiben noch etwa ${zahl(rest)} g auf der Rolle.</span>` : `<span class="klein">✕ Reicht nicht, es fehlen etwa ${zahl(-rest)} g.</span>`}
+    </div><p class="leise klein">Schätzung aus Volumen und Oberfläche. Genauer wird es mit dem G-Code aus Bambu Studio.</p>`;
+  },
+
+  _modReglerHtml(k, name, wert, min, max, step, einheit) {
+    return `<div class="mod-regler"><div class="r-kopf"><span>${name}</span><strong id="mod-wert-${k}">${zahl(wert, step < 1 ? 2 : 0)}${einheit ? ` ${einheit}` : ""}</strong></div>
+      <div class="regler-zeile"><input type="range" min="${min}" max="${max}" step="${step}" value="${wert}" data-mod="${k}"></div></div>`;
+  },
+
+  _modGcodeUebersichtHtml() {
+    const m = this._mod, i = m.gcode.info;
+    const rolle = this._modRolle();
+    const rest = rolle && rolle.rest_g != null && i.gramm ? rolle.rest_g - i.gramm : null;
+    const rollen = this._daten.rollen.slice().sort((a, b) => (b.rest_g ?? -1) - (a.rest_g ?? -1));
+    const g = m.grenzen ? m.grenzen.groesse : null;
+    return `
+      ${g ? `<div class="mod-masse">${["X", "Y", "Z"].map((a, k) => `<div><span>${a}</span><strong>${zahl(g[k], 1)}</strong><small>mm</small></div>`).join("")}</div>` : ""}
+      <div class="info-liste">
+        <div class="info-zeile"><span>Filament laut Slicer</span><strong>${i.gramm ? `${zahl(i.gramm, 1)} g` : "–"}</strong></div>
+        <div class="info-zeile"><span>Länge</span><strong>${i.mm ? `${zahl(i.mm / 1000, 2)} m` : "–"}</strong></div>
+        <div class="info-zeile"><span>Druckzeit</span><strong>${esc(i.zeit || "–")}</strong></div>
+        <div class="info-zeile"><span>Material</span><strong>${esc(i.material || "–")}</strong></div>
+        <div class="info-zeile"><span>Düse / Schicht</span><strong>${i.duese ? `${zahl(i.duese, 1)} mm` : "–"} / ${i.schicht ? `${zahl(i.schicht, 2)} mm` : "–"}</strong></div>
+        <div class="info-zeile"><span>Schichten</span><strong>${zahl(m.gcode.schichten.length)}</strong></div>
+      </div>
+      <h3>⚖️ Reicht die Rolle?</h3>
+      <label class="auswahl breit-auswahl"><span>Rolle</span><select data-mod="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${rolle && r.id === rolle.id ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : " · nicht gewogen"}</option>`).join("")}</select></label>
+      <div class="ergebnis ${rest != null && rest < 0 ? "fehlt" : ""}">
+        <strong>${i.gramm ? `${zahl(i.gramm, 1)} g` : "Gewicht unbekannt"}</strong>
+        ${rest == null ? `<span class="klein leise">${i.gramm ? "Rolle nicht gewogen, Rest unbekannt." : "Im G-Code steht kein Gewicht."}</span>` : rest >= 0 ? `<span class="klein">✓ Reicht. Danach bleiben etwa ${zahl(rest)} g übrig.</span>` : `<span class="klein">✕ Reicht nicht, es fehlen etwa ${zahl(-rest)} g.</span>`}
+      </div>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button><button class="knopf" data-aktion="ws-aus-modell">＋ Warteschlange</button></div>`;
+  },
+
+  // ---- Löcher ----
+  _modLoecherHtml() {
+    const m = this._mod;
+    if (!m.loecher) return `<div class="mod-laden-klein"><span class="dreher klein"></span> Suche Löcher …</div>`;
+    const markierKnopf = `<button class="knopf leise breit mod-markier ${m.markieren ? "an" : ""}" data-aktion="mod-markieren">${m.markieren ? "✕ Markieren abbrechen" : "＋ Loch von Hand markieren"}</button>`;
+    if (!m.loecher.length) return `<div class="hinweis">Keine runden Löcher gefunden. Erkannt werden kreisrunde Löcher entlang X, Y und Z. Schräge oder eckige Löcher kannst du von Hand markieren.</div>${markierKnopf}`;
+    const inv = this._daten.inventar;
+    const eingesetzt = m.eingesetzt;
+    const liste = m.loecher.map((l) => {
+      const auf = m.lochAuswahl === l.nr;
+      const drin = eingesetzt[l.nr];
+      const vor = teileFuerLoch(l, inv);
+      const richtung = l.achse === 2 ? "senkrecht" : l.achse === 0 ? "quer (X)" : "quer (Y)";
+      return `<div class="mod-loch ${auf ? "auf" : ""} ${drin ? "drin" : ""}">
+        <button class="mod-loch-kopf" data-aktion="mod-loch" data-nr="${l.nr}">
+          <span class="mod-nr">${l.nr}</span>
+          <span class="dr-druck-text"><strong>Ø ${zahl(l.durchmesser, 2)} mm · ${zahl(l.tiefe, 1)} mm tief</strong>
+            <small>${l.manuell ? "von Hand · " : ""}${l.durch ? "durchgehend" : "Sackloch"} · ${richtung}${drin ? ` · ✓ ${esc(kategorie((inv.find((t) => t.id === drin) || {}).kat).einzahl)} ${esc(teilName(inv.find((t) => t.id === drin) || {}))}` : ""}</small></span>
+          <span class="pille ${vor.length ? "mint" : "leise"}">${vor.length ? `${vor.length} passend` : "nichts passend"}</span>
+        </button>
+        ${auf && l.manuell ? `<div class="mod-manuell">
+          ${this._modReglerHtml(`loch-d-${l.nr}`, "Durchmesser", l.durchmesser, 1, 30, 0.05, "mm").replace(`data-mod="loch-d-${l.nr}"`, `data-mod="loch-d" data-nr="${l.nr}"`)}
+          ${this._modReglerHtml(`loch-t-${l.nr}`, "Tiefe", l.tiefe, 0.5, 60, 0.5, "mm").replace(`data-mod="loch-t-${l.nr}"`, `data-mod="loch-t" data-nr="${l.nr}"`)}
+          <div class="chips"><button class="chip ${l.durch ? "" : "an"}" data-aktion="mod-loch-art" data-nr="${l.nr}" data-durch="0">Sackloch</button><button class="chip ${l.durch ? "an" : ""}" data-aktion="mod-loch-art" data-nr="${l.nr}" data-durch="1">Durchgehend</button>
+          <button class="mini" data-aktion="mod-loch-weg" data-nr="${l.nr}">Loch löschen</button></div></div>` : ""}
+        ${auf ? `<div class="mod-vorschlaege">${vor.length ? vor.map((x) => `
+          <div class="mod-vorschlag ${drin === x.teil.id ? "an" : ""}">
+            <span class="mod-v-bild">${teilSvg(x.teil)}</span>
+            <span class="dr-druck-text"><strong>${kategorie(x.teil.kat).icon} ${esc(teilName(x.teil))}</strong><small>${esc(x.text)} · Bestand ${x.teil.menge ?? "?"}</small></span>
+            ${drin === x.teil.id ? `<button class="mini" data-aktion="mod-raus" data-nr="${l.nr}">Entfernen</button>` : `<button class="knopf klein-knopf" data-aktion="mod-einsetzen" data-nr="${l.nr}" data-id="${esc(x.teil.id)}">Einsetzen</button>`}
+          </div>`).join("") : `<p class="leise klein">Im Inventar ist nichts, das passt. Für einen Einschmelzeinsatz sollte das Loch etwa 0,5–1 mm kleiner sein als der Einsatz, für eine Schraube 0,2–0,6 mm größer als das Gewinde.</p>`}</div>` : ""}
+      </div>`;
+    }).join("");
+    const zaehlen = {};
+    Object.values(eingesetzt).forEach((id) => (zaehlen[id] = (zaehlen[id] || 0) + 1));
+    const teileliste = Object.entries(zaehlen).map(([id, n]) => {
+      const t = inv.find((x) => x.id === id);
+      if (!t) return "";
+      const knapp = t.menge != null && t.menge < n;
+      return `<div class="info-zeile"><span>${n}× ${kategorie(t.kat).icon} ${esc(kategorie(t.kat).einzahl)} ${esc(teilName(t))}</span><strong class="${knapp ? "rot" : ""}">Bestand ${t.menge ?? "?"}</strong></div>`;
+    }).join("");
+    return `<div class="knopf-reihe"><button class="knopf" data-aktion="mod-alle-einsetzen">Alle passenden einsetzen</button>
+        ${Object.keys(eingesetzt).length ? `<button class="knopf leise" data-aktion="mod-alle-raus">Alle entfernen</button>` : ""}</div>
+      <div class="mod-loecher">${liste}</div>${markierKnopf}
+      ${teileliste ? `<h3>🧾 Teileliste für dieses Modell</h3><div class="info-liste">${teileliste}</div>` : ""}
+      <p class="leise klein oben-abstand">Erkannt werden kreisrunde Löcher entlang X, Y und Z. Schräge Löcher und Sechskant-Taschen für Muttern noch nicht. Tiefe auf etwa ±0,3 mm genau.</p>`;
+  },
+
+  // ---- Schichten ----
+  _modSchichtenHtml() {
+    const m = this._mod;
+    if (m.art === "gcode") {
+      const arten = new Set();
+      m.gcode.schichten.forEach((s) => { for (let i = 4; i < s.linien.length; i += 5) arten.add(GCODE_ARTEN_LISTE[s.linien[i]]); });
+      return `<p class="leise">Echte Druckwege aus dem G-Code. Mit dem Regler unter der Ansicht gehst du Schicht für Schicht.</p>
+        ${this._modLegendeHtml([...arten])}`;
+    }
+    const duesen = [...new Set(this._daten.inventar.filter((t) => t.kat === "duese" && (t.menge == null || t.menge > 0)).map((t) => t.groesse))].sort();
+    const [smin, smax] = SCHICHT_BEREICH[m.duese] || [0.08, 0.28];
+    return `
+      <div class="r-kopf"><span>Düse</span><span class="leise klein">aus deinem Inventar</span></div>
+      <div class="chips">${(duesen.length ? duesen : [0.4]).map((d) => `<button class="chip ${m.duese === d ? "an" : ""}" data-aktion="mod-duese" data-id="${d}">${zahl(d, 1)} mm</button>`).join("")}</div>
+      ${this._modReglerHtml("schicht_h", "Schichthöhe", m.schicht_h, smin, smax, 0.02, "mm")}
+      <p class="leise klein">Für ${zahl(m.duese, 1)} mm sind ${zahl(smin, 2)}–${zahl(smax, 2)} mm sinnvoll. Dünner sieht feiner aus und dauert länger.</p>
+      ${this._modReglerHtml("waende", "Wände", m.waende, 1, 6, 1, "")}
+      ${this._modReglerHtml("fuellung", "Füllung", m.fuellung, 0, 100, 5, "%")}
+      <div class="r-kopf oben-abstand"><span>Stützen</span><button class="mini mint-rand" data-aktion="mod-stuetzen-hilfe">Was ist was?</button></div>
+      <div class="chips">${STUETZEN.map((s) => `<button class="chip ${m.stuetzen === s.id ? "an" : ""}" data-aktion="mod-stuetzen" data-id="${s.id}">${s.name}</button>`).join("")}</div>
+      <div id="mod-schicht-status">${this._modSchichtStatusHtml()}</div>
+      ${this._modLegendeHtml(["aussen", "innen", "fuellung", ...(m.stuetzen !== "keine" ? ["stuetze"] : [])])}
+      <p class="leise klein">Vereinfachte Vorschau, kein echter Slicer: Wände, Füllung und Stützen sind angenähert. Für die echten Wege den G-Code aus Bambu Studio laden.</p>`;
+  },
+
+  _modSchichtStatusHtml() {
+    const m = this._mod;
+    if (m.schichtFortschritt != null && m.schichtFortschritt < 1) return `<div class="mod-laden-klein"><span class="dreher klein"></span> Berechne Schichten … ${zahl(m.schichtFortschritt * 100)} %</div>`;
+    if (!m.schichtGewicht) return "";
+    const rolle = this._modRolle();
+    return `<div class="info-liste oben-abstand">
+      <div class="info-zeile"><span>Schichten</span><strong>${zahl(m.schichtZahl)}</strong></div>
+      <div class="info-zeile"><span>Filament (aus den Schichten)</span><strong>≈ ${zahl(m.schichtGewicht, 1)} g</strong></div>
+      ${m.stuetzGewicht ? `<div class="info-zeile"><span>davon Stützen</span><strong>≈ ${zahl(m.stuetzGewicht, 1)} g</strong></div>` : ""}
+      <div class="info-zeile"><span>Material</span><strong>${esc(rolle ? rolle.material : "PLA")}</strong></div>
+    </div>`;
+  },
+
+  _modLegendeHtml(arten) {
+    return `<div class="mod-legende">${arten.filter(Boolean).map((a) => { const f = LINIEN_FARBEN[a] || [1, 1, 1];
+      return `<span><i style="background: rgb(${f.map((x) => Math.round(x * 255)).join(",")})"></i>${LINIEN_NAMEN[a] || a}</span>`; }).join("")}</div>`;
+  },
+
+  _modSchichtText() {
+    const m = this._mod;
+    const z = m.schichtHoehen ? m.schichtHoehen[m.schichtNr - 1] : null;
+    return `Schicht ${m.schichtNr} von ${m.schichtZahl}${z != null ? ` · ${zahl(z, 2)} mm` : ""}`;
+  },
+
+  _modStuetzenHilfeHtml() {
+    const bild = (art) => {
+      const boden = `<rect x="0" y="92" width="160" height="8" fill="#2a3330"/>`;
+      const teil = `<path d="M20 20 h120 v18 h-60 v-0 h-60 z" fill="#3ee6a8" opacity=".85"/><rect x="20" y="20" width="40" height="72" fill="#3ee6a8" opacity=".85"/>`;
+      let st = "";
+      if (art === "normal") for (let x = 66; x < 140; x += 8) st += `<line x1="${x}" y1="40" x2="${x}" y2="92" stroke="#4fe08a" stroke-width="2"/>`;
+      if (art.startsWith("baum")) {
+        const dick = art === "baum-stark" ? 5 : art === "baum-hybrid" ? 3.5 : 2.2;
+        st += `<path d="M100 92 C100 75 100 70 100 62" stroke="#4fe08a" stroke-width="${dick + 1.5}" fill="none"/>`;
+        [70, 86, 114, 130].forEach((x) => (st += `<path d="M100 64 Q${(x + 100) / 2} 55 ${x} 40" stroke="#4fe08a" stroke-width="${dick}" fill="none"/>`));
+        if (art === "baum-hybrid") for (let x = 66; x < 140; x += 6) st += `<line x1="${x}" y1="40" x2="${x}" y2="43" stroke="#4fe08a" stroke-width="2"/>`;
+      }
+      return `<svg viewBox="0 0 160 100" class="stuetz-bild">${boden}${teil}${st}</svg>`;
+    };
+    const texte = {
+      keine: "Druckt ohne Stützen. Gut, wenn nichts mehr als etwa 30–45° überhängt. Brücken bis ca. 10–20 mm schafft der P1S meist frei.",
+      normal: "Senkrechte Säulen im Gitter direkt unter dem Überhang. Stabil und schnell berechnet, braucht aber mehr Material und hinterlässt mehr Spuren.",
+      "baum-schlank": "Dünne Äste, die sich nach unten zu einem Stamm vereinen. Spart Material, lässt sich leicht entfernen. Gut für Figuren und kleine Überhänge.",
+      "baum-stark": "Wie Baum schlank, aber mit dickeren Ästen. Für schwere oder hohe Überhänge, wackelt weniger.",
+      "baum-hybrid": "Baum unten, oben flache Auflage wie bei Normal. Gut für große, flache Überhänge, die eine glatte Unterseite brauchen.",
+    };
+    return `<h2>Welche Stützen?</h2><div class="stuetz-liste">${STUETZEN.map((s) => `<div class="stuetz-eintrag">${bild(s.id)}<div><strong>${s.name}</strong><p class="leise klein">${texte[s.id]}</p></div></div>`).join("")}</div>
+      <button class="knopf leise breit" data-aktion="dialog-zu">Schließen</button>`;
+  },
+
+  _modLadenDialogHtml() {
+    return `<h2>Datei öffnen</h2>
+      <label class="ablage klein-ablage" data-ablage="1">
+        <input type="file" accept=".stl,.gcode,.3mf" data-mod="datei" hidden>
+        <span class="ablage-icon">＋</span><strong>Hierher ziehen oder tippen</strong>
+        <span class="leise klein">.stl · .gcode · .gcode.3mf</span>
+      </label>
+      <button class="knopf leise breit" data-aktion="dialog-zu">Abbrechen</button>`;
+  },
+
+  // ---- Einrichtung und Bühne ----
+  _modEinrichten() {
+    if (this._modBereit) return;
+    this._modBereit = true;
+    MOD_DB.alle().then((l) => { this._modZuletzt = l; if (this._ansicht === "modelle" && !this._mod) this._zeichnen(); });
+    const root = this.shadowRoot;
+    root.addEventListener("dragover", (e) => {
+      if (this._ansicht !== "modelle") return;
+      e.preventDefault();
+      const app = root.querySelector(".app");
+      if (app) app.classList.add("ziehen");
+    });
+    root.addEventListener("dragleave", (e) => { if (!e.relatedTarget) { const app = root.querySelector(".app"); if (app) app.classList.remove("ziehen"); } });
+    root.addEventListener("drop", (e) => {
+      if (this._ansicht !== "modelle") return;
+      e.preventDefault();
+      const app = root.querySelector(".app");
+      if (app) app.classList.remove("ziehen");
+      const f = e.dataTransfer && e.dataTransfer.files[0];
+      if (f) { this._dialog = null; this._modDatei(f); }
+    });
+  },
+
+  _modStandard() {
+    const rolle = this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => b.rest_g - a.rest_g)[0];
+    return { tab: "uebersicht", fuellung: 15, waende: 2, duese: 0.4, schicht_h: 0.2, stuetzen: "keine", eingesetzt: {}, rolleId: this._modRolleId || (rolle && rolle.id) };
+  },
+  _modRolle() { const m = this._mod; return this._daten.rollen.find((r) => r.id === (m && m.rolleId)) || null; },
+
+  async _modDatei(datei, name) {
+    name = name || datei.name;
+    const groesse = datei instanceof ArrayBuffer ? datei.byteLength : datei.size;
+    if (groesse > MOD_MAX_BYTES) { this._toast(`Die Datei ist mit ${zahl(groesse / 1048576)} MB zu groß (höchstens ${MOD_MAX_BYTES / 1048576} MB).`); return; }
+    if (!groesse) { this._toast("Die Datei ist leer."); return; }
+    let puffer;
+    try { puffer = datei instanceof ArrayBuffer ? datei : await datei.arrayBuffer(); }
+    catch (e) { this._toast("Die Datei konnte nicht gelesen werden."); return; }
+    this._mod = { ...this._modStandard(), name, laedt: "Lese Datei …" };
+    this._zeichnen();
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      if (/\.stl$/i.test(name)) await this._modStl(puffer, name);
+      else if (/\.3mf$/i.test(name)) {
+        const zip = await zipDateien(puffer);
+        const g = zip.dateien.find((d) => /plate_\d+\.gcode$/i.test(d.name)) || zip.dateien.find((d) => /\.gcode$/i.test(d.name));
+        if (!g) throw new Error("In dieser 3MF ist kein G-Code. Bitte in Bambu Studio „Datei › Exportieren › G-Code exportieren“ (.gcode.3mf) benutzen.");
+        this._mod.laedt = "Entpacke G-Code …"; this._zeichnen();
+        this._modGcode(new TextDecoder().decode(await zip.lesen(g)), name);
+      } else if (/\.gcode$/i.test(name)) this._modGcode(new TextDecoder().decode(puffer), name);
+      else throw new Error("Unbekanntes Format. Erlaubt sind .stl, .gcode und .gcode.3mf.");
+      MOD_DB.speichern(name, puffer).then(() => MOD_DB.alle()).then((l) => (this._modZuletzt = l));
+    } catch (e) {
+      this._mod = null;
+      this._toast(e.message || String(e));
+      return;
+    }
+    this._zeichnen();
+    if (this._buehne) this._buehne.ansicht("iso", this._mod.grenzen);
+  },
+
+  async _modStl(puffer, name) {
+    const roh = stlLesen(puffer);
+    if (!roh.length) throw new Error("In der STL wurden keine Dreiecke gefunden.");
+    if (roh.length / 9 > MOD_MAX_DREIECKE) throw new Error(`Das Modell hat ${zahl(roh.length / 9)} Dreiecke, mehr als ${zahl(MOD_MAX_DREIECKE)} schafft der Browser nicht flüssig. Bitte im Slicer vereinfachen.`);
+    if (roh.some((x) => !Number.isFinite(x))) throw new Error("Die STL enthält ungültige Koordinaten (beschädigte Datei).");
+    const v = aufsBett(roh);
+    const m = this._mod;
+    Object.assign(m, { art: "stl", v, laedt: null });
+    this._modGeometrieNeu();
+  },
+
+  _modGeometrieNeu() {
+    const m = this._mod;
+    m.grenzen = meshGrenzen(m.v);
+    m.kenn = meshKennwerte(m.v);
+    m.ueber = ueberhaenge(m.v);
+    m.loecher = null; m.eingesetzt = {}; m.lochAuswahl = null;
+    m.schichten = null; m.schichtZahl = 0; m.schichtGewicht = null;
+    const id = (m.id = (m.id || 0) + 1);
+    setTimeout(() => {
+      if (this._mod !== m || m.id !== id) return;
+      m.loecher = loecherFinden(m.v, m.grenzen);
+      if (this._ansicht === "modelle") { if (m.tab === "loecher") this._zeichnen(); else this._modSeiteNeu(); this._modMarker(); }
+    }, 50);
+    if (this._buehne) this._modSzene();
+  },
+
+  _modGcode(text, name) {
+    const g = gcodeLesen(text);
+    if (!g.schichten.length) throw new Error("Im G-Code wurden keine Druckwege gefunden.");
+    const m = this._mod;
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const s of g.schichten) {
+      for (let i = 0; i < s.linien.length; i += 5) {
+        if (s.linien[i + 4] === GCODE_ARTEN_NR.turm || s.linien[i + 4] === GCODE_ARTEN_NR.rand) continue;
+        for (const [x, y] of [[s.linien[i], s.linien[i + 1]], [s.linien[i + 2], s.linien[i + 3]]]) {
+          if (x < min[0]) min[0] = x; if (x > max[0]) max[0] = x; if (y < min[1]) min[1] = y; if (y > max[1]) max[1] = y;
+        }
+      }
+      if (s.z < min[2]) min[2] = 0; if (s.z > max[2]) max[2] = s.z;
+    }
+    Object.assign(m, { art: "gcode", gcode: g, laedt: null, grenzen: { min, max, groesse: [max[0] - min[0], max[1] - min[1], max[2]] } });
+    m.schichtHoehen = g.schichten.map((s) => s.z);
+    m.schichtZahl = g.schichten.length;
+    m.schichtNr = g.schichten.length;
+    if (this._buehne) this._modSzene();
+  },
+
+  // Bühne einhängen (das Canvas bleibt beim Neuzeichnen erhalten)
+  _modNachZeichnen() {
+    const ort = this.shadowRoot.getElementById("mod-buehne");
+    if (!ort) return;
+    if (!this._buehne) {
+      this._buehne = new Buehne();
+      if (!this._buehne.ok) { ort.innerHTML = `<div class="dr-kamera-leer">Dieser Browser kann kein WebGL.</div>`; return; }
+      this._buehne.nachZeichnen = () => this._modMarkerSetzen();
+      this._buehne.antippen = (strahl) => this._modAntippen(strahl);
+      this._modSzene();
+      this._buehne.ansicht("iso", this._mod && this._mod.grenzen);
+    }
+    ort.appendChild(this._buehne.canvas);
+    if (!this._modRo) {
+      this._modRo = new ResizeObserver(() => this._buehne && this._buehne.neu());
+    }
+    this._modRo.disconnect();
+    this._modRo.observe(ort);
+    this._modMarker();
+    this._buehne.neu();
+  },
+
+  _modSzene() {
+    const b = this._buehne, m = this._mod;
+    if (!b || !m || m.laedt) return;
+    for (const n of [...b.objekte.keys()]) if (!n.startsWith("bett")) b.weg(n);
+    if (m.art === "stl") {
+      const farbe = new Float32Array(m.v.length);
+      const ueber = m.tab === "schichten" && m.stuetzen !== "keine" ? m.ueber.markiert : null;
+      for (let t = 0; t < m.v.length / 9; t++) {
+        const f = ueber && ueber[t] ? [1, 0.45, 0.3] : [0.24, 0.86, 0.64];
+        for (let k = 0; k < 9; k += 3) { farbe[t * 9 + k] = f[0]; farbe[t * 9 + k + 1] = f[1]; farbe[t * 9 + k + 2] = f[2]; }
+      }
+      b.mesh("modell", m.v, farbe);
+      this._modGrundriss();
+      Object.entries(m.eingesetzt).forEach(([nr, id]) => this._modTeilZeigen(Number(nr), id, false));
+      if (m.tab === "schichten") this._modSchichtenStarten();
+    } else {
+      this._modGcodeLinien();
+    }
+    this._modSchichtAnzeigen();
+  },
+
+  _modGrundriss() {
+    const b = this._buehne, g = this._mod.grenzen;
+    const zuGross = g.groesse.some((x) => x > BETT_MM + 0.01);
+    const f = zuGross ? [1, 0.42, 0.42] : [0.24, 0.9, 0.66];
+    const [x1, y1, x2, y2] = [g.min[0], g.min[1], g.max[0], g.max[1]];
+    const l = [x1, y1, 0.05, x2, y1, 0.05, x2, y1, 0.05, x2, y2, 0.05, x2, y2, 0.05, x1, y2, 0.05, x1, y2, 0.05, x1, y1, 0.05];
+    b.linien("grundriss", new Float32Array(l), new Float32Array(l.map((_, i) => f[i % 3])));
+  },
+
+  // ---- Löcher in der Ansicht ----
+  _modMarker() {
+    const box = this.shadowRoot.getElementById("mod-marker");
+    const m = this._mod;
+    if (!box || !m || m.art !== "stl" || !m.loecher || m.tab === "schichten") { if (box) box.innerHTML = ""; return; }
+    box.innerHTML = m.loecher.map((l) => `<button class="mod-pin ${m.lochAuswahl === l.nr ? "an" : ""} ${m.eingesetzt[l.nr] ? "drin" : ""}" data-aktion="mod-loch" data-nr="${l.nr}" data-pin="${l.nr}">${l.nr}</button>`).join("");
+    this._modMarkerSetzen();
+  },
+  _modMarkerSetzen() {
+    const box = this.shadowRoot.getElementById("mod-marker");
+    const m = this._mod;
+    if (!box || !m || !m.loecher || !this._buehne) return;
+    for (const l of m.loecher) {
+      const pin = box.querySelector(`[data-pin="${l.nr}"]`);
+      if (!pin) continue;
+      const p = l.mitte.slice();
+      p[l.achse] = l.oeffnung + l.richtung * 0.5;
+      const s = this._buehne.projizieren(p);
+      if (!s) { pin.style.display = "none"; continue; }
+      pin.style.display = "";
+      pin.style.transform = `translate(${s[0] - 11}px, ${s[1] - 40}px)`;   // über dem Loch, damit es sichtbar bleibt
+    }
+  },
+
+  _modTeilZeigen(nr, id, animiert = true) {
+    const m = this._mod, b = this._buehne;
+    const loch = m.loecher && m.loecher.find((l) => l.nr === nr);
+    const teil = this._daten.inventar.find((t) => t.id === id);
+    if (!b || !loch || !teil) return;
+    const geo = teilGeometrie(teil, loch);
+    const name = `teil-${nr}`;
+    b.mesh(name, insLoch(geo.v, loch), new Float32Array(geo.farben), { reihe: 2 });
+    if (!animiert) return;
+    // Von außen entlang der Lochachse hereinfliegen, mit kleinem Nachfedern
+    const weg = [0, 0, 0];
+    weg[loch.achse] = loch.richtung * 45;
+    const start = performance.now(), dauer = 900;
+    b.animieren((t) => {
+      const x = Math.min(1, (t - start) / dauer);
+      const e = 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2);   // „easeOutBack“
+      const f = 1 - e;
+      b.setze(name, { m: M4.verschieben(weg[0] * f, weg[1] * f, weg[2] * f) });
+      return x < 1;
+    });
+  },
+
+  // ---- Schichten: vereinfachtes Slicen im Hintergrund ----
+  _modSchichtenStarten() {
+    const m = this._mod;
+    const schluessel = `${m.duese}|${m.schicht_h}|${m.waende}|${m.fuellung}|${m.stuetzen}|${m.id}`;
+    if (m.schichtSchluessel === schluessel && (m.schichtFortschritt === 1 || m.schichtLaeuft)) { this._modSchichtAnzeigen(); return; }
+    m.schichtSchluessel = schluessel;
+    m.schichtLaeuft = true;
+    m.schichtFortschritt = 0;
+    const s = schnittVorbereiten(m.v, 2);
+    const hoehe = m.grenzen.max[2];
+    const zs = [];
+    for (let z = m.schicht_h; z <= hoehe + 1e-6; z += m.schicht_h) zs.push(Math.min(z, hoehe - 0.01) - m.schicht_h / 2);
+    const massivUnten = Math.ceil(0.6 / m.schicht_h), massivOben = Math.ceil(0.8 / m.schicht_h);
+    const linien = [], farben = [], enden = [];
+    let laenge = 0, stuetzLaenge = 0;
+    const stuetzen = m.stuetzen !== "keine" ? this._modStuetzen(m) : [];
+    let i = 0;
+    const schritt = () => {
+      if (this._mod !== m || m.schichtSchluessel !== schluessel) return;
+      const bis = Math.min(zs.length, i + 8);
+      for (; i < bis; i++) {
+        const z = zs[i], zz = z + m.schicht_h / 2;
+        const sch = schichtBerechnen(s, z, { duese: m.duese, waende: m.waende, fuellung: m.fuellung, nr: i, massiv: i < massivUnten || i >= zs.length - massivOben });
+        const add = (a, b, f) => { linien.push(a[0], a[1], zz, b[0], b[1], zz); farben.push(...f, ...f); return Math.hypot(b[0] - a[0], b[1] - a[1]); };
+        for (const [art, zuege] of [["aussen", sch.aussen], ["innen", sch.innen]]) {
+          for (const zug of zuege) for (let k = 0; k < zug.length; k++) laenge += add(zug[k], zug[(k + 1) % zug.length], LINIEN_FARBEN[art]);
+        }
+        for (const [a, b] of sch.fuellung) laenge += add(a, b, LINIEN_FARBEN.fuellung);
+        for (const st of stuetzen) for (const [a, b] of st) {
+          // Strecke a→b (3D) in dieser Schicht?
+          if ((a[2] <= zz && b[2] >= zz) || (b[2] <= zz && a[2] >= zz)) {
+            const f = Math.abs(b[2] - a[2]) < 1e-6 ? 0 : (zz - a[2]) / (b[2] - a[2]);
+            const x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f;
+            const r = st.dicke || 0.6;
+            stuetzLaenge += add([x - r, y], [x + r, y], LINIEN_FARBEN.stuetze) + add([x, y - r], [x, y + r], LINIEN_FARBEN.stuetze);
+          }
+        }
+        enden.push(linien.length / 3);
+      }
+      m.schichtFortschritt = i / zs.length;
+      const status = this.shadowRoot.getElementById("mod-schicht-status");
+      if (i < zs.length) {
+        if (status) status.innerHTML = this._modSchichtStatusHtml();
+        setTimeout(schritt, 0);
+        return;
+      }
+      const querschnitt = m.duese * 1.05 * m.schicht_h;
+      const dichte = materialInfo(this._modRolle() ? this._modRolle().material : "PLA").dichte;
+      Object.assign(m, {
+        schichtLaeuft: false, schichtFortschritt: 1, schichtEnden: enden, schichtHoehen: zs.map((z) => z + m.schicht_h / 2),
+        schichtZahl: zs.length, schichtNr: Math.min(m.schichtNr || zs.length, zs.length) || zs.length,
+        schichtGewicht: ((laenge + stuetzLaenge) * querschnitt * dichte) / 1000, stuetzGewicht: (stuetzLaenge * querschnitt * dichte) / 1000,
+        schichtLinien: new Float32Array(linien), schichtFarben: new Float32Array(farben),
+      });
+      if (this._ansicht === "modelle" && m.tab === "schichten") { this._zeichnen(); this._modSchichtAnzeigen(); }
+    };
+    setTimeout(schritt, 0);
+  },
+
+  // Stützen als 3D-Strecken: Normal = senkrechte Säulen im Raster, Baum = Äste zu Stämmen
+  _modStuetzen(m) {
+    const v = m.v, ueber = m.ueber.markiert;
+    const raster = m.stuetzen === "normal" ? 2.5 : 4;
+    const punkte = [];
+    const gesehen = new Set();
+    for (let t = 0; t < ueber.length && punkte.length < 600; t++) {
+      if (!ueber[t]) continue;
+      const i = t * 9;
+      const xs = [v[i], v[i + 3], v[i + 6]], ys = [v[i + 1], v[i + 4], v[i + 7]];
+      for (let x = Math.ceil(Math.min(...xs) / raster) * raster; x <= Math.max(...xs); x += raster) {
+        for (let y = Math.ceil(Math.min(...ys) / raster) * raster; y <= Math.max(...ys); y += raster) {
+          const k = `${x}|${y}`;
+          if (gesehen.has(k)) continue;
+          // Punkt im Dreieck? Höhe dort berechnen
+          const d = (ys[1] - ys[2]) * (xs[0] - xs[2]) + (xs[2] - xs[1]) * (ys[0] - ys[2]);
+          if (Math.abs(d) < 1e-9) continue;
+          const l1 = ((ys[1] - ys[2]) * (x - xs[2]) + (xs[2] - xs[1]) * (y - ys[2])) / d, l2 = ((ys[2] - ys[0]) * (x - xs[2]) + (xs[0] - xs[2]) * (y - ys[2])) / d;
+          if (l1 < 0 || l2 < 0 || l1 + l2 > 1) continue;
+          gesehen.add(k);
+          const z = l1 * v[i + 2] + l2 * v[i + 5] + (1 - l1 - l2) * v[i + 8];
+          punkte.push([x, y, z, this._modBodenUnter(v, x, y, z)]);
+        }
+      }
+    }
+    if (m.stuetzen === "normal") return punkte.map(([x, y, z, boden]) => Object.assign([[[x, y, boden], [x, y, z]]], { dicke: 0.9 }));
+    // Bäume: Punkte nach Boden-Höhe und 12-mm-Feldern bündeln, Stamm in der Mitte
+    const dicke = m.stuetzen === "baum-stark" ? 1.4 : m.stuetzen === "baum-hybrid" ? 1.1 : 0.8;
+    const gruppen = new Map();
+    for (const p of punkte) {
+      const k = `${Math.round(p[0] / 12)}|${Math.round(p[1] / 12)}|${Math.round(p[3])}`;
+      if (!gruppen.has(k)) gruppen.set(k, []);
+      gruppen.get(k).push(p);
+    }
+    const baeume = [];
+    for (const g of gruppen.values()) {
+      const cx = g.reduce((s, p) => s + p[0], 0) / g.length, cy = g.reduce((s, p) => s + p[1], 0) / g.length;
+      const boden = Math.max(...g.map((p) => p[3]));
+      const zMin = Math.min(...g.map((p) => p[2]));
+      const gabel = boden + (zMin - boden) * 0.55;
+      const aeste = g.map((p) => [[cx, cy, gabel], [p[0], p[1], p[2]]]);
+      baeume.push(Object.assign([[[cx, cy, boden], [cx, cy, gabel]]], { dicke: dicke * 1.6 }));
+      aeste.forEach((a) => baeume.push(Object.assign([a], { dicke })));
+    }
+    return baeume;
+  },
+  _modBodenUnter(v, x, y, z) {
+    let boden = 0;
+    for (let i = 0; i < v.length; i += 9) {
+      const ax = v[i], ay = v[i + 1], bx = v[i + 3], by = v[i + 4], cx = v[i + 6], cy = v[i + 7];
+      const d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (Math.abs(d) < 1e-9) continue;
+      const l1 = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d, l2 = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d;
+      if (l1 < 0 || l2 < 0 || l1 + l2 > 1) continue;
+      const h = l1 * v[i + 2] + l2 * v[i + 5] + (1 - l1 - l2) * v[i + 8];
+      if (h < z - 0.3 && h > boden) boden = h;
+    }
+    return boden;
+  },
+
+  _modGcodeLinien() {
+    const m = this._mod, g = m.gcode;
+    const linien = [], farben = [], enden = [];
+    for (const s of g.schichten) {
+      const l = s.linien;
+      for (let i = 0; i < l.length; i += 5) {
+        const f = LINIEN_FARBEN[GCODE_ARTEN_LISTE[l[i + 4]]] || [1, 1, 1];
+        linien.push(l[i], l[i + 1], s.z, l[i + 2], l[i + 3], s.z);
+        farben.push(...f, ...f);
+      }
+      enden.push(linien.length / 3);
+    }
+    m.schichtEnden = enden;
+    this._buehne.linien("wege", new Float32Array(linien), new Float32Array(farben), { dunkel: 0.55 });
+  },
+
+  _modSchichtAnzeigen() {
+    const m = this._mod, b = this._buehne;
+    if (!b || !m) return;
+    const schichten = m.tab === "schichten" || m.art === "gcode";
+    const modell = b.objekte.get("modell");
+    if (modell) b.setze("modell", schichten ? { sichtbar: true, alpha: 0.08 } : { sichtbar: true, alpha: 1 });
+    for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: !schichten });
+    if (m.art === "stl" && schichten && m.schichtLinien && m.schichtFortschritt === 1) {
+      if (!b.objekte.has("wege") || m.schichtWegeSchluessel !== m.schichtSchluessel) {
+        b.linien("wege", m.schichtLinien, m.schichtFarben, { dunkel: 0.55 });
+        m.schichtWegeSchluessel = m.schichtSchluessel;
+      }
+    } else if (m.art === "stl" && !schichten) b.weg("wege");
+    if (b.objekte.has("wege") && m.schichtEnden) {
+      const nr = Math.max(1, Math.min(m.schichtNr || 1, m.schichtEnden.length));
+      b.setze("wege", { bis: m.schichtEnden[nr - 1], hoehe: m.schichtHoehen[nr - 1] });
+    }
+  },
+
+  _modSeiteNeu() {
+    const box = this.shadowRoot.querySelector(".mod-inhalt");
+    if (box) { const sc = box.scrollTop; box.innerHTML = this._mod.tab === "loecher" ? this._modLoecherHtml() : this._mod.tab === "schichten" ? this._modSchichtenHtml() : this._modUebersichtHtml(); box.scrollTop = sc; this._auswahlenBauen(); }
+    const tab = this.shadowRoot.querySelector('[data-aktion="mod-tab"][data-id="loecher"]');
+    if (tab && this._mod.loecher) tab.textContent = `Löcher (${this._mod.loecher.length})`;
+  },
+
+  // ---- Ereignisse ----
+  _modKlick(a, el) {
+    const m = this._mod;
+    switch (a) {
+      case "mod-ansicht": if (this._buehne) this._buehne.ansicht(el.dataset.id, m && m.grenzen); return;
+      case "mod-schliessen": this._mod = null; if (this._buehne) for (const n of [...this._buehne.objekte.keys()]) if (!n.startsWith("bett")) this._buehne.weg(n); break;
+      case "mod-tab":
+        m.tab = el.dataset.id;
+        this._zeichnen();
+        this._modSzene();
+        return;
+      case "mod-drehen":
+        drehen90(m.v, Number(el.dataset.achse), 1);
+        this._modGeometrieNeu();
+        if (this._buehne) this._buehne.ansicht("iso", m.grenzen);
+        break;
+      case "mod-loch":
+        m.tab = "loecher";
+        m.lochAuswahl = m.lochAuswahl === Number(el.dataset.nr) ? null : Number(el.dataset.nr);
+        this._zeichnen();
+        this._modSchichtAnzeigen();
+        return;
+      case "mod-einsetzen":
+        m.eingesetzt[el.dataset.nr] = el.dataset.id;
+        this._modTeilZeigen(Number(el.dataset.nr), el.dataset.id, true);
+        break;
+      case "mod-raus": delete m.eingesetzt[el.dataset.nr]; if (this._buehne) this._buehne.weg(`teil-${el.dataset.nr}`); break;
+      case "mod-alle-einsetzen": {
+        let verzoegerung = 0;
+        for (const l of m.loecher || []) {
+          const v = teileFuerLoch(l, this._daten.inventar)[0];
+          if (!v || m.eingesetzt[l.nr]) continue;
+          m.eingesetzt[l.nr] = v.teil.id;
+          setTimeout(() => this._modTeilZeigen(l.nr, v.teil.id, true), verzoegerung);
+          verzoegerung += 250;
+        }
+        break;
+      }
+      case "mod-alle-raus": Object.keys(m.eingesetzt).forEach((nr) => this._buehne && this._buehne.weg(`teil-${nr}`)); m.eingesetzt = {}; break;
+      case "mod-duese": {
+        m.duese = Number(el.dataset.id);
+        const [lo, hi, std] = SCHICHT_BEREICH[m.duese] || [0.08, 0.28, 0.2];
+        if (m.schicht_h < lo || m.schicht_h > hi) m.schicht_h = std;
+        this._zeichnen(); this._modSchichtenStarten();
+        return;
+      }
+      case "mod-stuetzen": m.stuetzen = el.dataset.id; this._zeichnen(); this._modSzene(); return;
+      case "mod-markieren": m.markieren = !m.markieren; m.tab = "loecher"; break;
+      case "mod-loch-art": { const l = m.loecher.find((x) => x.nr === Number(el.dataset.nr)); if (l) { l.durch = el.dataset.durch === "1"; this._modLochGrenzen(l); } this._modSeiteNeu(); return; }
+      case "mod-loch-weg": {
+        const nr = Number(el.dataset.nr);
+        m.loecher = m.loecher.filter((x) => x.nr !== nr);
+        delete m.eingesetzt[nr];
+        if (this._buehne) this._buehne.weg(`teil-${nr}`);
+        m.lochAuswahl = null;
+        break;
+      }
+      case "mod-stuetzen-hilfe": this._dialog = "mod-stuetzen"; break;
+      case "mod-schicht": this._modSchichtSetzen((m.schichtNr || 1) + Number(el.dataset.d)); return;
+      case "mod-zuletzt":
+        MOD_DB.holen(el.dataset.name).then((x) => x ? this._modDatei(x.daten, x.name) : this._toast("Datei nicht mehr gespeichert."));
+        return;
+      case "mod-zuletzt-weg":
+        MOD_DB.loeschen(el.dataset.name);
+        this._modZuletzt = (this._modZuletzt || []).filter((z) => z.name !== el.dataset.name);
+        break;
+      default: return;
+    }
+    this._zeichnen();
+  },
+
+  // Loch von Hand: Strahl gegen alle Dreiecke (Möller–Trumbore), nächster Treffer zählt
+  _modAntippen(strahl) {
+    const m = this._mod;
+    if (!m || !m.markieren || m.art !== "stl") return;
+    const v = m.v, o = strahl.von, d = strahl.richtung;
+    let best = Infinity, n = null;
+    for (let i = 0; i < v.length; i += 9) {
+      const e1 = [v[i + 3] - v[i], v[i + 4] - v[i + 1], v[i + 5] - v[i + 2]], e2 = [v[i + 6] - v[i], v[i + 7] - v[i + 1], v[i + 8] - v[i + 2]];
+      const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
+      const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+      if (Math.abs(det) < 1e-12) continue;
+      const inv = 1 / det, tv = [o[0] - v[i], o[1] - v[i + 1], o[2] - v[i + 2]];
+      const u = (tv[0] * p[0] + tv[1] * p[1] + tv[2] * p[2]) * inv;
+      if (u < 0 || u > 1) continue;
+      const q = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
+      const w = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
+      if (w < 0 || u + w > 1) continue;
+      const t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
+      if (t > 0 && t < best) { best = t; n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; }
+    }
+    if (!n) { this._toast("Da ist kein Modell. Tippe direkt auf die Oberfläche."); return; }
+    const treffer = [0, 1, 2].map((i) => o[i] + d[i] * best);
+    // Normale zur Kamera drehen = nach außen; Lochachse = größte Komponente
+    if (n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0) n = n.map((x) => -x);
+    const achse = [0, 1, 2].reduce((a, i) => (Math.abs(n[i]) > Math.abs(n[a]) ? i : a), 0);
+    const nr = Math.max(0, ...m.loecher.map((l) => l.nr)) + 1;
+    const l = { nr, achse, durchmesser: 4.2, tiefe: 6, durch: false, mitte: treffer, oeffnung: treffer[achse], richtung: Math.sign(n[achse]) || 1, manuell: true };
+    this._modLochGrenzen(l);
+    m.loecher.push(l);
+    m.markieren = false;
+    m.lochAuswahl = nr;
+    this._zeichnen();
+  },
+  _modLochGrenzen(l) {
+    const ende = l.oeffnung - l.richtung * l.tiefe;
+    l.von = Math.min(l.oeffnung, ende); l.bis = Math.max(l.oeffnung, ende);
+  },
+
+  _modSchichtSetzen(nr) {
+    const m = this._mod;
+    m.schichtNr = Math.max(1, Math.min(m.schichtZahl || 1, nr));
+    const r = this.shadowRoot.querySelector('[data-mod="schicht"]');
+    if (r) r.value = m.schichtNr;
+    const t = this.shadowRoot.getElementById("mod-schicht-text");
+    if (t) t.textContent = this._modSchichtText();
+    this._modSchichtAnzeigen();
+  },
+
+  _modEingabe(t) {
+    const k = t.dataset && t.dataset.mod;
+    if (!k || !this._mod) return false;
+    const m = this._mod;
+    if (k === "schicht") { this._modSchichtSetzen(Number(t.value)); return true; }
+    if (k === "loch-d" || k === "loch-t") {
+      const l = m.loecher && m.loecher.find((x) => x.nr === Number(t.dataset.nr));
+      if (!l) return true;
+      if (k === "loch-d") l.durchmesser = Number(t.value); else l.tiefe = Number(t.value);
+      this._modLochGrenzen(l);
+      const w = this.shadowRoot.getElementById(`mod-wert-${k}-${l.nr}`);
+      if (w) w.textContent = `${zahl(Number(t.value), 2)} mm`;
+      return true;
+    }
+    if (["fuellung", "waende", "schicht_h"].includes(k)) {
+      m[k] = Number(t.value);
+      const w = this.shadowRoot.getElementById(`mod-wert-${k}`);
+      if (w) w.textContent = `${zahl(m[k], k === "schicht_h" ? 2 : 0)}${k === "fuellung" ? " %" : k === "schicht_h" ? " mm" : ""}`;
+      const g = this.shadowRoot.getElementById("mod-gewicht");
+      if (g && m.art === "stl") {
+        const rolle = this._modRolle();
+        const gew = gewichtSchaetzen(m.kenn, materialInfo(rolle ? rolle.material : "PLA").dichte, { duese: m.duese, waende: m.waende, fuellung: m.fuellung });
+        g.innerHTML = this._modGewichtHtml(gew, rolle && rolle.rest_g != null ? rolle.rest_g - gew.gramm : null, rolle);
+      }
+      return true;
+    }
+    return false;
+  },
+
+  _modAenderung(t) {
+    const k = t.dataset && t.dataset.mod;
+    if (!k) return false;
+    if (k === "datei") { const f = t.files && t.files[0]; this._dialog = null; if (f) this._modDatei(f); return true; }
+    const m = this._mod;
+    if (!m) return false;
+    if (k === "rolle") { m.rolleId = this._modRolleId = t.value; this._zeichnen(); return true; }
+    if (k === "loch-d" || k === "loch-t") {
+      const nr = Number(t.dataset.nr);
+      if (m.eingesetzt[nr]) this._modTeilZeigen(nr, m.eingesetzt[nr], false);
+      this._modSeiteNeu();
+      return true;
+    }
+    if (["fuellung", "waende", "schicht_h"].includes(k) && m.tab === "schichten" && m.art === "stl") { this._modSchichtenStarten(); this._modSeiteNeu(); return true; }
+    return ["fuellung", "waende", "schicht_h", "schicht"].includes(k);
+  },
+};
+// ---------------------------------------------------------------------------
 // Die Seite selbst: ein Web-Component, das Home Assistant als Panel lädt.
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.6.0";
+const VERSION = "0.8.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -1763,9 +5780,14 @@ const NAVIGATION = [
   { id: "filament", name: "Filament", icon: "🧵" },
   { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️" },
-  { id: "hilfe", name: "Hilfe", icon: "💡", bald: true },
+  { id: "modelle", name: "3D-Modelle", kurz: "3D", icon: "🧊" },
+  { id: "werkstatt", name: "Werkstatt", icon: "🧰" },
+  { id: "hilfe", name: "Hilfe", icon: "💡" },
+  { id: "nerd", name: "Nerd", icon: "🤓" },
   { id: "system", name: "System", icon: "⚙️" },
 ];
+// Handy: diese Bereiche unten, der Rest im „Mehr“-Menü
+const NAV_UNTEN = ["filament", "inventar", "drucker", "modelle"];
 
 const STATUS = [
   { id: "offen", name: "Nicht probiert" },
@@ -1872,7 +5894,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const erstes = !this._hass;
     this._hass = hass;
     if (erstes) this._laden();
-    else this._drHassNeu();
+    else { this._drHassNeu(); this._buHassNeu(); }
   }
   set narrow(n) {
     if (this._narrow !== !!n) { this._narrow = !!n; this._zeichnen(); }
@@ -1885,16 +5907,44 @@ class FilamentWerkstattPanel extends HTMLElement {
         const mobil = e[0].contentRect.width < 720;
         if (mobil !== this._mobil) { this._mobil = mobil; this._zeichnen(); }
       });
-      this.shadowRoot.addEventListener("click", (e) => this._klick(e));
-      this.shadowRoot.addEventListener("input", (e) => this._eingabe(e));
-      this.shadowRoot.addEventListener("change", (e) => this._aenderung(e));
+      this.shadowRoot.addEventListener("click", (e) => this._sicher(() => this._klick(e)));
+      this.shadowRoot.addEventListener("input", (e) => this._sicher(() => this._eingabe(e)));
+      this.shadowRoot.addEventListener("change", (e) => this._sicher(() => this._aenderung(e)));
       this.shadowRoot.addEventListener("scroll", (e) => { this._ddBeimScrollen(e.target); }, true);
-      this.shadowRoot.addEventListener("keydown", (e) => { if (e.key === "Escape") this._ddZu(); });
+      this.shadowRoot.addEventListener("keydown", (e) => this._sicher(() => this._taste(e)));
+      this._tasteGlobal = (e) => { if ((e.key === "k" && (e.ctrlKey || e.metaKey)) && this.isConnected && this._daten) { e.preventDefault(); this._sucheOeffnen(); } };
+      window.addEventListener("keydown", this._tasteGlobal);
+      // Zurück im Tab/App: neuere Daten von einem anderen Gerät holen
+      this._sichtbar = () => { if (document.visibilityState === "visible") this._fremdeAenderungPruefen(); };
+      document.addEventListener("visibilitychange", this._sichtbar);
+      this._wischenEinrichten();
     }
     this._ro.observe(this);
     this._zeichnen();
   }
   disconnectedCallback() { this._ro && this._ro.disconnect(); }
+
+  // Fehler in einem Klick soll nicht die ganze Seite lahmlegen
+  _sicher(f) {
+    try { f(); } catch (e) {
+      console.error("Filament-Werkstatt:", e);
+      this._dialog = null;
+      this._toast(`Da ist etwas schiefgelaufen: ${e.message || e}`);
+    }
+  }
+
+  _taste(e) {
+    if (e.key === "Escape") {
+      this._ddZu();
+      if (this._sucheOffen || this._mehrOffen) { this._sucheOffen = false; this._mehrOffen = false; this._zeichnen(); }
+      else if (this._dialog && !["bu", "sich-import", "konflikt"].includes(this._dialog)) { this._dialog = null; this._zeichnen(); }
+      return;
+    }
+    if (e.key === "Enter" && e.target.id === "global-suche") {
+      const erst = this.shadowRoot.querySelector(".such-treffer");
+      if (erst) erst.click();
+    }
+  }
 
   // ---- Laden und Speichern ------------------------------------------------
   async _laden() {
@@ -1905,12 +5955,14 @@ class FilamentWerkstattPanel extends HTMLElement {
         // Sicherung des letzten Stands, bevor in dieser Sitzung etwas geändert wird
         this._hass.callWS({ type: "frontend/set_user_data", key: SICHERUNG_KEY, value: r.value }).catch(() => {});
         const alt = r.value.version;
+        this._standGeladen = r.value.geaendert || null;
         this._daten = migrieren(JSON.parse(JSON.stringify(r.value)));
-        if (alt !== this._daten.version) await this._speichernJetzt();
+        if (alt !== this._daten.version) await this._speichernJetzt(true);
       } else {
         this._daten = standardDaten();
-        await this._speichernJetzt();
+        await this._speichernJetzt(true);
       }
+      this._drVerlaufLaden();
     } catch (e) {
       this._fehler = e.message || String(e);
     }
@@ -1919,20 +5971,54 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _speichern() {
     this._speicherStatus = "speichert";
+    this._ungespeichert = true;
     this._statusZeigen();
     clearTimeout(this._speicherTimer);
+    clearTimeout(this._wiederholTimer);
     this._speicherTimer = setTimeout(() => this._speichernJetzt(), 500);
   }
 
-  async _speichernJetzt() {
+  // Vor dem Schreiben prüfen, ob ein anderes Gerät inzwischen gespeichert hat.
+  // Schlägt das Speichern fehl, nach 3 s, 10 s und 30 s nochmal versuchen.
+  async _speichernJetzt(erzwingen = false) {
+    if (!this._daten || this._konflikt) return;
     try {
+      if (!erzwingen && this._standGeladen) {
+        const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
+        const fremd = r && r.value && r.value.geaendert;
+        if (fremd && fremd > this._standGeladen) {
+          this._konflikt = { am: fremd };
+          this._dialog = "konflikt";
+          this._speicherStatus = "fehler";
+          this._zeichnen();
+          return;
+        }
+      }
       this._daten.geaendert = new Date().toISOString();
       await this._hass.callWS({ type: "frontend/set_user_data", key: SPEICHER_KEY, value: this._daten });
+      this._standGeladen = this._daten.geaendert;
       this._speicherStatus = "gespeichert";
+      this._ungespeichert = false;
+      this._versuche = 0;
     } catch (e) {
       this._speicherStatus = "fehler";
+      this._versuche = (this._versuche || 0) + 1;
+      if (this._versuche <= 3) this._wiederholTimer = setTimeout(() => this._speichernJetzt(erzwingen), [3000, 10000, 30000][this._versuche - 1]);
     }
     this._statusZeigen();
+  }
+
+  async _fremdeAenderungPruefen() {
+    if (!this._hass || !this._daten || this._ungespeichert || this._modus || this._dialog || this._konflikt) return;
+    try {
+      const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
+      const v = r && r.value;
+      if (v && v.geaendert && this._standGeladen && v.geaendert > this._standGeladen && Array.isArray(v.rollen) && !this._ungespeichert && !this._modus && !this._dialog) {
+        this._daten = migrieren(JSON.parse(JSON.stringify(v)));
+        this._standGeladen = v.geaendert;
+        this._toast("Neuere Daten von einem anderen Gerät geladen.");
+      }
+    } catch (e) { /* offline: beim nächsten Mal */ }
   }
 
   _statusZeigen() {
@@ -1942,7 +6028,7 @@ class FilamentWerkstattPanel extends HTMLElement {
 
   _speicherHtml() {
     const s = this._speicherStatus;
-    const text = s === "speichert" ? "Speichert …" : s === "gespeichert" ? "Gespeichert" : s === "fehler" ? "Speichern fehlgeschlagen" : "";
+    const text = s === "speichert" ? "Speichert …" : s === "gespeichert" ? "Gespeichert" : s === "fehler" ? (this._konflikt ? "Nicht gespeichert" : this._versuche && this._versuche <= 3 ? "Speichern fehlgeschlagen, neuer Versuch …" : "Speichern fehlgeschlagen") : "";
     return `<span id="speicher" class="speicher ${s}">${text}</span>`;
   }
 
@@ -1956,6 +6042,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   // Nur die Meldung entfernen, nicht neu zeichnen (sonst gehen Eingaben verloren)
   _toastWeg() {
     this._toastText = null;
+    this._toastKnopf = null;
     const t = this.shadowRoot.querySelector(".toast");
     if (t) t.remove();
   }
@@ -2071,6 +6158,12 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a === "dd-wahl") { this._ddWaehlen(el); return; }
     if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
     if (a.startsWith("dr-")) { this._drKlick(a, el); return; }
+    if (a.startsWith("mod-")) { this._modKlick(a, el); return; }
+    if (a.startsWith("bu-")) { this._buKlick(a, el); return; }
+    if (a.startsWith("hi-")) { this._hiKlick(a, el); return; }
+    if (a.startsWith("ws-")) { this._wsKlick(a, el); return; }
+    if (a.startsWith("ne-")) { this._neKlick(a, el); return; }
+    if (this._exKlick(a, el)) return;
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
       const k = el.dataset.k;
@@ -2083,9 +6176,11 @@ class FilamentWerkstattPanel extends HTMLElement {
         this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
         return;
       case "ansicht":
-        if (el.dataset.bald) { this._toast("Kommt in einem der nächsten Schritte."); return; }
+        if (!this._schliessen()) return;
         this._ansicht = el.dataset.id;
         this._filterAuf = false;
+        this._sucheOffen = false; this._mehrOffen = false;
+        if (this._ansicht === "werkstatt" && ["bibliothek", "fehl"].includes(this._wsZustand().tab)) this._wsFotos();
         if (this._ansicht === "system") this._systemcheck();
         break;
       case "alle":
@@ -2093,6 +6188,11 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._suche = "";
         break;
       case "status": this._f = { sorte: "", hersteller: "", farbe: "", status: el.dataset.id }; break;
+      case "oeffnen-filament":
+        if (!this._daten.rollen.some((x) => x.id === el.dataset.id)) return;
+        if (this._modus && !this._schliessen()) return;
+        this._ansicht = "filament"; this._sucheOffen = false; this._mehrOffen = false;
+        // fall through
       case "oeffnen":
         this._modus = "detail";
         this._offen = el.dataset.id;
@@ -2102,8 +6202,12 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._rechner = null;
         this._sheetScroll = 0;
         break;
-      case "neu": this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
+      case "neu": this._ansicht === "modelle" ? (this._dialog = "mod-laden") : this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
+      case "zum-druck":
+        if (!this._schliessen()) return;
+        this._ansicht = "drucker"; this._drOffen = el.dataset.uid; this._dialog = "dr-druck";
+        break;
       case "tab":
         if (this._tab === "rest" && this._rechnerGeaendert()) this._toast(this._restSpeichern(false));
         this._tab = el.dataset.id; this._sheetScroll = 0;
@@ -2317,6 +6421,15 @@ class FilamentWerkstattPanel extends HTMLElement {
   _eingabe(e) {
     const t = e.target;
     if (this._invEingabe(t)) return;
+    if (this._modEingabe(t)) return;
+    if (this._buEingabe(t)) return;
+    if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (t.id === "global-suche") {
+      this._sucheQ = t.value;
+      clearTimeout(this._suchTimer);
+      this._suchTimer = setTimeout(() => { const box = this.shadowRoot.getElementById("such-ergebnisse"); if (box) box.innerHTML = this._suchErgebnisHtml(); }, 80);
+      return;
+    }
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -2343,6 +6456,10 @@ class FilamentWerkstattPanel extends HTMLElement {
   _aenderung(e) {
     const t = e.target;
     if (this._invAenderung(t)) return;
+    if (this._modAenderung(t)) return;
+    if (this._buAenderung(t)) return;
+    if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
+    if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -2441,23 +6558,44 @@ class FilamentWerkstattPanel extends HTMLElement {
     const sheet = root.querySelector(".sheet-inhalt");
     const scrollHaupt = haupt ? haupt.scrollTop : 0;
     if (sheet) this._sheetScroll = sheet.scrollTop;
-    const fokusId = root.activeElement && ["suche", "inv-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
+    const fokusId = root.activeElement && ["suche", "inv-suche", "global-suche"].includes(root.activeElement.id) ? root.activeElement.id : null;
     const schonDa = new Set([...root.querySelectorAll("[data-einmal]")].map((x) => x.dataset.einmal));
     this._ddOffen = null;
 
-    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}
+    let html;
+    try {
+      html = this._appHtml();
+    } catch (e) {
+      // Fehler beim Aufbau: Notansicht statt leerer Seite
+      console.error("Filament-Werkstatt:", e);
+      this._modus = null; this._dialog = null; this._sucheOffen = false; this._mehrOffen = false;
+      html = `<div class="app ${this._mobil ? "mobil" : ""}">${this._kopfHtml()}<main class="haupt"><div class="karte fehlerkarte"><h2>Diese Ansicht konnte nicht angezeigt werden</h2>
+        <p>${esc(e.message || e)}</p><p class="leise klein">Deine Daten sind nicht betroffen.</p><button class="knopf" data-aktion="ansicht" data-id="filament">Zur Filament-Übersicht</button></div></main></div>`;
+    }
+    root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}${html}`;
+    this._nachZeichnen(root, scrollHaupt, fokusId, schonDa);
+  }
+
+  _appHtml() {
+    return `
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
-        <main class="haupt">${this._inhaltHtml()}</main>
-        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
+        ${this._daten && this._drVerlauf ? this._buBalkenHtml() : ""}
+        ${this._daten ? this._sicherungBalkenHtml() : ""}
+        <main class="haupt"><div class="ansicht-rein ${this._ansicht === "modelle" ? "voll" : ""}" data-einmal="ansicht-${this._ansicht}">${this._inhaltHtml()}</div></main>
+        ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus && !this._mehrOffen && !this._sucheOffen ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
         ${this._mobil ? this._navHtml("unten") : ""}
         ${this._modus === "detail" ? this._sheetHtml() : ""}
         ${this._modus === "neu" ? this._neuSheetHtml() : ""}
         ${this._modus === "inv-detail" || this._modus === "inv-neu" ? this._invSheetHtml() : ""}
+        ${this._mobil ? this._mehrHtml() : ""}
+        ${this._sucheHtml()}
         ${this._dialogHtml()}
-        ${this._toastText ? `<div class="toast" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}</div>` : ""}
+        ${this._toastText ? `<div class="toast ${this._toastKnopf ? "mit-knopf" : ""}" role="status" data-einmal="toast-${esc(this._toastText)}">${esc(this._toastText)}${this._toastKnopf ? ` <button class="mini mint-rand" data-aktion="toast-knopf">${esc(this._toastKnopf.knopf)}</button>` : ""}</div>` : ""}
       </div>`;
+  }
 
+  _nachZeichnen(root, scrollHaupt, fokusId, schonDa) {
     const h = root.querySelector(".haupt");
     if (h) h.scrollTop = scrollHaupt;
     const s = root.querySelector(".sheet-inhalt");
@@ -2469,12 +6607,67 @@ class FilamentWerkstattPanel extends HTMLElement {
     }
     // Einblend-Animationen nur beim ersten Erscheinen, nicht bei jedem Neuzeichnen
     root.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });
-    this._auswahlenBauen();
+    try {
+      this._auswahlenBauen();
+      if (this._ansicht === "modelle") this._modNachZeichnen();
+      if (this._ansicht === "hilfe") this._hiNachZeichnen();
+    } catch (e) { console.error("Filament-Werkstatt:", e); }
     if (this._klappNeu) {
       const k = root.querySelector(`[data-klapp="${this._klappNeu}"]`);
       this._klappNeu = null;
       if (k) this._klappAnimieren(k, true);
     }
+  }
+
+  // ---- Handy: Detailansicht nach unten wegwischen ------------------------
+  // Greift am Griff/Kopf immer, im Inhalt nur, wenn dieser ganz oben steht.
+  _wischenEinrichten() {
+    const root = this.shadowRoot;
+    let w = null;
+    root.addEventListener("touchstart", (e) => {
+      w = null;
+      if (!this._mobil || e.touches.length !== 1) return;
+      const sheet = e.target.closest(".sheet");
+      if (!sheet || e.target.closest('input[type="range"], .dd-liste, textarea')) return;
+      const inhalt = sheet.querySelector(".sheet-inhalt");
+      const imInhalt = !!e.target.closest(".sheet-inhalt");
+      if (imInhalt && inhalt.scrollTop > 0) return;
+      w = { sheet, inhalt, imInhalt, y0: e.touches[0].clientY, t0: performance.now(), dy: 0, aktiv: false };
+    }, { passive: true });
+    root.addEventListener("touchmove", (e) => {
+      if (!w) return;
+      const dy = e.touches[0].clientY - w.y0;
+      if (!w.aktiv) {
+        if (dy < -4 || (w.imInhalt && w.inhalt.scrollTop > 0)) { w = null; return; }
+        if (dy < 8) return;
+        w.aktiv = true;
+        w.sheet.style.transition = "none";
+        w.sheet.style.animation = "none";
+        w.schleier = root.querySelector(".schleier:not(.oben)");
+      }
+      e.preventDefault();
+      w.dy = Math.max(0, dy - 8);
+      w.sheet.style.transform = `translateY(${w.dy}px)`;
+      if (w.schleier) w.schleier.style.opacity = String(Math.max(0.2, 1 - w.dy / w.sheet.offsetHeight));
+    }, { passive: false });
+    const ende = () => {
+      if (!w || !w.aktiv) { w = null; return; }
+      const { sheet, schleier, dy } = w;
+      const tempo = dy / Math.max(1, performance.now() - w.t0);
+      w = null;
+      if (dy > 120 || (dy > 40 && tempo > 0.6)) {
+        sheet.style.transition = "transform .18s ease-in";
+        sheet.style.transform = "translateY(100%)";
+        if (schleier) { schleier.style.transition = "opacity .18s"; schleier.style.opacity = "0"; }
+        setTimeout(() => { const s = root.querySelector(".schleier:not(.oben)"); if (s && s.dataset.aktion) s.click(); }, 170);
+      } else {
+        sheet.style.transition = "transform .22s cubic-bezier(.2,.9,.3,1.2)";
+        sheet.style.transform = "";
+        if (schleier) { schleier.style.transition = "opacity .2s"; schleier.style.opacity = ""; }
+      }
+    };
+    root.addEventListener("touchend", ende);
+    root.addEventListener("touchcancel", ende);
   }
 
   // ---- Aufklappen mit Animation (nach unten fahren) -----------------------
@@ -2619,14 +6812,18 @@ class FilamentWerkstattPanel extends HTMLElement {
       <div class="marke"><span class="punkt-leucht"></span>Filament-Werkstatt</div>
       ${this._mobil ? "" : this._navHtml("oben")}
       ${this._speicherHtml()}
+      ${this._daten ? `<button class="icon-knopf such-knopf" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)">🔍</button>` : ""}
     </header>`;
   }
 
   _navHtml(lage) {
-    return `<nav class="nav nav-${lage}">${NAVIGATION.map((n) => `
-      <button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""} ${n.bald ? "bald" : ""}" data-aktion="ansicht" data-id="${n.id}" ${n.bald ? 'data-bald="1"' : ""}>
-        <span class="nav-icon">${n.icon}</span><span>${n.name}</span>${n.bald ? '<small>bald</small>' : ""}
-      </button>`).join("")}</nav>`;
+    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}">
+        <span class="nav-icon">${n.icon}</span><span class="nav-name">${lage === "unten" && n.kurz ? n.kurz : n.name}</span></button>`;
+    if (lage === "oben") return `<nav class="nav nav-oben">${NAVIGATION.map(punkt).join("")}</nav>`;
+    const mehrAktiv = !NAV_UNTEN.includes(this._ansicht);
+    const mehrIcon = mehrAktiv ? (NAVIGATION.find((n) => n.id === this._ansicht) || {}).icon || "☰" : "☰";
+    return `<nav class="nav nav-unten">${NAVIGATION.filter((n) => NAV_UNTEN.includes(n.id)).map(punkt).join("")}
+      <button class="nav-punkt ${mehrAktiv || this._mehrOffen ? "aktiv" : ""}" data-aktion="mehr" aria-label="Weitere Bereiche"><span class="nav-icon">${mehrIcon}</span><span class="nav-name">Mehr</span></button></nav>`;
   }
 
   _inhaltHtml() {
@@ -2638,6 +6835,10 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (!this._daten) return `<div class="laden">Lade Daten aus Home Assistant …</div>`;
     if (this._ansicht === "inventar") return this._invHtml();
     if (this._ansicht === "drucker") return this._drHtml();
+    if (this._ansicht === "modelle") return this._modHtml();
+    if (this._ansicht === "hilfe") return this._hiHtml();
+    if (this._ansicht === "werkstatt") return this._wsHtml();
+    if (this._ansicht === "nerd") return this._neHtml();
     return this._filamentHtml();
   }
 
@@ -2703,6 +6904,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       const p = prozent(r);
       return `<button class="kachel ${r.probiert ? "" : "offen"}" data-aktion="oeffnen" data-id="${esc(r.id)}">
         ${r.probiert ? "" : `<span class="badge-offen">noch nicht probiert</span>`}
+        ${r.achtung ? `<span class="achtung-punkt kachel-achtung" title="Nach Fehldruck: testen und genau hinschauen">!</span>` : ""}
         <div class="kachel-spule">${spuleSvg(r)}</div>
         <div class="kachel-name">${esc(r.name)}</div>
         <div class="kachel-sub">${esc(r.hersteller)}</div>
@@ -2744,22 +6946,29 @@ class FilamentWerkstattPanel extends HTMLElement {
         </header>
         <div class="tabs">${tabs.map(([id, n]) => `<button class="tab ${this._tab === id ? "an" : ""}" data-aktion="tab" data-id="${id}" ${this._bearbeiten ? "disabled" : ""}>${n}</button>`).join("")}</div>
         <div class="sheet-inhalt">
+          ${r.achtung && this._tab === "einstellungen" ? `<div class="hinweis rot-hinweis achtung-hinweis"><span class="achtung-punkt">!</span><div><strong>Nach einem Fehldruck: testen und genau hinschauen.</strong>
+            <small>${esc(r.achtung.grund || "")}${r.achtung.geaendert && r.achtung.geaendert.length ? ` · geändert: ${esc(r.achtung.geaendert.join(", "))}` : ""}</small></div>
+            <button class="mini" data-aktion="bu-achtung-weg" data-id="${esc(r.id)}">Test hat geklappt</button></div>` : ""}
           ${this._tab === "einstellungen" ? this._letzterDruckHtml(r) + this._einstellungenHtml(r) : this._tab === "rest" ? this._restHtml(r) : this._infosHtml(r)}
         </div>
         ${fuss ? `<footer class="sheet-fuss">${fuss}</footer>` : ""}
       </section>`;
   }
 
-  // Platzhalter: wird mit der Druckverbuchung (nächster Schritt) gefüllt
+  // Letzter verbuchter Druck mit dieser Rolle, Sprung in den Druckverlauf
   _letzterDruckHtml(r) {
-    const d = r.letzter_druck;
+    const l = this._buLetzterDruck(r.id);
+    const f = l && l.d ? fotoName(l.d) : null;
+    const foto = f && this._drFotos && this._drFotos[f];
+    if (f && this._drFotos && !(f in this._drFotos)) setTimeout(() => this._drFotosLaden(), 0);
+    const g = l && l.x.gebucht;
     return `<div class="letzter-druck">
-      <div class="ld-bild">${d && d.bild ? `<img src="${esc(d.bild)}" alt="">` : "🖼️"}</div>
+      <div class="ld-bild" ${f ? `data-foto="${esc(f)}"` : ""}>${foto ? `<img src="${esc(foto)}" alt="">` : "🖼️"}</div>
       <div class="ld-text">
         <strong>Letzter Druck</strong>
-        <span class="leise klein">${d ? esc(d.name) : "Noch kein Druck mit dieser Rolle verbucht. Erscheint, sobald die Verbuchung läuft."}</span>
+        <span class="leise klein">${l ? `${esc(l.name)} · ${zahl(g.g, 1)} g · ${new Date(g.am).toLocaleDateString("de-DE")}${g.ergebnis === "fehl" ? " · Fehldruck" : ""}${l.x.kommentar ? ` · 💬 ${esc(l.x.kommentar)}` : ""}` : "Noch kein Druck mit dieser Rolle verbucht."}</span>
       </div>
-      <button class="knopf leise klein-knopf" disabled>Zum Druck ›</button>
+      <button class="knopf leise klein-knopf" ${l ? `data-aktion="zum-druck" data-uid="${esc(l.uid)}"` : "disabled"}>Zum Druck ›</button>
     </div>`;
   }
 
@@ -2922,7 +7131,10 @@ class FilamentWerkstattPanel extends HTMLElement {
         <input type="range" min="0" max="80" step="0.5" value="${r.preis_kg || 0}" data-info="preis_kg">
       </div>
       <h3>Notizen</h3>
-      <textarea id="notiz" rows="4" placeholder="z. B. Schichthöhe, Besonderheiten …">${esc(r.notiz)}</textarea>`;
+      <textarea id="notiz" rows="4" maxlength="2000" placeholder="z. B. Schichthöhe, Besonderheiten …">${esc(r.notiz)}</textarea>
+      <h3>Bambu Studio</h3>
+      <p class="leise klein">Filament-Profil mit deinen Werten (Temperaturen, Lüfter, Flow, K-Faktor, Volumenstrom) als Datei. In Bambu Studio über Datei › Importieren › Konfiguration importieren laden.</p>
+      <button class="knopf leise breit" data-aktion="profil-export">⬇ Profil für Bambu Studio</button>`;
   }
 
   // ---- Filament hinzufügen ------------------------------------------------
@@ -2994,6 +7206,17 @@ class FilamentWerkstattPanel extends HTMLElement {
   // ---- Dialoge ------------------------------------------------------------
   _dialogHtml() {
     if (!this._dialog) return "";
+    if (this._dialog === "bu" || this._dialog === "bu-hand") return `<div class="schleier oben" data-einmal="schleier-bu"></div><div class="dialog breit-dialog bu-dialog" role="dialog" data-einmal="dialog-${this._dialog}"><button class="icon-knopf dialog-x" data-aktion="${this._dialog === "bu" ? "bu-fertig" : "dialog-zu"}" aria-label="Schließen">✕</button>${this._dialog === "bu" ? this._buDialogHtml() : this._buHandHtml()}</div>`;
+    if (this._dialog === "ws-auftrag") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-ws"></div><div class="dialog" role="dialog" data-einmal="dialog-ws">${this._wsAuftragDialogHtml()}</div>`;
+    if (this._dialog === "sich-import") return `<div class="schleier oben" data-einmal="schleier-imp"></div><div class="dialog" role="dialog" data-einmal="dialog-imp">${this._importDialogHtml()}</div>`;
+    if (this._dialog === "kopieren") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-kop"></div><div class="dialog" role="dialog" data-einmal="dialog-kop"><h2>Zum Kopieren markieren</h2>
+      <p class="leise klein">Die Zwischenablage ist hier gesperrt. Text markieren und kopieren:</p><textarea rows="10" readonly>${esc(this._kopierText || "")}</textarea><button class="knopf breit oben-abstand" data-aktion="dialog-zu">Fertig</button></div>`;
+    if (this._dialog === "konflikt") return `<div class="schleier oben" data-einmal="schleier-kon"></div><div class="dialog" role="alertdialog" data-einmal="dialog-kon"><h2>Auf einem anderen Gerät geändert</h2>
+      <p class="leise">Seit du die Seite geöffnet hast, wurde auf einem anderen Gerät gespeichert (${this._konflikt ? new Date(this._konflikt.am).toLocaleString("de-DE") : ""}). Welcher Stand soll gelten?</p>
+      <button class="wahl" data-aktion="kon-laden"><span>↻</span><div><strong>Neu laden</strong><small>Stand vom anderen Gerät übernehmen, meine letzte Änderung verwerfen</small></div></button>
+      <button class="wahl" data-aktion="kon-behalten"><span>✓</span><div><strong>Meinen Stand speichern</strong><small>Überschreibt die Änderungen vom anderen Gerät</small></div></button></div>`;
+    if (this._dialog === "mod-laden") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod"></div><div class="dialog" role="dialog" data-einmal="dialog-mod">${this._modLadenDialogHtml()}</div>`;
+    if (this._dialog === "mod-stuetzen") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod-s"></div><div class="dialog breit-dialog" role="dialog" data-einmal="dialog-mod-s">${this._modStuetzenHilfeHtml()}</div>`;
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
     if (this._dialog === "dr-druck") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr"></div><div class="dialog" role="dialog" data-einmal="dialog-dr">${this._drDialogHtml()}</div>`;
     const r = this._rolle();
@@ -3050,11 +7273,11 @@ class FilamentWerkstattPanel extends HTMLElement {
       <p class="leise">Prüft, ob die Seite alles in Home Assistant erreicht. Version ${VERSION}.</p>
       <ul class="check">${liste}</ul>
       <button class="knopf" data-aktion="pruefen" ${c && c.laeuft ? "disabled" : ""}>${c && c.laeuft ? "Prüft …" : "Neu prüfen"}</button>
-    </div>`;
+    </div>${this._sicherungKarteHtml()}`;
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);
