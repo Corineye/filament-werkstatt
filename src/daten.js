@@ -5,7 +5,7 @@
 // Oberfläche anders eingefärbt, bis Corin sie übernimmt oder ändert.
 // ---------------------------------------------------------------------------
 
-const DATEN_VERSION = 3;
+const DATEN_VERSION = 4;
 
 // Leergewicht der Spulen in Gramm (Blatt „Tabelle2“)
 // Ändert sich das Gewicht einer Spule, gilt es für alle Rollen, die diese Spule nutzen.
@@ -211,6 +211,31 @@ function standardDaten() {
     materialien_eigen: [],
     arten_eigen: {},
     inventar: standardInventar(),
+    ...werkstattStandard(),
+  };
+}
+
+// Neu in Version 4: Verbuchen, Werkstatt, Wartung, Einstellungen
+const EINSTELLUNGEN_STANDARD = {
+  strompreis: 0.35,      // €/kWh
+  linie_g: 0.3,          // Anfangslinie + Reinigung am Druckstart (je Druck)
+  extruder_g: 0.1,       // 3 Extruder-Fahrten vor dem Druck (je Druck)
+  wechsel_g: 0.15,       // Reststück Schneider → Düse beim Rollenwechsel (alte Rolle)
+  mindest_g: 250,        // Einkaufsliste: unter dieser Menge je Farbe + Material nachkaufen
+  mindest_material_g: 500,
+  korrektur: {},         // Faktor je Material aus dem Abgleich beim Wiegen
+  sicherung_am: null,
+  sicherung_spaeter: null,
+};
+function werkstattStandard() {
+  return {
+    einstellungen: JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)),
+    drucke: {},
+    letzte_rolle: null,
+    buchen_ab: new Date().toISOString(),   // ältere Drucke nicht nachfragen
+    warteschlange: [],
+    abgleich: [],
+    wartung: { aufgaben: {}, teile: null },
   };
 }
 
@@ -224,6 +249,9 @@ function migrieren(d) {
   if (!d.materialien_eigen) d.materialien_eigen = [];
   if (!d.arten_eigen) d.arten_eigen = {};
   if (!d.drucke) d.drucke = {};   // Kommentare usw. zu Drucken aus dem Verlauf, Schlüssel = Eintrag in „3D-Drucke“
+  const w = werkstattStandard();
+  for (const k of Object.keys(w)) if (d[k] == null) d[k] = w[k];
+  d.einstellungen = { ...EINSTELLUNGEN_STANDARD, ...d.einstellungen };
   d.version = DATEN_VERSION;
   return d;
 }

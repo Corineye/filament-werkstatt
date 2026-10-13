@@ -309,12 +309,13 @@ const DruckerAnsicht = {
       this._drVerlaufFehler = e.message || String(e);
     }
     this._drVerlaufLaedt = false;
-    if (this._ansicht === "drucker") this._zeichnen();
+    if (!this._modus && !this._ddOffen) this._zeichnen();
     this._drFotosLaden();
+    this._buNachLaden();
   },
   async _drFotosLaden() {
     this._drFotos = this._drFotos || {};
-    for (const d of (this._drVerlauf || []).slice(0, 12)) {
+    for (const d of this._buAlle().slice(0, 30)) {
       const f = fotoName(d);
       if (!f || f in this._drFotos) continue;
       this._drFotos[f] = null;
@@ -328,7 +329,7 @@ const DruckerAnsicht = {
   },
 
   _drVerlaufHtml() {
-    const liste = this._drVerlauf;
+    const liste = this._drVerlauf ? this._buAlle() : null;
     let inhalt;
     if (!liste) inhalt = `<div class="leise klein">Lade Druckverlauf …</div>`;
     else if (this._drVerlaufFehler) inhalt = `<div class="hinweis amber">Die Liste „3D-Drucke“ konnte nicht gelesen werden: ${esc(this._drVerlaufFehler)}</div>`;
@@ -339,11 +340,13 @@ const DruckerAnsicht = {
         const f = fotoName(d);
         const foto = f && this._drFotos && this._drFotos[f];
         const extra = (this._daten.drucke || {})[d.uid] || {};
-        const [st, farbe] = d.status === "finish" ? ["fertig", "mint"] : d.status === "failed" ? ["fehlgeschlagen", "rot"] : d.status === "laeuft" ? ["ohne Abschluss", "amber"] : [d.status, "leise"];
+        const g = extra.gebucht;
+        const [st, farbe] = g ? (g.ergebnis === "fehl" ? ["Fehldruck", "rot"] : g.ergebnis === "anders" ? ["abgebrochen", "leise"] : ["verbucht", "mint"])
+          : d.status === "finish" ? ["fertig", "amber"] : d.status === "failed" ? ["abgebrochen", "rot"] : d.status === "laeuft" ? ["läuft / ohne Abschluss", "amber"] : [d.status, "leise"];
         return `<button class="dr-druck" data-aktion="dr-druck" data-uid="${esc(d.uid)}">
           <span class="ld-bild" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="">` : "🖼️"}</span>
           <span class="dr-druck-text"><strong>${esc(d.name)}</strong>
-            <small>${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g` : ""}${d.duese_mm ? ` · ${zahl(d.duese_mm, 1)} mm Düse` : ""}</small>
+            <small>${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g` : ""}${d.duese_mm ? ` · ${zahl(d.duese_mm, 1)} mm Düse` : ""}${g ? ` · ${esc((this._daten.rollen.find((r) => r.id === g.rolle) || {}).name || "")}` : ""}${d.hand ? " · von Hand" : ""}</small>
             ${extra.kommentar ? `<small class="dr-kommentar">💬 ${esc(extra.kommentar)}</small>` : ""}</span>
           <span class="pille ${farbe}">${st}</span>
         </button>`;
@@ -351,11 +354,11 @@ const DruckerAnsicht = {
       ${liste.length > 8 ? `<button class="mini mint-rand" data-aktion="dr-alle">${this._drAlle ? "Weniger zeigen" : `Alle ${liste.length} Drucke zeigen`}</button>` : ""}`;
     }
     return `<div class="dr-karte"><div class="dr-kamera-kopf"><h3 class="dr-titel">🗂️ Druckverlauf</h3>
-      <button class="chip" data-aktion="dr-neu-laden">↻ Aktualisieren</button></div>${inhalt}</div>`;
+      <span class="chips"><button class="chip" data-aktion="bu-hand">＋ Nachtragen</button><button class="chip" data-aktion="dr-neu-laden">↻ Aktualisieren</button></span></div>${inhalt}</div>`;
   },
 
   _drDialogHtml() {
-    const d = (this._drVerlauf || []).find((x) => x.uid === this._drOffen);
+    const d = this._buAlle().find((x) => x.uid === this._drOffen);
     if (!d) return "";
     const extra = (this._daten.drucke || {})[d.uid] || {};
     const f = fotoName(d);
@@ -373,10 +376,30 @@ const DruckerAnsicht = {
         ${zeile("Düse / Bett", d.duese_c ? `${zahl(d.duese_c)} °C / ${zahl(d.bett_c)} °C` : null)}
         ${zeile("Düse", d.duese_mm ? `${zahl(d.duese_mm, 1)} mm` : null)}
       </div>
+      ${this._drBuchungHtml(d, extra)}
       <h3>Kommentar</h3>
       <textarea id="dr-kommentar" rows="4" placeholder="z. B. warum abgebrochen, was du gelernt hast …">${esc(extra.kommentar || "")}</textarea>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Schließen</button>
         <button class="knopf" data-aktion="dr-kommentar-speichern">Speichern</button></div>`;
+  },
+
+  _drBuchungHtml(d, extra) {
+    const g = extra.gebucht;
+    if (!g) {
+      return BU_ENDE.includes(d.status) ? `<div class="hinweis amber oben-abstand">Noch nicht verbucht${extra.ignoriert ? " (übersprungen)" : ""}.
+        <button class="mini" data-aktion="bu-start" data-uid="${esc(d.uid)}">Jetzt verbuchen</button></div>` : "";
+    }
+    const rolle = this._daten.rollen.find((r) => r.id === g.rolle);
+    const k = g.kosten || {};
+    const kosten = (k.filament || 0) + (k.strom || 0);
+    const fehl = extra.fehl;
+    return `<h3>Verbucht</h3><div class="info-liste">
+      <div class="info-zeile"><span>Rolle</span><strong>${esc(rolle ? rolle.name : "gelöscht")}</strong></div>
+      <div class="info-zeile"><span>Abgezogen</span><strong>${zahl(g.g, 1)} g${g.wechsel ? ` + ${zahl(g.wechsel.g, 2)} g Reststück` : ""}</strong></div>
+      <div class="info-zeile"><span>Ergebnis</span><strong>${g.ergebnis === "fehl" ? "Fehldruck" : g.ergebnis === "anders" ? "anders überlegt" : "geglückt"}</strong></div>
+      ${kosten ? `<div class="info-zeile"><span>Kosten</span><strong>${zahl(kosten, 2)} €${k.kwh != null ? ` (${zahl(k.kwh, 3)} kWh)` : ""}</strong></div>` : ""}
+      ${fehl ? `<div class="info-zeile"><span>Ursachen</span><strong>${esc((fehl.ursachen || []).map((id) => (fehlerbild(id) || {}).name).filter(Boolean).join(", ") || "–")}</strong></div>` : ""}
+    </div><button class="mini" data-aktion="bu-rueckgaengig" data-uid="${esc(d.uid)}">Buchung rückgängig machen</button>`;
   },
 
   // ---- Steckdose schalten (immer mit Nachfrage) --------------------------

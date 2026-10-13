@@ -6,7 +6,7 @@
 // Oberfläche anders eingefärbt, bis Corin sie übernimmt oder ändert.
 // ---------------------------------------------------------------------------
 
-const DATEN_VERSION = 3;
+const DATEN_VERSION = 4;
 
 // Leergewicht der Spulen in Gramm (Blatt „Tabelle2“)
 // Ändert sich das Gewicht einer Spule, gilt es für alle Rollen, die diese Spule nutzen.
@@ -212,6 +212,31 @@ function standardDaten() {
     materialien_eigen: [],
     arten_eigen: {},
     inventar: standardInventar(),
+    ...werkstattStandard(),
+  };
+}
+
+// Neu in Version 4: Verbuchen, Werkstatt, Wartung, Einstellungen
+const EINSTELLUNGEN_STANDARD = {
+  strompreis: 0.35,      // €/kWh
+  linie_g: 0.3,          // Anfangslinie + Reinigung am Druckstart (je Druck)
+  extruder_g: 0.1,       // 3 Extruder-Fahrten vor dem Druck (je Druck)
+  wechsel_g: 0.15,       // Reststück Schneider → Düse beim Rollenwechsel (alte Rolle)
+  mindest_g: 250,        // Einkaufsliste: unter dieser Menge je Farbe + Material nachkaufen
+  mindest_material_g: 500,
+  korrektur: {},         // Faktor je Material aus dem Abgleich beim Wiegen
+  sicherung_am: null,
+  sicherung_spaeter: null,
+};
+function werkstattStandard() {
+  return {
+    einstellungen: JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)),
+    drucke: {},
+    letzte_rolle: null,
+    buchen_ab: new Date().toISOString(),   // ältere Drucke nicht nachfragen
+    warteschlange: [],
+    abgleich: [],
+    wartung: { aufgaben: {}, teile: null },
   };
 }
 
@@ -225,6 +250,9 @@ function migrieren(d) {
   if (!d.materialien_eigen) d.materialien_eigen = [];
   if (!d.arten_eigen) d.arten_eigen = {};
   if (!d.drucke) d.drucke = {};   // Kommentare usw. zu Drucken aus dem Verlauf, Schlüssel = Eintrag in „3D-Drucke“
+  const w = werkstattStandard();
+  for (const k of Object.keys(w)) if (d[k] == null) d[k] = w[k];
+  d.einstellungen = { ...EINSTELLUNGEN_STANDARD, ...d.einstellungen };
   d.version = DATEN_VERSION;
   return d;
 }
@@ -391,6 +419,380 @@ function passtZurSuche(t, worte) {
     if (text.includes(w)) return true;
     return w.length >= 4 && woerter.some((x) => x.length >= 4 && abstand(w, x) <= 1);
   });
+}
+// ---------------------------------------------------------------------------
+// Wissen: Fehlerbilder, Kalibrierung, P1S-Zeichnung, Trockner, Wartung.
+// Wird von Hilfe, Fehldruck-Fragen, Werkstatt und Nerd-Menü gemeinsam genutzt.
+// ---------------------------------------------------------------------------
+
+// Kleine Zeichnungen der Fehlerbilder (120 × 80)
+const FB_FARBE = "#3ee6a8", FB_ROT = "#ff6b6b", FB_GRAU = "#2a3330";
+const fbBild = (inhalt) => `<svg viewBox="0 0 120 80" class="fb-bild" aria-hidden="true"><rect x="0" y="70" width="120" height="10" fill="${FB_GRAU}"/>${inhalt}</svg>`;
+const FB_ZEICHNUNG = {
+  haftung: fbBild(`<path d="M30 70 L32 40 L88 36 L92 62 Z" fill="${FB_FARBE}" opacity=".85" transform="rotate(-8 60 60)"/><path d="M20 70 q10 -6 20 0" stroke="${FB_ROT}" stroke-width="2" fill="none"/><text x="96" y="30" fill="${FB_ROT}" font-size="14">↑</text>`),
+  warping: fbBild(`<path d="M22 62 Q22 70 28 70 L92 70 Q98 70 98 62 L98 34 L22 34 Z" fill="${FB_FARBE}" opacity=".85"/><path d="M22 62 Q16 60 14 54 M98 62 Q104 60 106 54" stroke="${FB_ROT}" stroke-width="3" fill="none"/><path d="M14 54 L22 34 M106 54 L98 34" stroke="${FB_FARBE}" stroke-width="2"/>`),
+  spaghetti: fbBild(`<rect x="40" y="50" width="40" height="20" fill="${FB_FARBE}" opacity=".85"/><path d="M45 50 C30 20 70 40 60 15 C55 5 90 25 75 45 C65 60 100 30 95 10 M50 48 C40 30 25 40 30 20" stroke="${FB_FARBE}" stroke-width="1.6" fill="none"/>`),
+  verschiebung: fbBild(`<rect x="30" y="52" width="50" height="18" fill="${FB_FARBE}" opacity=".85"/><rect x="44" y="30" width="50" height="22" fill="${FB_FARBE}" opacity=".85"/><path d="M80 52 L94 52" stroke="${FB_ROT}" stroke-width="2"/><text x="96" y="62" fill="${FB_ROT}" font-size="11">→</text>`),
+  unterextrusion: fbBild(`<rect x="25" y="22" width="70" height="48" fill="none" stroke="${FB_FARBE}" stroke-width="1"/>${[26, 32, 38, 44, 50, 56, 62].map((y, i) => `<path d="M25 ${y} H95" stroke="${FB_FARBE}" stroke-width="3.5" stroke-dasharray="${i % 2 ? "9 5" : "14 4"}"/>`).join("")}`),
+  faeden: fbBild(`<rect x="18" y="26" width="18" height="44" fill="${FB_FARBE}" opacity=".85"/><rect x="84" y="26" width="18" height="44" fill="${FB_FARBE}" opacity=".85"/>${[32, 40, 47, 55].map((y) => `<path d="M36 ${y} Q60 ${y + 8} 84 ${y - 2}" stroke="${FB_FARBE}" stroke-width=".8" fill="none"/>`).join("")}`),
+  feucht: fbBild(`<rect x="25" y="28" width="70" height="42" fill="${FB_FARBE}" opacity=".85"/>${[[35, 40], [55, 36], [72, 48], [45, 58], [82, 34], [64, 62]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2.6" fill="#0b1210"/>`).join("")}<text x="98" y="26" fill="#5cc8ff" font-size="13">💧</text>`),
+  verstopft: fbBild(`<path d="M50 6 h20 v18 l-6 10 h-8 l-6 -10 z" fill="#8da49a"/><circle cx="60" cy="38" r="3" fill="${FB_ROT}"/><path d="M40 70 v-8 h40 v8" fill="${FB_FARBE}" opacity=".85"/><text x="72" y="48" fill="${FB_ROT}" font-size="12">✕</text>`),
+  stuetzen: fbBild(`<rect x="20" y="22" width="80" height="10" fill="${FB_FARBE}" opacity=".85"/><rect x="20" y="32" width="12" height="38" fill="${FB_FARBE}" opacity=".85"/><path d="M60 70 V50 M75 70 V44 M90 70 V56" stroke="#4fe08a" stroke-width="2"/><path d="M58 44 l6 6 M73 38 l6 6" stroke="${FB_ROT}" stroke-width="2"/><path d="M55 32 q10 8 20 0 q10 10 25 2" stroke="${FB_FARBE}" stroke-width="1.5" fill="none"/>`),
+  trennung: fbBild(`<rect x="30" y="54" width="60" height="16" fill="${FB_FARBE}" opacity=".85"/><rect x="30" y="24" width="60" height="26" fill="${FB_FARBE}" opacity=".85"/><path d="M28 52 L40 51 L50 53 L62 50 L74 53 L92 51" stroke="${FB_ROT}" stroke-width="2.2" fill="none"/>`),
+  elefantenfuss: fbBild(`<path d="M34 24 H86 V62 Q92 66 94 70 H26 Q28 66 34 62 Z" fill="${FB_FARBE}" opacity=".85"/><path d="M26 70 Q28 64 34 62 M94 70 Q92 64 86 62" stroke="${FB_ROT}" stroke-width="2.5" fill="none"/>`),
+  pickel: fbBild(`<rect x="25" y="24" width="70" height="46" fill="${FB_FARBE}" opacity=".85"/>${[[40, 34], [70, 30], [55, 50], [82, 58], [34, 60]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="3.2" fill="#b9f5dd"/>`).join("")}`),
+  geisterbild: fbBild(`<rect x="25" y="24" width="70" height="46" fill="${FB_FARBE}" opacity=".85"/><path d="M40 34 v26 M44 34 v26 M48 34 v26" stroke="#0b1210" stroke-width="1.2" opacity=".6"/><text x="56" y="52" fill="#0b1210" font-size="16" font-weight="700">B</text><text x="61" y="52" fill="#0b1210" font-size="16" font-weight="700" opacity=".35">B</text>`),
+  naht: fbBild(`<rect x="30" y="22" width="60" height="48" rx="8" fill="${FB_FARBE}" opacity=".85"/><path d="M62 22 v48" stroke="#b9f5dd" stroke-width="2.5" stroke-dasharray="3 2"/>`),
+};
+
+// Fehlerbilder mit Ursachen und konkreten Änderungen an den Rollenwerten.
+// aenderung: k = Feld aus FELDER, d = Änderung (absolut) oder f = Faktor, min/max = Grenzen
+const FEHLERBILDER = [
+  { id: "haftung", name: "Löst sich vom Bett", kurz: "Teil hat sich gelöst oder verschoben",
+    ursachen: ["Druckbett fettig (Fingerabdrücke)", "Bett zu kalt", "Erste Schicht zu schnell", "Falsche Platte für das Material"],
+    loesungen: [
+      { text: "Platte mit Spülmittel und warmem Wasser waschen, danach nicht mehr anfassen." },
+      { text: "Betttemperatur etwas erhöhen", aenderung: { k: "bett", d: 5, max: 110 } },
+      { text: "Erste Schicht langsamer drucken", aenderung: { k: "v_erste", d: -10, min: 15 } },
+      { text: "Rand (Brim) 5 mm in Bambu Studio einschalten, vor allem bei kleinen Kontaktflächen." },
+    ] },
+  { id: "warping", name: "Ecken heben sich (Verzug)", kurz: "Ecken biegen sich nach oben",
+    ursachen: ["Material schrumpft beim Abkühlen (ASA, ABS, PETG)", "Zugluft oder offene Haube", "Lüfter zu stark"],
+    loesungen: [
+      { text: "Bauteillüfter maximal reduzieren", aenderung: { k: "luefter_max", d: -20, min: 0 } },
+      { text: "Betttemperatur erhöhen", aenderung: { k: "bett", d: 5, max: 110 } },
+      { text: "Haube und Tür geschlossen lassen, Drucker vorher 10 min aufheizen lassen." },
+      { text: "Rand (Brim) oder Mausohren an den Ecken setzen." },
+    ] },
+  { id: "spaghetti", name: "Fadensalat (Spaghetti)", kurz: "Druck hängt in der Luft, Fäden überall",
+    ursachen: ["Teil hat sich gelöst", "Stützen fehlen oder sind umgekippt", "Überhang zu steil"],
+    loesungen: [
+      { text: "Haftung prüfen (siehe „Löst sich vom Bett“)." },
+      { text: "Stützen einschalten, Baum-Stützen für Überhänge über 45°." },
+      { text: "Teil so drehen, dass die größte flache Seite auf dem Bett liegt." },
+    ] },
+  { id: "verschiebung", name: "Schichtverschiebung", kurz: "Obere Schichten sind seitlich versetzt",
+    ursachen: ["Düse ist gegen ein hochgebogenes Teil gestoßen", "Zu schnell oder zu hohe Beschleunigung", "Riemen locker"],
+    loesungen: [
+      { text: "Außen- und Innenwand langsamer", aenderung: { k: "v_innen", f: 0.8, min: 20 } },
+      { text: "Füllung langsamer", aenderung: { k: "v_fuellung", f: 0.8, min: 20 } },
+      { text: "Z-Hop beim Verfahren in Bambu Studio einschalten (Prozess › Andere › Z-Hop)." },
+      { text: "Riemenspannung prüfen (Wartung)." },
+    ] },
+  { id: "unterextrusion", name: "Lücken (zu wenig Material)", kurz: "Wände löchrig, Linien dünn",
+    ursachen: ["Max. Volumenstrom zu hoch für das Material", "Düse teilweise verstopft", "Temperatur zu niedrig", "Rolle hakt"],
+    loesungen: [
+      { text: "Max. Volumenstrom senken", aenderung: { k: "max_vol", d: -2, min: 2 } },
+      { text: "Düsentemperatur etwas erhöhen", aenderung: { k: "duese", d: 5, max: 300 } },
+      { text: "Flow Ratio kalibrieren (Hilfe › Kalibrierung)." },
+      { text: "Prüfen, ob die Rolle frei abrollt und nichts verknotet ist." },
+    ] },
+  { id: "faeden", name: "Fäden (Stringing)", kurz: "Feine Fäden zwischen Teilen",
+    ursachen: ["Filament feucht", "Düse zu heiß", "Rückzug zu kurz"],
+    loesungen: [
+      { text: "Rolle trocknen (Werte siehe Trockner-Hilfe)." },
+      { text: "Düsentemperatur senken", aenderung: { k: "duese", d: -5, min: 170 } },
+      { text: "Rückzug in Bambu Studio um 0,2 mm erhöhen." },
+    ] },
+  { id: "feucht", name: "Blasen, Knacken, raue Oberfläche", kurz: "Knistert beim Drucken, Bläschen",
+    ursachen: ["Filament hat Feuchtigkeit gezogen (PETG, TPU, PA besonders)"],
+    loesungen: [
+      { text: "Rolle trocknen, danach luftdicht mit Trockenmittel lagern." },
+      { text: "Beim Drucken direkt aus dem Trockner ziehen." },
+    ] },
+  { id: "verstopft", name: "Kein Filament kommt", kurz: "Düse verstopft oder Extruder rutscht",
+    ursachen: ["Düse verstopft (Wood-PLA in 0,2 mm, Kohle im Hotend)", "Hitzestau bei PLA in warmer Kammer", "Filament gerissen"],
+    loesungen: [
+      { text: "Kaltzug (Cold Pull) machen oder Düse tauschen." },
+      { text: "Bei PLA Tür oder Haube einen Spalt öffnen (Hitzestau)." },
+      { text: "Düsentemperatur etwas erhöhen", aenderung: { k: "duese", d: 5, max: 300 } },
+    ] },
+  { id: "stuetzen", name: "Stützen versagen", kurz: "Stützen kippen oder lösen sich",
+    ursachen: ["Zu dünne Baumstützen", "Kleine Auflage auf dem Bett"],
+    loesungen: [
+      { text: "„Baum stark“ oder „Normal“ statt „Baum schlank“ wählen." },
+      { text: "Rand für Stützen einschalten (Stützen › Rand)." },
+    ] },
+  { id: "trennung", name: "Schichten trennen sich", kurz: "Teil bricht entlang der Schichten",
+    ursachen: ["Düse zu kalt", "Lüfter zu stark", "Material feucht"],
+    loesungen: [
+      { text: "Düsentemperatur erhöhen", aenderung: { k: "duese", d: 5, max: 300 } },
+      { text: "Bauteillüfter reduzieren", aenderung: { k: "luefter_max", d: -20, min: 0 } },
+      { text: "Bei ASA/ABS Haube geschlossen lassen." },
+    ] },
+  { id: "elefantenfuss", name: "Elefantenfuß", kurz: "Unterste Schichten stehen über",
+    ursachen: ["Bett zu heiß", "Erste Schicht zu dick gequetscht"],
+    loesungen: [
+      { text: "Betttemperatur senken", aenderung: { k: "bett", d: -5, min: 0 } },
+      { text: "„Elefantenfuß-Kompensation“ in Bambu Studio auf 0,15 mm setzen." },
+    ] },
+  { id: "pickel", name: "Pickel und Kleckse", kurz: "Kleine Knubbel auf der Oberfläche",
+    ursachen: ["Zu viel Material (Flow)", "Naht verteilt auf „Zufällig“", "Feuchtes Filament"],
+    loesungen: [
+      { text: "Flow Ratio leicht senken", aenderung: { k: "flow", d: -0.02, min: 0.85 } },
+      { text: "Nahtposition auf „Ausgerichtet“ oder „Hinten“ stellen." },
+    ] },
+  { id: "geisterbild", name: "Wellen hinter Kanten (Ghosting)", kurz: "Echo-Muster nach Ecken",
+    ursachen: ["Schwingungen bei hoher Geschwindigkeit", "Lockere Riemen"],
+    loesungen: [
+      { text: "Außenwand langsamer", aenderung: { k: "v_aussen", f: 0.8, min: 20 } },
+      { text: "Vibrations-Kalibrierung am Drucker neu laufen lassen." },
+    ] },
+  { id: "naht", name: "Sichtbare Naht", kurz: "Senkrechte Linie, wo jede Schicht beginnt",
+    ursachen: ["Druckdruck beim Start und Ende der Wand (K-Faktor)"],
+    loesungen: [
+      { text: "Flussdynamik (K-Faktor) kalibrieren (Hilfe › Kalibrierung)." },
+      { text: "Naht in eine Ecke legen: Nahtposition „Ausgerichtet“." },
+    ] },
+];
+const fehlerbild = (id) => FEHLERBILDER.find((f) => f.id === id);
+
+// Was eine Änderung konkret bedeutet: aktueller Wert → neuer Wert
+function aenderungRechnen(rolle, a) {
+  const alt = wert(rolle, a.k).v;
+  if (alt == null) return null;
+  let neu = a.f != null ? alt * a.f : alt + a.d;
+  if (a.min != null) neu = Math.max(a.min, neu);
+  if (a.max != null) neu = Math.min(a.max, neu);
+  const f = FELDER.find((x) => x.k === a.k);
+  const st = f ? f.step : 1;
+  neu = Math.round(neu / st) * st;
+  if (Math.abs(neu - alt) < 1e-9) return null;
+  return { k: a.k, alt, neu, feld: f };
+}
+
+// Fragenkatalog für Fehldrucke
+const FEHL_FRAGEN = {
+  wann: [
+    { id: "erste", name: "Erste Schicht", hinweis: "Fast immer Haftung: Bett sauber, Temperatur, erste Schicht." },
+    { id: "frueh", name: "Im ersten Drittel", hinweis: "Häufig Haftung oder Verzug, der langsam die Ecken anhebt." },
+    { id: "mitte", name: "Mittendrin", hinweis: "Oft Stützen, Kollision mit hochgebogenen Teilen oder verstopfte Düse." },
+    { id: "spaet", name: "Gegen Ende", hinweis: "Hitzestau, Verzug bei hohen Teilen oder Filament fast leer/feucht." },
+  ],
+  extra: [
+    { id: "getrocknet", frage: "War die Rolle frisch getrocknet?", ja: null, nein: "feucht" },
+    { id: "bett_sauber", frage: "War das Druckbett frisch gereinigt?", ja: null, nein: "haftung" },
+    { id: "haube", frage: "War die Haube/Tür geschlossen?", ja: null, nein: "warping" },
+  ],
+};
+// Aus Fortschritt (%) eine Antwort für „Wann?“ vorschlagen
+const wannAusFortschritt = (p) => (p == null ? null : p < 3 ? "erste" : p < 33 ? "frueh" : p < 80 ? "mitte" : "spaet");
+
+// Kalibrierungen (Bambu Studio › Kalibrierung)
+const KALIBRIERUNGEN = [
+  { id: "temp", name: "Temperaturturm", feld: "duese", icon: "🌡️",
+    wozu: "Findet die beste Düsentemperatur für eine Rolle: sauber, ohne Fäden, mit fester Schichthaftung.",
+    so: ["Bambu Studio › Kalibrierung › Temperatur.", "Material wählen, Bereich vorgeben (z. B. 230 → 190 °C bei PLA).", "Drucken. Jede Stufe hat eine andere Temperatur."],
+    achten: ["Unten heiß, oben kalt: die Stufe mit sauberen Brücken, wenig Fäden und ohne Lücken wählen.", "Turm oben abbrechen: wenn er leicht bricht, ist es zu kalt."],
+    fehler: ["Fäden an den heißen Stufen (zu heiß oder feucht)", "Brücken hängen durch", "Turm bricht bei kalten Stufen"],
+    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="38" y="${70 - i * 13}" width="44" height="12" fill="hsl(${10 + i * 28} 70% 55%)"/><text x="88" y="${79 - i * 13}" font-size="7" fill="#8da49a">${230 - i * 5}°</text>`).join("")}</svg>` },
+  { id: "flow", name: "Flow Rate", feld: "flow", icon: "💧",
+    wozu: "Stimmt, wie viel Material gefördert wird. Zu viel macht Pickel und raue Deckflächen, zu wenig Lücken.",
+    so: ["Bambu Studio › Kalibrierung › Flow-Rate › Durchgang 1.", "Die glatteste Fläche wählen und die Zahl eintragen.", "Optional Durchgang 2 für die Feinabstimmung."],
+    achten: ["Mit dem Finger über die Oberflächen fahren: die glatteste ohne Rillen und ohne Wülste.", "Bei Lücken zwischen den Linien ist der Wert zu klein."],
+    fehler: ["Deckfläche mit Rillen (zu wenig)", "Wülste und Pickel (zu viel)", "Flächen unterscheiden sich kaum: Material feucht oder Temperatur falsch"],
+    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => `<rect x="${8 + (i % 3) * 36}" y="${10 + Math.floor(i / 3) * 24}" width="30" height="20" rx="3" fill="#3ee6a8" opacity="${i === 4 ? 1 : 0.45}"/>`).join("")}</svg>` },
+  { id: "k", name: "Flussdynamik (K-Faktor)", feld: "k", icon: "📈",
+    wozu: "Gleicht den Druck in der Düse beim Beschleunigen und Bremsen aus. Saubere Ecken, gleichmäßige Wände, weniger Naht.",
+    so: ["Bambu Studio › Kalibrierung › Flussdynamik › Manuell (Linien-Methode).", "Die Linie mit der gleichmäßigsten Breite wählen.", "Den K-Wert eintragen und in Bambu Studio als PA-Profil speichern."],
+    achten: ["Gerade, gleich breite Linie ohne dicken Anfang und dünnes Ende.", "Bei 0,2-mm-Düse und TPU ist der Wert anders, eigenes Profil anlegen."],
+    fehler: ["Dicke Ecken und Wulst an der Naht (K zu klein)", "Lücken nach Ecken (K zu groß)"],
+    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5].map((i) => `<path d="M10 ${12 + i * 12} H40 L${40 + 4} ${12 + i * 12} H110" stroke="#3ee6a8" stroke-width="${i === 3 ? 3 : 2 + Math.abs(i - 3) * 0.6}" opacity="${i === 3 ? 1 : 0.5}" stroke-dasharray="${i < 3 ? "30 2 80 0" : "30 4 80 0"}"/>`).join("")}</svg>` },
+  { id: "maxvol", name: "Max. Volumenstrom", feld: "max_vol", icon: "🚀",
+    wozu: "Wie viel mm³/s die Düse schmelzen kann, bevor Lücken entstehen. Begrenzt das Tempo, damit der Druck nicht unterextrudiert.",
+    so: ["Bambu Studio › Kalibrierung › Max. Volumenstrom.", "Turm drucken, die Höhe ablesen, ab der die Wand Lücken bekommt.", "Höhe × Schritt + Start ergibt den Wert, davon 10–20 % abziehen."],
+    achten: ["Die Stelle, an der die Oberfläche matt und löchrig wird.", "Lieber etwas vorsichtiger eintragen."],
+    fehler: ["Ganzer Turm löchrig: Temperatur zu niedrig", "Kein Wechsel sichtbar: Bereich zu klein gewählt"],
+    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/><path d="M40 82 L50 10 L70 10 L80 82 Z" fill="#3ee6a8" opacity=".85"/><path d="M48 30 H72" stroke="#ff6b6b" stroke-width="2" stroke-dasharray="3 2"/><text x="78" y="32" font-size="8" fill="#ff6b6b">Lücken ab hier</text></svg>` },
+];
+
+// ---- Bambu Lab P1S: Bereiche der Zeichnung ----
+// x/y = Punkt in der Zeichnung (viewBox 420 × 440), live = Wert aus Home Assistant
+const P1S_BEREICHE = [
+  { id: "duese", n: 1, x: 214, y: 196, name: "Düse und Hotend", live: "duese", einheit: "°C",
+    text: "Hier wird das Filament geschmolzen. Die Temperatur entscheidet über Haftung der Schichten, Glanz und Fäden.",
+    einst: [["Düse erste Schicht / weitere", "Etwas heißer in der ersten Schicht verbessert die Haftung."], ["Düsendurchmesser", "0,2 fein und langsam, 0,4 Standard, 0,6 schnell und stabil."], ["Flow Ratio", "Wie viel Material genau gefördert wird."]] },
+  { id: "extruder", n: 2, x: 214, y: 140, name: "Extruder", live: null,
+    text: "Zahnräder schieben das Filament in die Düse. Von hier kommen Rückzug, Flussdynamik und das Förderlimit.",
+    einst: [["Rückzug (Retraction)", "Zieht das Filament beim Verfahren zurück, gegen Fäden."], ["K-Faktor", "Gleicht den Druck beim Beschleunigen aus."], ["Max. Volumenstrom", "Obergrenze für mm³/s, sonst Lücken."]] },
+  { id: "luefter", n: 3, x: 246, y: 178, name: "Bauteillüfter", live: "l_bauteil", einheit: "%",
+    text: "Kühlt die frische Schicht. Viel Luft für PLA und Überhänge, wenig für ASA/ABS/PETG.",
+    einst: [["Lüfter min. / max.", "Bereich, in dem der Lüfter je nach Schichtzeit läuft."], ["Überhang-Lüfter", "Volle Kühlung an Überhängen und Brücken."]] },
+  { id: "riemen", n: 4, x: 110, y: 88, name: "Riemen und Kohlestangen (X/Y)", live: "tempo",
+    text: "Bewegen den Druckkopf. Geschwindigkeit und Beschleunigung wirken hier, zu viel davon macht Wellen hinter Kanten.",
+    einst: [["Geschwindigkeiten", "Außenwand langsamer für schöne Oberflächen, Füllung schnell."], ["Beschleunigung", "Höher = schneller, aber mehr Schwingungen."], ["Geschwindigkeitsprofil am Drucker", "Leise, Standard, Sport, Wahnsinn."]] },
+  { id: "bett", n: 5, x: 210, y: 300, name: "Druckbett", live: "bett", einheit: "°C",
+    text: "Heizbett mit wechselbarer Platte. Platte und Temperatur entscheiden über Haftung und Elefantenfuß.",
+    einst: [["Druckbetttyp", "Textured PEI für fast alles, Cool Plate für PLA, Engineering für Kleber."], ["Betttemperatur", "PLA 55 °C, PETG 70 °C, ASA 100 °C."], ["Erste Schicht", "Höhe und Tempo der ersten Schicht."]] },
+  { id: "z", n: 6, x: 76, y: 262, name: "Z-Achse (Spindeln)", live: null,
+    text: "Senkt das Bett Schicht für Schicht ab. Hier wirken Schichthöhe und Z-Hop.",
+    einst: [["Schichthöhe", "0,2 mm Standard, 0,12 fein, 0,28 schnell (bei 0,4-mm-Düse)."], ["Z-Hop", "Hebt beim Verfahren an, verhindert Anstoßen."]] },
+  { id: "aux", n: 7, x: 36, y: 190, name: "Hilfslüfter (seitlich)", live: null,
+    text: "Großer Lüfter an der Seite für zusätzliche Kühlung. Gut für PLA bei hohem Tempo, bei ASA/ABS aus.",
+    einst: [["Hilfslüfter", "In Bambu Studio unter Filament › Kühlung."]] },
+  { id: "kammer", n: 8, x: 372, y: 64, name: "Druckraumlüfter", live: "l_raum", einheit: "%",
+    text: "Saugt warme Luft ab. Bei PLA gegen Hitzestau, bei ASA/ABS gering halten, damit es warm bleibt.",
+    einst: [["Kammerlüfter", "Filament › Kühlung › Druckraumlüfter."]] },
+  { id: "spule", n: 9, x: 402, y: 210, name: "Spulenhalter und PTFE", live: "filament",
+    text: "Die Rolle hängt hinten. Ohne AMS läuft das Filament durch den PTFE-Schlauch zum Druckkopf.",
+    einst: [["Trocknen", "Feuchtes Filament macht Fäden und Blasen."], ["Abrollen", "Rolle muss frei laufen, sonst Lücken."]] },
+  { id: "kamera", n: 10, x: 58, y: 54, name: "Kamera", live: null,
+    text: "Zeigt den Druck live und macht das Endfoto. Die Fehlererkennung (Spaghetti) läuft darüber.",
+    einst: [["Druckfehlererkennung", "Am Drucker unter Einstellungen einschalten."]] },
+  { id: "display", n: 11, x: 110, y: 404, name: "Display", live: "schritt",
+    text: "Bedienung am Gerät: Filament laden, Extruder fahren, Geschwindigkeitsprofil, Kalibrierung.",
+    einst: [["Extruder fahren", "Vor dem Druck 3× fördern (wird beim Verbuchen eingerechnet)."]] },
+  { id: "schneider", n: 12, x: 180, y: 158, name: "Filament-Schneider", live: null,
+    text: "Schneidet beim Entladen das Filament ab. Das Reststück bis zur Düse wird beim Rollenwechsel der alten Rolle abgezogen.",
+    einst: [["Reststück", "Etwa 4–5 cm, rund 0,15 g."]] },
+];
+
+function p1sSvg(aktiv) {
+  const linie = 'stroke="#5d726a" stroke-width="1.4" fill="none"';
+  return `<svg viewBox="0 0 420 440" class="p1s-bild" role="img" aria-label="Zeichnung Bambu Lab P1S">
+    <defs><pattern id="p1s-raster" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M10 0 H0 V10" stroke="rgba(62,230,168,.06)" fill="none"/></pattern></defs>
+    <rect x="0" y="0" width="420" height="440" fill="url(#p1s-raster)"/>
+    <!-- Gehäuse -->
+    <rect x="20" y="24" width="370" height="400" rx="14" ${linie}/>
+    <rect x="34" y="40" width="342" height="330" rx="6" stroke="#3ee6a8" stroke-opacity=".35" stroke-width="1" fill="rgba(62,230,168,.03)"/>
+    <path d="M34 40 L376 40" stroke="#5d726a" stroke-width="3"/>
+    <!-- Kammerlüfter hinten oben -->
+    <circle cx="372" cy="64" r="12" ${linie}/><path d="M372 52 V76 M360 64 H384" stroke="#5d726a"/>
+    <!-- Kamera -->
+    <rect x="48" y="48" width="20" height="12" rx="3" ${linie}/><circle cx="58" cy="54" r="3" fill="#5d726a"/>
+    <!-- Kohlestangen + Riemen -->
+    <path d="M44 88 H366" stroke="#8da49a" stroke-width="3"/><path d="M44 96 H366" stroke="#5d726a" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <path d="M44 88 V120 M366 88 V120" ${linie}/>
+    <!-- Druckkopf -->
+    <rect x="178" y="98" width="72" height="84" rx="8" fill="rgba(141,164,154,.10)" stroke="#8da49a" stroke-width="1.6"/>
+    <rect x="190" y="110" width="48" height="36" rx="4" ${linie}/><circle cx="214" cy="128" r="10" ${linie}/>
+    <circle cx="246" cy="164" r="11" ${linie}/><path d="M238 164 H254 M246 156 V172" stroke="#5d726a"/>
+    <path d="M178 150 L170 158 L182 162" ${linie}/>
+    <path d="M206 182 L222 182 L218 194 L210 194 Z" fill="#8da49a"/><path d="M212 194 L216 194 L214 200 Z" fill="#ffb547"/>
+    <!-- PTFE zur Spule -->
+    <path d="M214 98 C214 60 330 50 380 130 C392 150 396 180 400 196" stroke="#ffb547" stroke-opacity=".7" stroke-width="2" fill="none" stroke-dasharray="5 3"/>
+    <!-- Spule hinten -->
+    <circle cx="402" cy="210" r="14" stroke="#ffb547" stroke-width="2" fill="rgba(255,181,71,.12)"/><circle cx="402" cy="210" r="4" fill="#ffb547"/>
+    <!-- Hilfslüfter seitlich -->
+    <rect x="22" y="160" width="14" height="60" rx="3" ${linie}/><path d="M24 170 H34 M24 180 H34 M24 190 H34 M24 200 H34 M24 210 H34" stroke="#5d726a"/>
+    <!-- Z-Spindeln -->
+    <path d="M76 120 V360 M344 120 V360" stroke="#8da49a" stroke-width="2.5" stroke-dasharray="2 3"/>
+    <!-- Druckbett -->
+    <path d="M70 286 L350 286 L362 306 L58 306 Z" fill="rgba(62,230,168,.10)" stroke="#3ee6a8" stroke-width="1.6"/>
+    <rect x="58" y="306" width="304" height="8" fill="rgba(62,230,168,.25)"/>
+    <!-- kleines Druckteil -->
+    <rect x="196" y="268" width="36" height="22" rx="2" fill="#3ee6a8" opacity=".7"/>
+    <!-- Display + Tür -->
+    <rect x="70" y="390" width="80" height="26" rx="4" stroke="#8da49a" stroke-width="1.4" fill="rgba(62,230,168,.06)"/>
+    <path d="M78 403 H110" stroke="#3ee6a8" stroke-width="2"/>
+    <path d="M34 370 H376" ${linie}/>
+    ${P1S_BEREICHE.map((b) => `<g class="p1s-punkt ${aktiv === b.id ? "an" : ""}" data-aktion="hi-p1s" data-id="${b.id}" tabindex="0">
+      <circle cx="${b.x}" cy="${b.y}" r="16" class="p1s-flaeche"/>
+      <circle cx="${b.x}" cy="${b.y}" r="10" class="p1s-ring"/><text x="${b.x}" y="${b.y + 3.5}" text-anchor="middle">${b.n}</text></g>`).join("")}
+  </svg>`;
+}
+
+// ---- Sovol-Trockner: Bereiche des Displays ----
+const TROCKNER_BEREICHE = [
+  { id: "material", name: "Material", x: 92, y: 236, text: "Voreinstellung für das Material. Setzt Temperatur und Zeit. Für eigene Werte „Custom“ wählen und anpassen." },
+  { id: "feuchte", name: "Luftfeuchte", x: 162, y: 236, text: "Relative Feuchte im Trockner. Ziel: unter 15 % für PLA/PETG, unter 10 % für ASA, TPU, PA. Sinkt sie nicht mehr, ist die Rolle trocken." },
+  { id: "soll", name: "Soll-Temperatur", x: 232, y: 236, text: "Die eingestellte Temperatur. Nie über die Erweichungstemperatur, sonst verkleben die Windungen (PLA max. 55 °C)." },
+  { id: "ist", name: "Ist-Temperatur", x: 296, y: 236, text: "Aktuelle Temperatur im Inneren. Sie erreicht den Sollwert nach etwa 20–30 Minuten, die Zeit zählt aber sofort." },
+  { id: "zeit", name: "Restzeit", x: 360, y: 236, text: "Verbleibende Trocknungszeit. Danach Rolle warm luftdicht einpacken oder direkt aus dem Trockner drucken." },
+  { id: "spulen", name: "Zwei Spulenplätze", x: 200, y: 110, text: "Zwei Rollen gleichzeitig. Nur Materialien mit ähnlicher Temperatur zusammen trocknen, sonst nach dem empfindlicheren richten." },
+  { id: "auslass", name: "Filament-Auslass", x: 386, y: 96, text: "Durch die Öffnung kann direkt aus dem Trockner gedruckt werden. Gut für TPU und PETG bei langen Drucken." },
+];
+function trocknerSvg(aktiv) {
+  const l = 'stroke="#8da49a" stroke-width="1.5" fill="none"';
+  const spule = (cx) => `<circle cx="${cx}" cy="110" r="54" stroke="#ffb547" stroke-width="2" fill="rgba(255,181,71,.08)"/>
+    <circle cx="${cx}" cy="110" r="40" stroke="#ffb547" stroke-opacity=".5" fill="none"/><circle cx="${cx}" cy="110" r="10" fill="#ffb547" opacity=".6"/>`;
+  return `<svg viewBox="0 0 440 290" class="trockner-bild" role="img" aria-label="Zeichnung Sovol Filament-Trockner">
+    <rect x="20" y="20" width="400" height="250" rx="22" ${l}/>
+    <rect x="34" y="32" width="372" height="160" rx="14" stroke="#5cc8ff" stroke-opacity=".4" stroke-width="1.4" fill="rgba(92,200,255,.05)"/>
+    ${spule(130)}${spule(310)}
+    <path d="M386 84 h20" stroke="#ffb547" stroke-width="2"/><circle cx="406" cy="84" r="4" fill="none" stroke="#8da49a"/>
+    <rect x="60" y="206" width="330" height="54" rx="10" fill="rgba(0,0,0,.35)" stroke="#3ee6a8" stroke-opacity=".5"/>
+    <text x="92" y="228" class="tr-wert" text-anchor="middle">PETG</text>
+    <text x="162" y="228" class="tr-wert" text-anchor="middle">12 %</text>
+    <text x="232" y="228" class="tr-wert" text-anchor="middle">65°</text>
+    <text x="296" y="228" class="tr-wert" text-anchor="middle">63°</text>
+    <text x="360" y="228" class="tr-wert" text-anchor="middle">05:40</text>
+    ${TROCKNER_BEREICHE.map((b) => `<g class="p1s-punkt ${aktiv === b.id ? "an" : ""}" data-aktion="hi-tr" data-id="${b.id}" tabindex="0">
+      <rect x="${b.x - 30}" y="${b.y - (b.id === "spulen" ? 60 : 12)}" width="60" height="${b.id === "spulen" ? 120 : 24}" rx="8" class="p1s-flaeche"/>
+      <circle cx="${b.x}" cy="${b.y + (b.id === "spulen" ? 70 : 14)}" r="9" class="p1s-ring"/><text x="${b.x}" y="${b.y + (b.id === "spulen" ? 73.5 : 17.5)}" text-anchor="middle">${TROCKNER_BEREICHE.indexOf(b) + 1}</text></g>`).join("")}
+  </svg>`;
+}
+
+// Trocknen je Material (Richtwerte, Sovol max. 70 °C)
+const TROCKNEN_TABELLE = [
+  { m: "PLA", temp: 50, h: 6, ziel: 15, zeichen: "Fäden, matte Stellen, spröde Rolle", lagern: "Beutel mit Trockenmittel reicht meist." },
+  { m: "PLA Silk / Matte", temp: 50, h: 6, ziel: 15, zeichen: "Glanz geht verloren, Fäden", lagern: "Wie PLA." },
+  { m: "Wood-PLA", temp: 45, h: 6, ziel: 15, zeichen: "Verstopfte Düse, raue Oberfläche", lagern: "Trocken lagern, nicht mit 0,2-mm-Düse." },
+  { m: "PETG", temp: 65, h: 6, ziel: 15, zeichen: "Knistern, Blasen, viele Fäden", lagern: "Zieht schnell Wasser, luftdicht lagern." },
+  { m: "ASA", temp: 70, h: 6, ziel: 10, zeichen: "Blasen, schwache Schichthaftung", lagern: "Luftdicht mit Trockenmittel." },
+  { m: "ABS", temp: 70, h: 4, ziel: 10, zeichen: "Blasen, raue Oberfläche", lagern: "Luftdicht mit Trockenmittel." },
+  { m: "TPU", temp: 55, h: 8, ziel: 10, zeichen: "Starkes Knistern, Fäden ohne Ende", lagern: "Direkt aus dem Trockner drucken." },
+  { m: "PC", temp: 70, h: 8, ziel: 10, zeichen: "Blasen, trübe Oberfläche", lagern: "Am besten im Trockner lassen." },
+  { m: "PA / Nylon", temp: 70, h: 12, ziel: 10, zeichen: "Knistern, weiche Teile", lagern: "Nur aus dem Trockner drucken." },
+];
+
+// ---- Wartung (Stunden aus der „Gesamtnutzung“ des Druckers) ----
+const WARTUNG_AUFGABEN = [
+  { id: "platte", name: "Druckplatte reinigen", alle_h: 10, alle_tage: 7, text: "Spülmittel und warmes Wasser, abtrocknen, nicht mehr anfassen." },
+  { id: "stangen", name: "Kohlestangen reinigen", alle_h: 100, alle_tage: 30, text: "Mit trockenem Tuch oder etwas Isopropanol abwischen. Nicht ölen." },
+  { id: "duese", name: "Düse und Silikonsocke prüfen", alle_h: 200, alle_tage: 60, text: "Verkrustungen entfernen, Socke auf Risse prüfen." },
+  { id: "luefter", name: "Lüfter von Staub befreien", alle_h: 300, alle_tage: 90, text: "Hotend-, Bauteil- und Kammerlüfter mit Pinsel oder Druckluft." },
+  { id: "spindeln", name: "Z-Spindeln schmieren", alle_h: 300, alle_tage: 90, text: "Alte Schmiere abwischen, dünn neues Fett (Bambu-Schmierfett) auftragen." },
+  { id: "riemen", name: "Riemenspannung prüfen", alle_h: 300, alle_tage: 90, text: "Am Drucker: Einstellungen › Riemenspannung, danach Vibrations-Kalibrierung." },
+  { id: "ptfe", name: "PTFE-Schlauch und Schneider prüfen", alle_h: 500, alle_tage: 180, text: "Schlauch auf Knicke und Abrieb, Schneider auf stumpfe Klinge prüfen." },
+  { id: "filter", name: "Aktivkohlefilter tauschen", alle_h: 500, alle_tage: 180, text: "Vor allem, wenn du oft ASA/ABS druckst." },
+  { id: "kalibrieren", name: "Komplette Kalibrierung", alle_h: 500, alle_tage: 180, text: "Bett-Nivellierung, Vibration und Motoren am Drucker neu kalibrieren." },
+];
+// Verschleißteile mit Richtwert für die Lebensdauer in Druckstunden
+const ERSATZTEILE_STANDARD = [
+  { id: "duese04", name: "Düse 0,4 mm gehärtet", lebensdauer_h: 2000, eingebaut_h: 0 },
+  { id: "platte", name: "Textured PEI Plate", lebensdauer_h: 1500, eingebaut_h: 0 },
+  { id: "socke", name: "Silikonsocke Hotend", lebensdauer_h: 500, eingebaut_h: 0 },
+  { id: "ptfe", name: "PTFE-Schlauch", lebensdauer_h: 1000, eingebaut_h: 0 },
+  { id: "filter", name: "Aktivkohlefilter", lebensdauer_h: 500, eingebaut_h: 0 },
+  { id: "riemen", name: "Riemen X/Y", lebensdauer_h: 3000, eingebaut_h: 0 },
+];
+
+// ---- Unscharfe Suche ----
+function normText(s) {
+  return String(s || "").toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss").replace(/[^a-z0-9,.]+/g, " ").trim();
+}
+function wortAbstand(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 9;
+  const z = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let vor = z[0]; z[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const t = z[j];
+      z[j] = Math.min(z[j] + 1, z[j - 1] + 1, vor + (a[i - 1] === b[j - 1] ? 0 : 1));
+      vor = t;
+    }
+  }
+  return z[b.length];
+}
+// Punktzahl: 0 = passt nicht. Jedes Suchwort muss passen (genau, Anfang, enthalten oder vertippt)
+function suchPunkte(anfrage, text) {
+  const woerter = normText(anfrage).split(" ").filter(Boolean);
+  if (!woerter.length) return 0;
+  const t = normText(text), teile = t.split(" ");
+  let summe = 0;
+  for (const w of woerter) {
+    let best = 0;
+    if (t.includes(w)) best = 3;
+    for (const x of teile) {
+      if (x === w) best = Math.max(best, 4);
+      else if (x.startsWith(w)) best = Math.max(best, 3.5);
+      else if (w.length >= 4 && wortAbstand(w, x.slice(0, w.length + 1)) <= (w.length >= 7 ? 2 : 1)) best = Math.max(best, 1.5);
+    }
+    if (!best) return 0;
+    summe += best;
+  }
+  return summe;
 }
 // ---------------------------------------------------------------------------
 // Aussehen: dunkler Tech-Look, Mint-Akzente, Glas-Karten, Rasterhintergrund
@@ -947,6 +1349,62 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .stuetz-eintrag { display: flex; gap: 14px; align-items: center; padding: 10px; border-radius: 14px; background: var(--flaeche); border: 1px solid var(--rand); }
 .stuetz-eintrag p { margin: 2px 0 0; }
 .stuetz-bild { width: 110px; height: 69px; flex: none; border-radius: 10px; background: rgba(0,0,0,.3); }
+/* Verbuchen */
+.bu-balken { position: relative; z-index: 2; display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 24px;
+  background: linear-gradient(90deg, rgba(62,230,168,.18), rgba(62,230,168,.06)); border-bottom: 1px solid rgba(62,230,168,.35); animation: balken-rein .35s cubic-bezier(.2,.9,.3,1.1); }
+.bu-balken.rot { background: linear-gradient(90deg, rgba(255,107,107,.26), rgba(255,107,107,.08)); border-bottom-color: rgba(255,107,107,.5); }
+@keyframes balken-rein { from { transform: translateY(-100%); opacity: 0; } }
+.bu-text { font-size: 14px; min-width: 0; }
+.bu-knoepfe { display: flex; gap: 8px; }
+.bu-mehr { font-size: 12px; color: var(--leise); margin-left: 6px; }
+.mobil .bu-balken { padding: 10px 16px; }
+.mobil .bu-knoepfe { width: 100%; }
+.mobil .bu-knoepfe .knopf { flex: 1; }
+.dialog-x { position: absolute; top: 12px; right: 12px; }
+.bu-dialog h2 { padding-right: 36px; }
+.bu-kopf { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; }
+.bu-kopf .ld-bild { width: 64px; height: 64px; }
+.bu-kopf p { margin: 2px 0 0; }
+.bu-rollen { display: grid; gap: 8px; margin-bottom: 8px; }
+.bu-rolle { position: relative; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; border-radius: 14px; background: var(--flaeche); border: 1px solid var(--rand); transition: border-color .15s, background .15s, transform .15s; }
+.bu-rolle:hover { border-color: rgba(62,230,168,.4); }
+.bu-rolle:active { transform: scale(.98); }
+.bu-rolle.an { border-color: var(--mint); background: var(--mint-weich); box-shadow: 0 0 0 3px rgba(62,230,168,.12); }
+.bu-rolle svg { width: 44px; height: 44px; flex: none; }
+.bu-rolle-text { display: grid; gap: 1px; min-width: 0; }
+.bu-rolle-text small { font-size: 12px; color: var(--leise); }
+.bu-rolle-text small.mint { color: var(--mint); }
+.achtung-punkt { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--rot); color: #fff; font-weight: 800; font-size: 14px; flex: none; box-shadow: 0 0 0 4px rgba(255,107,107,.2); animation: puls 2s ease-in-out infinite; }
+@keyframes puls { 50% { box-shadow: 0 0 0 7px rgba(255,107,107,.08); } }
+.bu-rolle .achtung-punkt { position: absolute; top: 8px; right: 8px; }
+.kachel-achtung { position: absolute; top: 10px; left: 10px; z-index: 1; }
+.achtung-hinweis { display: flex; gap: 12px; align-items: center; }
+.achtung-hinweis > div { flex: 1; display: grid; gap: 2px; }
+.achtung-hinweis small { font-size: 12px; opacity: .85; }
+.achtung-hinweis .mini { margin: 0; color: var(--mint); border-color: rgba(62,230,168,.4); }
+.chip.rot-chip.an { background: rgba(255,107,107,.16); border-color: rgba(255,107,107,.5); color: var(--rot); }
+.bu-ergebnis { margin: 6px 0; }
+.bu-bilder { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.bu-bild { display: grid; gap: 4px; justify-items: center; text-align: center; padding: 8px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); font-size: 12px; line-height: 1.25; transition: border-color .15s, background .15s; }
+.bu-bild.an { border-color: var(--amber); background: rgba(255,181,71,.10); }
+.fb-bild { width: 100%; max-width: 110px; height: auto; border-radius: 8px; background: rgba(0,0,0,.3); }
+.bu-frage { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--rand); font-size: 14px; }
+.bu-frage .chip { padding: 5px 12px; }
+.bu-ursache { border: 1px solid var(--rand); border-radius: 14px; padding: 12px; margin: 10px 0; background: var(--flaeche); }
+.bu-ursache-kopf { display: flex; gap: 12px; align-items: center; }
+.bu-ursache-kopf .fb-bild { width: 84px; flex: none; }
+.bu-ursache-kopf > div { display: grid; gap: 2px; }
+.bu-ursache-kopf small { font-size: 12px; }
+.bu-loesungen { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.bu-loesungen li { display: flex; gap: 10px; align-items: flex-start; }
+.bu-haken { width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--mint); color: #062018; font-size: 13px; font-weight: 800; flex: none; display: grid; place-items: center; transition: background .15s; }
+.bu-haken.an { background: var(--mint); }
+.bu-punkt { width: 22px; text-align: center; color: var(--leise); flex: none; }
+.bu-aend { display: inline-block; margin-top: 2px; font-size: 12px; color: var(--amber); }
+.bu-aend strong { color: var(--text); }
+.feld { display: grid; gap: 4px; margin: 10px 0; font-size: 13px; color: var(--leise); }
+.feld input { padding: 11px 12px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; font-size: 15px; }
+.feld input:focus, textarea:focus { outline: none; border-color: rgba(62,230,168,.6); }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -1696,12 +2154,13 @@ const DruckerAnsicht = {
       this._drVerlaufFehler = e.message || String(e);
     }
     this._drVerlaufLaedt = false;
-    if (this._ansicht === "drucker") this._zeichnen();
+    if (!this._modus && !this._ddOffen) this._zeichnen();
     this._drFotosLaden();
+    this._buNachLaden();
   },
   async _drFotosLaden() {
     this._drFotos = this._drFotos || {};
-    for (const d of (this._drVerlauf || []).slice(0, 12)) {
+    for (const d of this._buAlle().slice(0, 30)) {
       const f = fotoName(d);
       if (!f || f in this._drFotos) continue;
       this._drFotos[f] = null;
@@ -1715,7 +2174,7 @@ const DruckerAnsicht = {
   },
 
   _drVerlaufHtml() {
-    const liste = this._drVerlauf;
+    const liste = this._drVerlauf ? this._buAlle() : null;
     let inhalt;
     if (!liste) inhalt = `<div class="leise klein">Lade Druckverlauf …</div>`;
     else if (this._drVerlaufFehler) inhalt = `<div class="hinweis amber">Die Liste „3D-Drucke“ konnte nicht gelesen werden: ${esc(this._drVerlaufFehler)}</div>`;
@@ -1726,11 +2185,13 @@ const DruckerAnsicht = {
         const f = fotoName(d);
         const foto = f && this._drFotos && this._drFotos[f];
         const extra = (this._daten.drucke || {})[d.uid] || {};
-        const [st, farbe] = d.status === "finish" ? ["fertig", "mint"] : d.status === "failed" ? ["fehlgeschlagen", "rot"] : d.status === "laeuft" ? ["ohne Abschluss", "amber"] : [d.status, "leise"];
+        const g = extra.gebucht;
+        const [st, farbe] = g ? (g.ergebnis === "fehl" ? ["Fehldruck", "rot"] : g.ergebnis === "anders" ? ["abgebrochen", "leise"] : ["verbucht", "mint"])
+          : d.status === "finish" ? ["fertig", "amber"] : d.status === "failed" ? ["abgebrochen", "rot"] : d.status === "laeuft" ? ["läuft / ohne Abschluss", "amber"] : [d.status, "leise"];
         return `<button class="dr-druck" data-aktion="dr-druck" data-uid="${esc(d.uid)}">
           <span class="ld-bild" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="">` : "🖼️"}</span>
           <span class="dr-druck-text"><strong>${esc(d.name)}</strong>
-            <small>${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g` : ""}${d.duese_mm ? ` · ${zahl(d.duese_mm, 1)} mm Düse` : ""}</small>
+            <small>${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g` : ""}${d.duese_mm ? ` · ${zahl(d.duese_mm, 1)} mm Düse` : ""}${g ? ` · ${esc((this._daten.rollen.find((r) => r.id === g.rolle) || {}).name || "")}` : ""}${d.hand ? " · von Hand" : ""}</small>
             ${extra.kommentar ? `<small class="dr-kommentar">💬 ${esc(extra.kommentar)}</small>` : ""}</span>
           <span class="pille ${farbe}">${st}</span>
         </button>`;
@@ -1738,11 +2199,11 @@ const DruckerAnsicht = {
       ${liste.length > 8 ? `<button class="mini mint-rand" data-aktion="dr-alle">${this._drAlle ? "Weniger zeigen" : `Alle ${liste.length} Drucke zeigen`}</button>` : ""}`;
     }
     return `<div class="dr-karte"><div class="dr-kamera-kopf"><h3 class="dr-titel">🗂️ Druckverlauf</h3>
-      <button class="chip" data-aktion="dr-neu-laden">↻ Aktualisieren</button></div>${inhalt}</div>`;
+      <span class="chips"><button class="chip" data-aktion="bu-hand">＋ Nachtragen</button><button class="chip" data-aktion="dr-neu-laden">↻ Aktualisieren</button></span></div>${inhalt}</div>`;
   },
 
   _drDialogHtml() {
-    const d = (this._drVerlauf || []).find((x) => x.uid === this._drOffen);
+    const d = this._buAlle().find((x) => x.uid === this._drOffen);
     if (!d) return "";
     const extra = (this._daten.drucke || {})[d.uid] || {};
     const f = fotoName(d);
@@ -1760,10 +2221,30 @@ const DruckerAnsicht = {
         ${zeile("Düse / Bett", d.duese_c ? `${zahl(d.duese_c)} °C / ${zahl(d.bett_c)} °C` : null)}
         ${zeile("Düse", d.duese_mm ? `${zahl(d.duese_mm, 1)} mm` : null)}
       </div>
+      ${this._drBuchungHtml(d, extra)}
       <h3>Kommentar</h3>
       <textarea id="dr-kommentar" rows="4" placeholder="z. B. warum abgebrochen, was du gelernt hast …">${esc(extra.kommentar || "")}</textarea>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Schließen</button>
         <button class="knopf" data-aktion="dr-kommentar-speichern">Speichern</button></div>`;
+  },
+
+  _drBuchungHtml(d, extra) {
+    const g = extra.gebucht;
+    if (!g) {
+      return BU_ENDE.includes(d.status) ? `<div class="hinweis amber oben-abstand">Noch nicht verbucht${extra.ignoriert ? " (übersprungen)" : ""}.
+        <button class="mini" data-aktion="bu-start" data-uid="${esc(d.uid)}">Jetzt verbuchen</button></div>` : "";
+    }
+    const rolle = this._daten.rollen.find((r) => r.id === g.rolle);
+    const k = g.kosten || {};
+    const kosten = (k.filament || 0) + (k.strom || 0);
+    const fehl = extra.fehl;
+    return `<h3>Verbucht</h3><div class="info-liste">
+      <div class="info-zeile"><span>Rolle</span><strong>${esc(rolle ? rolle.name : "gelöscht")}</strong></div>
+      <div class="info-zeile"><span>Abgezogen</span><strong>${zahl(g.g, 1)} g${g.wechsel ? ` + ${zahl(g.wechsel.g, 2)} g Reststück` : ""}</strong></div>
+      <div class="info-zeile"><span>Ergebnis</span><strong>${g.ergebnis === "fehl" ? "Fehldruck" : g.ergebnis === "anders" ? "anders überlegt" : "geglückt"}</strong></div>
+      ${kosten ? `<div class="info-zeile"><span>Kosten</span><strong>${zahl(kosten, 2)} €${k.kwh != null ? ` (${zahl(k.kwh, 3)} kWh)` : ""}</strong></div>` : ""}
+      ${fehl ? `<div class="info-zeile"><span>Ursachen</span><strong>${esc((fehl.ursachen || []).map((id) => (fehlerbild(id) || {}).name).filter(Boolean).join(", ") || "–")}</strong></div>` : ""}
+    </div><button class="mini" data-aktion="bu-rueckgaengig" data-uid="${esc(d.uid)}">Buchung rückgängig machen</button>`;
   },
 
   // ---- Steckdose schalten (immer mit Nachfrage) --------------------------
@@ -1846,6 +2327,426 @@ const DruckerAnsicht = {
       default: return;
     }
     this._zeichnen();
+  },
+};
+// ---------------------------------------------------------------------------
+// Verbuchen: nach jedem Druck fragen, welche Rolle benutzt wurde, und den
+// Verbrauch abziehen (Druck + Anfangslinie + Extruder-Fahrten, beim Rollenwechsel
+// das Reststück von der alten Rolle). Abbruch: Fehldruck oder anders überlegt.
+// Fehldruck: Fragenkatalog → Ursachen → Änderungen, rotes Ausrufezeichen an der Rolle.
+// ---------------------------------------------------------------------------
+
+const BU_ENDE = ["finish", "failed"];
+
+const BuchenAnsicht = {
+  // Alle Drucke: Liste aus Home Assistant + von Hand nachgetragene
+  _buAlle() {
+    const hand = Object.entries(this._daten.drucke || {}).filter(([, x]) => x.hand).map(([uid, x]) => ({
+      uid, titel: x.hand.name, name: x.hand.name, zeit: new Date(x.hand.start).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }),
+      gewicht: x.hand.gewicht, laenge: null, duese_c: null, bett_c: null, duese_mm: null, start: x.hand.start, ende: x.hand.start,
+      status: x.hand.status || "finish", fortschritt: x.hand.status === "failed" ? x.hand.fortschritt : 100, hand: true,
+    }));
+    return [...(this._drVerlauf || []), ...hand].sort((a, b) => (b.start || "").localeCompare(a.start || ""));
+  },
+  _buExtra(uid) { return (this._daten.drucke || {})[uid] || {}; },
+  _buOffene() {
+    if (!this._daten || !this._drVerlauf) return [];
+    const ab = this._daten.buchen_ab || "";
+    return this._buAlle().filter((d) => {
+      const x = this._buExtra(d.uid);
+      return BU_ENDE.includes(d.status) && !x.gebucht && !x.ignoriert && !d.hand && !d.erledigt && (d.ende || d.start || "") >= ab;
+    });
+  },
+
+  // Druckstatus beobachten: nach dem Ende den Verlauf neu laden (Automation schreibt mit Verzögerung)
+  _buHassNeu() {
+    if (!this._daten) return;
+    const s = this._drW && this._drW("status");
+    if (s && s !== this._buStatus) {
+      const vorher = this._buStatus;
+      this._buStatus = s;
+      if (vorher && ["running", "pause", "prepare"].includes(vorher) && BU_ENDE.includes(s)) {
+        [20000, 60000, 120000].forEach((t) => setTimeout(() => this._drVerlaufLaden(), t));
+      }
+    }
+  },
+
+  // Nach dem Laden des Verlaufs: einmal pro Sitzung von selbst nachfragen
+  _buNachLaden() {
+    const offen = this._buOffene();
+    if (!offen.length || this._modus || this._dialog) return;
+    this._buGezeigt = this._buGezeigt || new Set();
+    const d = offen.find((x) => !this._buGezeigt.has(x.uid));
+    if (!d) return;
+    this._buGezeigt.add(d.uid);
+    if (d.status === "failed") return;   // Abbruch: erst über den roten Balken fragen
+    this._buStarten(d.uid);
+    this._zeichnen();
+  },
+
+  // Balken oben: Abbruch rot, fertige Drucke mint
+  _buBalkenHtml() {
+    const offen = this._buOffene();
+    if (!offen.length || this._ansicht === "system") return "";
+    const d = offen[offen.length - 1];
+    const weitere = offen.length > 1 ? ` <span class="bu-mehr">+${offen.length - 1} weitere</span>` : "";
+    if (d.status === "failed") {
+      return `<div class="bu-balken rot" data-einmal="bu-${esc(d.uid)}" role="alert">
+        <span class="bu-text">⛔ <strong>${esc(d.name)}</strong> wurde abgebrochen${d.fortschritt != null ? ` (bei ${zahl(d.fortschritt)} %)` : ""}. Fehldruck oder anders überlegt?${weitere}</span>
+        <span class="bu-knoepfe"><button class="knopf rot-knopf klein-knopf" data-aktion="bu-start" data-uid="${esc(d.uid)}" data-ergebnis="fehl">Fehldruck</button>
+        <button class="knopf leise klein-knopf" data-aktion="bu-start" data-uid="${esc(d.uid)}" data-ergebnis="anders">Anders überlegt</button></span></div>`;
+    }
+    return `<div class="bu-balken" data-einmal="bu-${esc(d.uid)}">
+      <span class="bu-text">✅ <strong>${esc(d.name)}</strong> ist fertig${d.gewicht != null ? ` (${zahl(d.gewicht, 1)} g)` : ""}. Verbrauch verbuchen?${weitere}</span>
+      <span class="bu-knoepfe"><button class="knopf klein-knopf" data-aktion="bu-start" data-uid="${esc(d.uid)}">Verbuchen</button></span></div>`;
+  },
+
+  // ---- Dialog ----
+  _buStarten(uid, ergebnis) {
+    const d = this._buAlle().find((x) => x.uid === uid);
+    if (!d) return;
+    const vor = this._buVorschlaege(d);
+    this._bu = {
+      uid, ergebnis: ergebnis || (d.status === "failed" ? "fehl" : "ok"),
+      fortschritt: d.status === "failed" ? (d.fortschritt != null ? d.fortschritt : 50) : 100,
+      rolleId: vor[0] ? vor[0].rolle.id : null, schritt: "buchen", wann: null, bilder: [], extra: {}, waehlen: false, strom: "laedt", uebernehmen: {},
+    };
+    this._bu.wann = wannAusFortschritt(this._bu.fortschritt);
+    this._dialog = "bu";
+    this._buStromLaden(d);
+  },
+
+  // Material aus der Düsentemperatur raten (im Eintrag festgehalten)
+  _buMaterialRaten(d) {
+    const t = d.duese_c;
+    if (!t) return null;
+    if (t <= 232) return ["PLA", "TPU"];
+    if (t <= 258) return ["PETG", "ABS"];
+    return ["ASA", "ABS", "PC"];
+  },
+  _buBedarf(d, rolle, fortschritt) {
+    const e = this._daten.einstellungen;
+    const anteil = Math.max(0, Math.min(100, fortschritt)) / 100;
+    const korr = (rolle && e.korrektur[rolle.material]) || 1;
+    const druck = (d.gewicht || 0) * anteil * korr;
+    return { druck, fix: e.linie_g + e.extruder_g, summe: druck + e.linie_g + e.extruder_g, korr };
+  },
+  _buVorschlaege(d) {
+    const mats = this._buMaterialRaten(d);
+    const letzte = this._daten.letzte_rolle;
+    const bedarf = (d.gewicht || 0) + 0.5;
+    return this._daten.rollen.map((r) => {
+      let p = 0;
+      const gruende = [];
+      if (r.id === letzte) { p += 4; gruende.push("zuletzt benutzt"); }
+      if (mats) { if (mats.includes(r.material)) { p += 3; gruende.push(`${zahl(d.duese_c)} °C passt zu ${r.material}`); } else p -= 3; }
+      if (r.rest_g != null) { if (r.rest_g >= bedarf) p += 1; else { p -= 4; gruende.push("zu wenig Rest"); } }
+      if (r.probiert) p += 0.5;
+      return { rolle: r, p, gruende };
+    }).sort((a, b) => b.p - a.p).slice(0, 3);
+  },
+
+  async _buStromLaden(d) {
+    const id = this._drId && this._drId("monat", true);
+    const bu = this._bu;
+    if (!id || !d.start || !d.ende || d.hand) { bu.strom = null; return; }
+    try {
+      const vorher = new Date(new Date(d.start).getTime() - 60000).toISOString();
+      const nachher = new Date(new Date(d.ende).getTime() + 60000).toISOString();
+      const r = await this._hass.callWS({ type: "history/history_during_period", start_time: vorher, end_time: nachher, entity_ids: [id], minimal_response: true, no_attributes: true });
+      const werte = ((r && r[id]) || []).map((x) => Number(x.s != null ? x.s : x.state)).filter((x) => !isNaN(x));
+      let kwh = null;
+      if (werte.length >= 2) {
+        // Monatswechsel: Zähler fällt auf 0 → Anteile addieren
+        kwh = 0;
+        for (let i = 1; i < werte.length; i++) kwh += werte[i] >= werte[i - 1] ? werte[i] - werte[i - 1] : werte[i];
+      }
+      bu.strom = kwh != null ? { kwh, eur: kwh * this._daten.einstellungen.strompreis } : null;
+    } catch (e) {
+      bu.strom = null;
+    }
+    if (this._bu === bu && this._dialog === "bu") { const k = this.shadowRoot.getElementById("bu-kosten"); if (k) k.innerHTML = this._buKostenHtml(); }
+  },
+
+  _buKostenHtml() {
+    const bu = this._bu, d = this._buAlle().find((x) => x.uid === bu.uid);
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const b = this._buBedarf(d, rolle, bu.fortschritt);
+    const fil = rolle && rolle.preis_kg ? (b.summe / 1000) * rolle.preis_kg : null;
+    const strom = bu.strom === "laedt" ? "lädt …" : bu.strom ? `${zahl(bu.strom.kwh, 3)} kWh · ${zahl(bu.strom.eur, 2)} €` : "keine Messung";
+    const gesamt = (fil || 0) + (bu.strom && bu.strom.eur ? bu.strom.eur : 0);
+    return `<div class="info-zeile"><span>Filament</span><strong>${fil != null ? `${zahl(fil, 2)} €` : `<span class="leise">Preis/kg fehlt</span>`}</strong></div>
+      <div class="info-zeile"><span>Strom (Steckdose)</span><strong>${strom}</strong></div>
+      <div class="info-zeile"><span>Dieser Druck</span><strong>${gesamt ? `${zahl(gesamt, 2)} €` : "–"}</strong></div>`;
+  },
+
+  _buDialogHtml() {
+    const bu = this._bu;
+    const d = bu && this._buAlle().find((x) => x.uid === bu.uid);
+    if (!d) return "";
+    if (bu.schritt === "fragen") return this._buFragenHtml(d);
+    if (bu.schritt === "loesungen") return this._buLoesungenHtml(d);
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const vor = this._buVorschlaege(d);
+    const b = this._buBedarf(d, rolle, bu.fortschritt);
+    const e = this._daten.einstellungen;
+    const alt = this._daten.letzte_rolle && this._daten.letzte_rolle !== bu.rolleId ? this._daten.rollen.find((r) => r.id === this._daten.letzte_rolle) : null;
+    const f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+    const rest = rolle && rolle.rest_g != null ? rolle.rest_g - b.summe : null;
+    const kachel = (r, gruende) => `<button class="bu-rolle ${r.id === bu.rolleId ? "an" : ""}" data-aktion="bu-rolle" data-id="${esc(r.id)}">
+        ${spuleSvg(r)}<span class="bu-rolle-text"><strong>${esc(r.name)}</strong><small>${esc(r.hersteller)} · ${r.rest_g != null ? `${zahl(r.rest_g)} g` : "nicht gewogen"}</small>
+        ${gruende && gruende.length ? `<small class="mint">${esc(gruende.join(" · "))}</small>` : ""}</span>${r.achtung ? `<span class="achtung-punkt" title="Rolle beobachten">!</span>` : ""}</button>`;
+    const andere = this._daten.rollen.slice().sort((a, c) => a.name.localeCompare(c.name, "de"));
+    return `<div class="bu-kopf">
+        <span class="ld-bild">${foto ? `<img src="${esc(foto)}" alt="">` : "🖨️"}</span>
+        <div><h2>${esc(d.name)}</h2><p class="leise klein">${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g laut Slicer` : ""}</p></div>
+      </div>
+      ${d.status === "failed" || bu.ergebnis !== "ok" ? `<div class="chips bu-ergebnis">
+        <button class="chip ${bu.ergebnis === "fehl" ? "an rot-chip" : ""}" data-aktion="bu-ergebnis" data-id="fehl">⛔ Fehldruck</button>
+        <button class="chip ${bu.ergebnis === "anders" ? "an" : ""}" data-aktion="bu-ergebnis" data-id="anders">🤷 Anders überlegt</button>
+        <button class="chip ${bu.ergebnis === "ok" ? "an" : ""}" data-aktion="bu-ergebnis" data-id="ok">✅ Doch fertig</button></div>
+        <p class="leise klein">${bu.ergebnis === "anders" ? "Zählt nicht in die Fehlerquote. Das verbrauchte Material wird trotzdem abgezogen." : bu.ergebnis === "fehl" ? "Danach stelle ich dir ein paar Fragen zur Ursache." : ""}</p>
+        <div class="mod-regler"><div class="r-kopf"><span>Gedruckt bis</span><strong id="bu-wert-fortschritt">${zahl(bu.fortschritt)} %</strong></div>
+          <div class="regler-zeile"><input type="range" min="0" max="100" step="1" value="${bu.fortschritt}" data-bu="fortschritt"></div></div>` : ""}
+      <h3>Welche Rolle war drin?</h3>
+      <div class="bu-rollen">${vor.map((v) => kachel(v.rolle, v.gruende)).join("")}</div>
+      ${bu.waehlen ? `<label class="auswahl breit-auswahl"><span>Andere Rolle</span><select data-bu="rolle">${andere.map((r) => `<option value="${esc(r.id)}" ${r.id === bu.rolleId ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}</option>`).join("")}</select></label>`
+        : `<button class="mini mint-rand" data-aktion="bu-waehlen">Andere Rolle wählen</button>`}
+      <div id="bu-rechnung" class="info-liste oben-abstand">${this._buRechnungHtml(d, rolle, b, alt, rest)}</div>
+      <h3>Kosten</h3>
+      <div id="bu-kosten" class="info-liste">${this._buKostenHtml()}</div>
+      <div class="knopf-reihe oben-abstand">
+        <button class="knopf leise" data-aktion="bu-ignorieren">Nicht verbuchen</button>
+        <button class="knopf" data-aktion="bu-buchen" ${rolle ? "" : "disabled"}>${bu.ergebnis === "fehl" ? "Verbuchen und Ursache suchen" : "Verbuchen"}</button>
+      </div>`;
+  },
+
+  _buRechnungHtml(d, rolle, b, alt, rest) {
+    const e = this._daten.einstellungen;
+    return `${d.gewicht == null ? `<div class="info-zeile"><span class="amber">Gewicht fehlt im Eintrag</span><strong>0 g</strong></div>` : `<div class="info-zeile"><span>Druck${this._bu.fortschritt < 100 ? ` (${zahl(this._bu.fortschritt)} %)` : ""}${b.korr !== 1 ? ` × ${zahl(b.korr, 2)} Abgleich` : ""}</span><strong>${zahl(b.druck, 1)} g</strong></div>`}
+      <div class="info-zeile"><span>Anfangslinie + 3× Extruder</span><strong>${zahl(e.linie_g + e.extruder_g, 2)} g</strong></div>
+      <div class="info-zeile"><span><strong class="tx">Von ${esc(rolle ? rolle.name : "–")} ab</strong></span><strong>${zahl(b.summe, 1)} g</strong></div>
+      ${alt ? `<div class="info-zeile"><span>🔁 Rollenwechsel: Reststück von ${esc(alt.name)}</span><strong>${zahl(e.wechsel_g, 2)} g</strong></div>` : ""}
+      ${rest != null ? `<div class="info-zeile"><span>Danach auf der Rolle</span><strong class="${rest < 0 ? "rot" : ""}">${rest < 0 ? "reicht rechnerisch nicht (bitte wiegen)" : `${zahl(rest)} g`}</strong></div>` : ""}`;
+  },
+
+  _buRechnungNeu() {
+    const bu = this._bu, d = this._buAlle().find((x) => x.uid === bu.uid);
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const b = this._buBedarf(d, rolle, bu.fortschritt);
+    const alt = this._daten.letzte_rolle && this._daten.letzte_rolle !== bu.rolleId ? this._daten.rollen.find((r) => r.id === this._daten.letzte_rolle) : null;
+    const el = this.shadowRoot.getElementById("bu-rechnung");
+    if (el) el.innerHTML = this._buRechnungHtml(d, rolle, b, alt, rolle && rolle.rest_g != null ? rolle.rest_g - b.summe : null);
+    const k = this.shadowRoot.getElementById("bu-kosten");
+    if (k) k.innerHTML = this._buKostenHtml();
+  },
+
+  _buBuchen() {
+    const bu = this._bu, d = this._buAlle().find((x) => x.uid === bu.uid);
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    if (!d || !rolle) return;
+    if (this._buExtra(d.uid).gebucht) { this._toast("Dieser Druck ist schon verbucht."); this._dialog = null; return; }   // doppelt getippt
+    const e = this._daten.einstellungen;
+    const b = this._buBedarf(d, rolle, bu.fortschritt);
+    let wechsel = null;
+    const alt = this._daten.letzte_rolle && this._daten.letzte_rolle !== rolle.id ? this._daten.rollen.find((r) => r.id === this._daten.letzte_rolle) : null;
+    if (alt) {
+      wechsel = { rolle: alt.id, g: e.wechsel_g };
+      if (alt.rest_g != null) alt.rest_g = Math.max(0, alt.rest_g - e.wechsel_g);
+    }
+    if (rolle.rest_g != null) rolle.rest_g = Math.max(0, rolle.rest_g - b.summe);
+    rolle.verbraucht_g = (rolle.verbraucht_g || 0) + b.summe;
+    const fil = rolle.preis_kg ? (b.summe / 1000) * rolle.preis_kg : null;
+    const strom = bu.strom && bu.strom !== "laedt" ? bu.strom : null;
+    this._daten.drucke[d.uid] = {
+      ...this._buExtra(d.uid),
+      gebucht: { am: new Date().toISOString(), rolle: rolle.id, g: b.summe, druck_g: b.druck, fix_g: b.fix, wechsel, ergebnis: bu.ergebnis, fortschritt: bu.fortschritt,
+        kosten: { filament: fil, kwh: strom ? strom.kwh : null, strom: strom ? strom.eur : null } },
+      name: d.name, start: d.start, ende: d.ende,
+    };
+    this._daten.letzte_rolle = rolle.id;
+    let text = `${zahl(b.summe, 1)} g von ${rolle.name} abgezogen${wechsel ? `, ${zahl(wechsel.g, 2)} g Reststück von ${alt.name}` : ""}.`;
+    if (bu.ergebnis === "ok" && rolle.achtung) {
+      delete rolle.achtung;
+      text += " Druck geglückt, das rote Ausrufezeichen ist weg.";
+    }
+    this._speichern();
+    if (bu.ergebnis === "fehl") { bu.schritt = "fragen"; this._toast(text); return; }
+    this._dialog = null;
+    this._bu = null;
+    this._toast(text);
+    setTimeout(() => this._buNachLaden(), 3000);
+  },
+
+  _buRueckgaengig(uid) {
+    const x = this._buExtra(uid), g = x.gebucht;
+    if (!g) return;
+    const rolle = this._daten.rollen.find((r) => r.id === g.rolle);
+    if (rolle) { if (rolle.rest_g != null) rolle.rest_g += g.g; rolle.verbraucht_g = Math.max(0, (rolle.verbraucht_g || 0) - g.g); }
+    if (g.wechsel) { const alt = this._daten.rollen.find((r) => r.id === g.wechsel.rolle); if (alt && alt.rest_g != null) alt.rest_g += g.wechsel.g; }
+    delete x.gebucht;
+    delete x.fehl;
+    this._speichern();
+    this._toast(`Buchung zurückgenommen, ${zahl(g.g, 1)} g wieder gutgeschrieben.`);
+  },
+
+  // ---- Fehldruck: Fragen ----
+  _buFragenHtml(d) {
+    const bu = this._bu;
+    return `<h2>Was ist passiert?</h2><p class="leise klein">${esc(d.name)} · ${zahl(bu.fortschritt)} % gedruckt</p>
+      <h3>Wann ging es schief?</h3>
+      <div class="chips">${FEHL_FRAGEN.wann.map((w) => `<button class="chip ${bu.wann === w.id ? "an" : ""}" data-aktion="bu-wann" data-id="${w.id}">${w.name}</button>`).join("")}</div>
+      ${bu.wann ? `<p class="leise klein">${esc(FEHL_FRAGEN.wann.find((w) => w.id === bu.wann).hinweis)}</p>` : ""}
+      <h3>Wie sieht es aus? <span class="leise klein">(mehrere möglich)</span></h3>
+      <div class="bu-bilder">${FEHLERBILDER.map((f) => `<button class="bu-bild ${bu.bilder.includes(f.id) ? "an" : ""}" data-aktion="bu-bild" data-id="${f.id}">${FB_ZEICHNUNG[f.id] || ""}<span>${esc(f.name)}</span></button>`).join("")}</div>
+      <h3>Noch drei kurze Fragen</h3>
+      ${FEHL_FRAGEN.extra.map((q) => `<div class="bu-frage"><span>${esc(q.frage)}</span><span class="chips">
+        ${["ja", "nein", "?"].map((a) => `<button class="chip ${bu.extra[q.id] === a ? "an" : ""}" data-aktion="bu-extra" data-id="${q.id}" data-a="${a}">${a === "?" ? "weiß nicht" : a}</button>`).join("")}</span></div>`).join("")}
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="bu-fertig">Überspringen</button>
+        <button class="knopf" data-aktion="bu-auswerten">Ursachen anzeigen</button></div>`;
+  },
+
+  _buUrsachen() {
+    const bu = this._bu;
+    const liste = [...bu.bilder];
+    FEHL_FRAGEN.extra.forEach((q) => { const a = bu.extra[q.id]; if (a === "nein" && q.nein && !liste.includes(q.nein)) liste.push(q.nein); });
+    if (!liste.length) {
+      // Nichts ausgewählt: aus dem Zeitpunkt die häufigste Ursache nehmen
+      liste.push(bu.wann === "erste" || bu.wann === "frueh" ? "haftung" : bu.wann === "spaet" ? "verstopft" : "spaghetti");
+    }
+    return liste.map(fehlerbild).filter(Boolean);
+  },
+
+  _buLoesungenHtml(d) {
+    const bu = this._bu;
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const ursachen = this._buUrsachen();
+    return `<h2>Mögliche Ursachen</h2><p class="leise klein">Für ${esc(rolle ? rolle.name : "die Rolle")}. Haken bei den Werten, die ich in die Rolle übernehmen soll.</p>
+      ${ursachen.map((u) => `<div class="bu-ursache"><div class="bu-ursache-kopf">${FB_ZEICHNUNG[u.id] || ""}<div><strong>${esc(u.name)}</strong><small class="leise">${esc(u.ursachen.join(" · "))}</small></div></div>
+        <ul class="bu-loesungen">${u.loesungen.map((l, i) => {
+          const a = l.aenderung && rolle ? aenderungRechnen(rolle, l.aenderung) : null;
+          const key = `${u.id}-${i}`;
+          return `<li>${a ? `<button class="bu-haken ${bu.uebernehmen[key] ? "an" : ""}" data-aktion="bu-haken" data-id="${key}" aria-label="übernehmen">${bu.uebernehmen[key] ? "✓" : ""}</button>` : `<span class="bu-punkt">•</span>`}
+            <span>${esc(l.text)}${a ? ` <span class="bu-aend">${esc(a.feld.name)}: ${zahl(a.alt, a.feld.nk || 0)} → <strong>${zahl(a.neu, a.feld.nk || 0)}</strong> ${esc(a.feld.e)}</span>` : ""}</span></li>`;
+        }).join("")}</ul></div>`).join("")}
+      <div class="hinweis rot-hinweis">Die Rolle bekommt ein rotes <strong>!</strong>, bis ein Druck mit ihr wieder klappt.</div>
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="bu-zurueck">Zurück</button>
+        <button class="knopf" data-aktion="bu-fehl-speichern">${Object.values(bu.uebernehmen).some(Boolean) ? "Übernehmen und markieren" : "Rolle markieren"}</button></div>`;
+  },
+
+  _buFehlSpeichern() {
+    const bu = this._bu;
+    const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
+    const ursachen = this._buUrsachen();
+    const geaendert = [];
+    if (rolle) {
+      ursachen.forEach((u) => u.loesungen.forEach((l, i) => {
+        if (!bu.uebernehmen[`${u.id}-${i}`] || !l.aenderung) return;
+        const a = aenderungRechnen(rolle, l.aenderung);
+        if (!a) return;
+        rolle.eigen = { ...(rolle.eigen || {}), [a.k]: a.neu };
+        geaendert.push(`${a.feld.name} ${zahl(a.neu, a.feld.nk || 0)} ${a.feld.e}`.trim());
+      }));
+      rolle.achtung = { seit: new Date().toISOString(), druck: bu.uid, grund: ursachen.map((u) => u.name).join(", "), geaendert };
+    }
+    const x = this._daten.drucke[bu.uid] || (this._daten.drucke[bu.uid] = {});
+    x.fehl = { wann: bu.wann, bilder: bu.bilder, extra: bu.extra, ursachen: ursachen.map((u) => u.id), geaendert };
+    this._speichern();
+    this._dialog = null;
+    this._bu = null;
+    this._toast(geaendert.length ? `Gespeichert: ${geaendert.join(", ")}. Rolle ist rot markiert.` : "Gespeichert. Die Rolle ist rot markiert, bis ein Druck klappt.");
+  },
+
+  // ---- Druck von Hand nachtragen ----
+  _buHandHtml() {
+    const h = this._buHand;
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    return `<h2>Druck nachtragen</h2><p class="leise klein">Wenn die Automation einen Druck nicht erfasst hat, z. B. weil die Bambu-Cloud nicht erreichbar war.</p>
+      <label class="feld"><span>Name</span><input id="bu-hand-name" value="${esc(h.name)}" placeholder="z. B. Kabelhalter"></label>
+      <div class="mod-regler"><div class="r-kopf"><span>Gewicht laut Slicer</span><strong id="bu-wert-hand-g">${zahl(h.gewicht, 1)} g</strong></div>
+        <div class="regler-zeile"><input type="range" min="0" max="500" step="0.5" value="${h.gewicht}" data-bu="hand-g"></div></div>
+      <div class="chips"><button class="chip ${h.status === "finish" ? "an" : ""}" data-aktion="bu-hand-status" data-id="finish">Fertig</button>
+        <button class="chip ${h.status === "failed" ? "an" : ""}" data-aktion="bu-hand-status" data-id="failed">Abgebrochen</button></div>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
+        <button class="knopf" data-aktion="bu-hand-ok">Weiter zum Verbuchen</button></div>`;
+  },
+
+  _buKlick(a, el) {
+    const bu = this._bu;
+    switch (a) {
+      case "bu-start": this._buStarten(el.dataset.uid, el.dataset.ergebnis); break;
+      case "bu-rolle": bu.rolleId = el.dataset.id; break;
+      case "bu-waehlen": bu.waehlen = true; break;
+      case "bu-ergebnis": bu.ergebnis = el.dataset.id; if (bu.ergebnis === "ok") bu.fortschritt = 100; break;
+      case "bu-buchen": this._buBuchen(); break;
+      case "bu-ignorieren":
+        this._daten.drucke[bu.uid] = { ...this._buExtra(bu.uid), ignoriert: true };
+        this._speichern(); this._dialog = null; this._bu = null;
+        this._toast("Wird nicht verbucht. Im Druckverlauf kannst du es später nachholen.");
+        return;
+      case "bu-wann": bu.wann = el.dataset.id; break;
+      case "bu-bild": bu.bilder = bu.bilder.includes(el.dataset.id) ? bu.bilder.filter((x) => x !== el.dataset.id) : [...bu.bilder, el.dataset.id]; break;
+      case "bu-extra": bu.extra[el.dataset.id] = el.dataset.a; break;
+      case "bu-auswerten": bu.schritt = "loesungen"; this._sheetScroll = 0; break;
+      case "bu-zurueck": bu.schritt = "fragen"; break;
+      case "bu-haken": bu.uebernehmen[el.dataset.id] = !bu.uebernehmen[el.dataset.id]; break;
+      case "bu-fehl-speichern": this._buFehlSpeichern(); return;
+      case "bu-fertig": this._dialog = null; this._bu = null; break;
+      case "bu-rueckgaengig": this._buRueckgaengig(el.dataset.uid); break;
+      case "bu-hand": this._buHand = { name: "", gewicht: 10, status: "finish" }; this._dialog = "bu-hand"; break;
+      case "bu-hand-status": this._buHand.status = el.dataset.id; break;
+      case "bu-hand-ok": {
+        const name = (this.shadowRoot.getElementById("bu-hand-name").value || "").trim() || "Druck von Hand";
+        const uid = `hand-${Date.now()}`;
+        this._daten.drucke[uid] = { hand: { name, gewicht: this._buHand.gewicht, start: new Date().toISOString(), status: this._buHand.status, fortschritt: 50 } };
+        this._speichern();
+        this._buStarten(uid);
+        break;
+      }
+      case "bu-achtung-weg": {
+        const r = this._daten.rollen.find((x) => x.id === el.dataset.id);
+        if (r) { delete r.achtung; this._speichern(); this._toast("Markierung entfernt."); }
+        break;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+
+  _buEingabe(t) {
+    const k = t.dataset && t.dataset.bu;
+    if (!k) return false;
+    if (k === "fortschritt") {
+      this._bu.fortschritt = Number(t.value);
+      const w = this.shadowRoot.getElementById("bu-wert-fortschritt");
+      if (w) w.textContent = `${zahl(this._bu.fortschritt)} %`;
+      this._buRechnungNeu();
+    }
+    if (k === "hand-g") {
+      this._buHand.gewicht = Number(t.value);
+      const w = this.shadowRoot.getElementById("bu-wert-hand-g");
+      if (w) w.textContent = `${zahl(this._buHand.gewicht, 1)} g`;
+    }
+    if (k === "rolle") { this._bu.rolleId = t.value; this._buRechnungNeu(); }
+    return true;
+  },
+  _buAenderung(t) {
+    const k = t.dataset && t.dataset.bu;
+    if (!k) return false;
+    if (k === "rolle") { this._bu.rolleId = t.value; this._zeichnen(); }
+    if (k === "fortschritt") this._bu.wann = wannAusFortschritt(this._bu.fortschritt);
+    return true;
+  },
+
+  // Für Rollen-Detail: letzter verbuchter Druck dieser Rolle
+  _buLetzterDruck(rolleId) {
+    let best = null;
+    for (const [uid, x] of Object.entries(this._daten.drucke || {})) {
+      if (x.gebucht && x.gebucht.rolle === rolleId && (!best || x.gebucht.am > best.x.gebucht.am)) best = { uid, x };
+    }
+    if (!best) return null;
+    const d = this._buAlle().find((v) => v.uid === best.uid);
+    return { uid: best.uid, name: (d && d.name) || best.x.name || "Druck", d, x: best.x };
   },
 };
 // ---------------------------------------------------------------------------
@@ -3616,7 +4517,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const erstes = !this._hass;
     this._hass = hass;
     if (erstes) this._laden();
-    else this._drHassNeu();
+    else { this._drHassNeu(); this._buHassNeu(); }
   }
   set narrow(n) {
     if (this._narrow !== !!n) { this._narrow = !!n; this._zeichnen(); }
@@ -3656,6 +4557,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._daten = standardDaten();
         await this._speichernJetzt();
       }
+      this._drVerlaufLaden();
     } catch (e) {
       this._fehler = e.message || String(e);
     }
@@ -3817,6 +4719,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
     if (a.startsWith("dr-")) { this._drKlick(a, el); return; }
     if (a.startsWith("mod-")) { this._modKlick(a, el); return; }
+    if (a.startsWith("bu-")) { this._buKlick(a, el); return; }
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
       const k = el.dataset.k;
@@ -3850,6 +4753,10 @@ class FilamentWerkstattPanel extends HTMLElement {
         break;
       case "neu": this._ansicht === "modelle" ? (this._dialog = "mod-laden") : this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
+      case "zum-druck":
+        if (!this._schliessen()) return;
+        this._ansicht = "drucker"; this._drOffen = el.dataset.uid; this._dialog = "dr-druck";
+        break;
       case "tab":
         if (this._tab === "rest" && this._rechnerGeaendert()) this._toast(this._restSpeichern(false));
         this._tab = el.dataset.id; this._sheetScroll = 0;
@@ -4064,6 +4971,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const t = e.target;
     if (this._invEingabe(t)) return;
     if (this._modEingabe(t)) return;
+    if (this._buEingabe(t)) return;
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -4091,6 +4999,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const t = e.target;
     if (this._invAenderung(t)) return;
     if (this._modAenderung(t)) return;
+    if (this._buAenderung(t)) return;
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -4196,6 +5105,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
+        ${this._daten && this._drVerlauf ? this._buBalkenHtml() : ""}
         <main class="haupt">${this._inhaltHtml()}</main>
         ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
         ${this._mobil ? this._navHtml("unten") : ""}
@@ -4504,6 +5414,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       const p = prozent(r);
       return `<button class="kachel ${r.probiert ? "" : "offen"}" data-aktion="oeffnen" data-id="${esc(r.id)}">
         ${r.probiert ? "" : `<span class="badge-offen">noch nicht probiert</span>`}
+        ${r.achtung ? `<span class="achtung-punkt kachel-achtung" title="Nach Fehldruck: testen und genau hinschauen">!</span>` : ""}
         <div class="kachel-spule">${spuleSvg(r)}</div>
         <div class="kachel-name">${esc(r.name)}</div>
         <div class="kachel-sub">${esc(r.hersteller)}</div>
@@ -4545,22 +5456,29 @@ class FilamentWerkstattPanel extends HTMLElement {
         </header>
         <div class="tabs">${tabs.map(([id, n]) => `<button class="tab ${this._tab === id ? "an" : ""}" data-aktion="tab" data-id="${id}" ${this._bearbeiten ? "disabled" : ""}>${n}</button>`).join("")}</div>
         <div class="sheet-inhalt">
+          ${r.achtung && this._tab === "einstellungen" ? `<div class="hinweis rot-hinweis achtung-hinweis"><span class="achtung-punkt">!</span><div><strong>Nach einem Fehldruck: testen und genau hinschauen.</strong>
+            <small>${esc(r.achtung.grund || "")}${r.achtung.geaendert && r.achtung.geaendert.length ? ` · geändert: ${esc(r.achtung.geaendert.join(", "))}` : ""}</small></div>
+            <button class="mini" data-aktion="bu-achtung-weg" data-id="${esc(r.id)}">Test hat geklappt</button></div>` : ""}
           ${this._tab === "einstellungen" ? this._letzterDruckHtml(r) + this._einstellungenHtml(r) : this._tab === "rest" ? this._restHtml(r) : this._infosHtml(r)}
         </div>
         ${fuss ? `<footer class="sheet-fuss">${fuss}</footer>` : ""}
       </section>`;
   }
 
-  // Platzhalter: wird mit der Druckverbuchung (nächster Schritt) gefüllt
+  // Letzter verbuchter Druck mit dieser Rolle, Sprung in den Druckverlauf
   _letzterDruckHtml(r) {
-    const d = r.letzter_druck;
+    const l = this._buLetzterDruck(r.id);
+    const f = l && l.d ? fotoName(l.d) : null;
+    const foto = f && this._drFotos && this._drFotos[f];
+    if (f && this._drFotos && !(f in this._drFotos)) setTimeout(() => this._drFotosLaden(), 0);
+    const g = l && l.x.gebucht;
     return `<div class="letzter-druck">
-      <div class="ld-bild">${d && d.bild ? `<img src="${esc(d.bild)}" alt="">` : "🖼️"}</div>
+      <div class="ld-bild" ${f ? `data-foto="${esc(f)}"` : ""}>${foto ? `<img src="${esc(foto)}" alt="">` : "🖼️"}</div>
       <div class="ld-text">
         <strong>Letzter Druck</strong>
-        <span class="leise klein">${d ? esc(d.name) : "Noch kein Druck mit dieser Rolle verbucht. Erscheint, sobald die Verbuchung läuft."}</span>
+        <span class="leise klein">${l ? `${esc(l.name)} · ${zahl(g.g, 1)} g · ${new Date(g.am).toLocaleDateString("de-DE")}${g.ergebnis === "fehl" ? " · Fehldruck" : ""}${l.x.kommentar ? ` · 💬 ${esc(l.x.kommentar)}` : ""}` : "Noch kein Druck mit dieser Rolle verbucht."}</span>
       </div>
-      <button class="knopf leise klein-knopf" disabled>Zum Druck ›</button>
+      <button class="knopf leise klein-knopf" ${l ? `data-aktion="zum-druck" data-uid="${esc(l.uid)}"` : "disabled"}>Zum Druck ›</button>
     </div>`;
   }
 
@@ -4795,6 +5713,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   // ---- Dialoge ------------------------------------------------------------
   _dialogHtml() {
     if (!this._dialog) return "";
+    if (this._dialog === "bu" || this._dialog === "bu-hand") return `<div class="schleier oben" data-einmal="schleier-bu"></div><div class="dialog breit-dialog bu-dialog" role="dialog" data-einmal="dialog-${this._dialog}"><button class="icon-knopf dialog-x" data-aktion="${this._dialog === "bu" ? "bu-fertig" : "dialog-zu"}" aria-label="Schließen">✕</button>${this._dialog === "bu" ? this._buDialogHtml() : this._buHandHtml()}</div>`;
     if (this._dialog === "mod-laden") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod"></div><div class="dialog" role="dialog" data-einmal="dialog-mod">${this._modLadenDialogHtml()}</div>`;
     if (this._dialog === "mod-stuetzen") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod-s"></div><div class="dialog breit-dialog" role="dialog" data-einmal="dialog-mod-s">${this._modStuetzenHilfeHtml()}</div>`;
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
@@ -4857,7 +5776,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);

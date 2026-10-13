@@ -127,7 +127,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const erstes = !this._hass;
     this._hass = hass;
     if (erstes) this._laden();
-    else this._drHassNeu();
+    else { this._drHassNeu(); this._buHassNeu(); }
   }
   set narrow(n) {
     if (this._narrow !== !!n) { this._narrow = !!n; this._zeichnen(); }
@@ -167,6 +167,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._daten = standardDaten();
         await this._speichernJetzt();
       }
+      this._drVerlaufLaden();
     } catch (e) {
       this._fehler = e.message || String(e);
     }
@@ -328,6 +329,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("inv-")) { this._invKlick(a, el); return; }
     if (a.startsWith("dr-")) { this._drKlick(a, el); return; }
     if (a.startsWith("mod-")) { this._modKlick(a, el); return; }
+    if (a.startsWith("bu-")) { this._buKlick(a, el); return; }
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
       const k = el.dataset.k;
@@ -361,6 +363,10 @@ class FilamentWerkstattPanel extends HTMLElement {
         break;
       case "neu": this._ansicht === "modelle" ? (this._dialog = "mod-laden") : this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
+      case "zum-druck":
+        if (!this._schliessen()) return;
+        this._ansicht = "drucker"; this._drOffen = el.dataset.uid; this._dialog = "dr-druck";
+        break;
       case "tab":
         if (this._tab === "rest" && this._rechnerGeaendert()) this._toast(this._restSpeichern(false));
         this._tab = el.dataset.id; this._sheetScroll = 0;
@@ -575,6 +581,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const t = e.target;
     if (this._invEingabe(t)) return;
     if (this._modEingabe(t)) return;
+    if (this._buEingabe(t)) return;
     if (t.dataset.feld) {
       const f = FELDER.find((x) => x.k === t.dataset.feld);
       this._feldSetzen(f, Number(t.value), false);
@@ -602,6 +609,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const t = e.target;
     if (this._invAenderung(t)) return;
     if (this._modAenderung(t)) return;
+    if (this._buAenderung(t)) return;
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
@@ -707,6 +715,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
+        ${this._daten && this._drVerlauf ? this._buBalkenHtml() : ""}
         <main class="haupt">${this._inhaltHtml()}</main>
         ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
         ${this._mobil ? this._navHtml("unten") : ""}
@@ -1015,6 +1024,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       const p = prozent(r);
       return `<button class="kachel ${r.probiert ? "" : "offen"}" data-aktion="oeffnen" data-id="${esc(r.id)}">
         ${r.probiert ? "" : `<span class="badge-offen">noch nicht probiert</span>`}
+        ${r.achtung ? `<span class="achtung-punkt kachel-achtung" title="Nach Fehldruck: testen und genau hinschauen">!</span>` : ""}
         <div class="kachel-spule">${spuleSvg(r)}</div>
         <div class="kachel-name">${esc(r.name)}</div>
         <div class="kachel-sub">${esc(r.hersteller)}</div>
@@ -1056,22 +1066,29 @@ class FilamentWerkstattPanel extends HTMLElement {
         </header>
         <div class="tabs">${tabs.map(([id, n]) => `<button class="tab ${this._tab === id ? "an" : ""}" data-aktion="tab" data-id="${id}" ${this._bearbeiten ? "disabled" : ""}>${n}</button>`).join("")}</div>
         <div class="sheet-inhalt">
+          ${r.achtung && this._tab === "einstellungen" ? `<div class="hinweis rot-hinweis achtung-hinweis"><span class="achtung-punkt">!</span><div><strong>Nach einem Fehldruck: testen und genau hinschauen.</strong>
+            <small>${esc(r.achtung.grund || "")}${r.achtung.geaendert && r.achtung.geaendert.length ? ` · geändert: ${esc(r.achtung.geaendert.join(", "))}` : ""}</small></div>
+            <button class="mini" data-aktion="bu-achtung-weg" data-id="${esc(r.id)}">Test hat geklappt</button></div>` : ""}
           ${this._tab === "einstellungen" ? this._letzterDruckHtml(r) + this._einstellungenHtml(r) : this._tab === "rest" ? this._restHtml(r) : this._infosHtml(r)}
         </div>
         ${fuss ? `<footer class="sheet-fuss">${fuss}</footer>` : ""}
       </section>`;
   }
 
-  // Platzhalter: wird mit der Druckverbuchung (nächster Schritt) gefüllt
+  // Letzter verbuchter Druck mit dieser Rolle, Sprung in den Druckverlauf
   _letzterDruckHtml(r) {
-    const d = r.letzter_druck;
+    const l = this._buLetzterDruck(r.id);
+    const f = l && l.d ? fotoName(l.d) : null;
+    const foto = f && this._drFotos && this._drFotos[f];
+    if (f && this._drFotos && !(f in this._drFotos)) setTimeout(() => this._drFotosLaden(), 0);
+    const g = l && l.x.gebucht;
     return `<div class="letzter-druck">
-      <div class="ld-bild">${d && d.bild ? `<img src="${esc(d.bild)}" alt="">` : "🖼️"}</div>
+      <div class="ld-bild" ${f ? `data-foto="${esc(f)}"` : ""}>${foto ? `<img src="${esc(foto)}" alt="">` : "🖼️"}</div>
       <div class="ld-text">
         <strong>Letzter Druck</strong>
-        <span class="leise klein">${d ? esc(d.name) : "Noch kein Druck mit dieser Rolle verbucht. Erscheint, sobald die Verbuchung läuft."}</span>
+        <span class="leise klein">${l ? `${esc(l.name)} · ${zahl(g.g, 1)} g · ${new Date(g.am).toLocaleDateString("de-DE")}${g.ergebnis === "fehl" ? " · Fehldruck" : ""}${l.x.kommentar ? ` · 💬 ${esc(l.x.kommentar)}` : ""}` : "Noch kein Druck mit dieser Rolle verbucht."}</span>
       </div>
-      <button class="knopf leise klein-knopf" disabled>Zum Druck ›</button>
+      <button class="knopf leise klein-knopf" ${l ? `data-aktion="zum-druck" data-uid="${esc(l.uid)}"` : "disabled"}>Zum Druck ›</button>
     </div>`;
   }
 
@@ -1306,6 +1323,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   // ---- Dialoge ------------------------------------------------------------
   _dialogHtml() {
     if (!this._dialog) return "";
+    if (this._dialog === "bu" || this._dialog === "bu-hand") return `<div class="schleier oben" data-einmal="schleier-bu"></div><div class="dialog breit-dialog bu-dialog" role="dialog" data-einmal="dialog-${this._dialog}"><button class="icon-knopf dialog-x" data-aktion="${this._dialog === "bu" ? "bu-fertig" : "dialog-zu"}" aria-label="Schließen">✕</button>${this._dialog === "bu" ? this._buDialogHtml() : this._buHandHtml()}</div>`;
     if (this._dialog === "mod-laden") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod"></div><div class="dialog" role="dialog" data-einmal="dialog-mod">${this._modLadenDialogHtml()}</div>`;
     if (this._dialog === "mod-stuetzen") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod-s"></div><div class="dialog breit-dialog" role="dialog" data-einmal="dialog-mod-s">${this._modStuetzenHilfeHtml()}</div>`;
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
@@ -1368,7 +1386,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);

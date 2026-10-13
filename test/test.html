@@ -66,6 +66,7 @@ window.hass = { states, callService: async (domain, dienst, data) => {
   if (m.type === "frontend/set_user_data") { speicher[m.key] = JSON.stringify(m.value); return null; }
   if (m.type === "todo/item/list") return { items: drucke };
   if (m.type === "media_source/resolve_media") { if (m.media_content_id.includes("2026-10-12_21-15")) return { url: "/test/foto.svg" }; throw new Error("nicht gefunden"); }
+  if (m.type === "history/history_during_period") { const id = m.entity_ids[0]; return { [id]: [{ s: "12.40" }, { s: "12.52" }, { s: "12.61" }] }; }
   if (m.type === "media_source/browse_media") return { children: [{title: "Grundriss.png"}] };
   throw new Error("unbekannt " + m.type);
 }};
