@@ -11,7 +11,7 @@ async function seite(breite, hoehe, mobil = false, erwarteteFehler = false) {
   const p = await ctx.newPage();
   p.on("pageerror", (e) => fehler.push(e.message));
   p.on("console", (m) => m.type() === "error" && !m.text().includes("404") && !(erwarteteFehler && m.text().includes("Filament-Werkstatt")) && fehler.push(m.text()));
-  await p.goto("http://localhost:8765/test/test.html?drucker=bereit");
+  await p.goto(`http://localhost:${process.env.TEST_PORT || 8765}/test/test.html?drucker=bereit`);
   await p.waitForTimeout(800);
   // Fertige Testdrucke als verbucht markieren, damit kein Pop-up stört
   await p.evaluate(() => { const x = window.el; x._dialog = null; x._bu = null; x._daten.buchen_ab = "2099-01-01"; x._zeichnen(); });
