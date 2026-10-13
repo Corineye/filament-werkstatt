@@ -233,6 +233,7 @@ function werkstattStandard() {
     einstellungen: { ...JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)), sicherung_start: new Date().toISOString() },
     drucke: {},
     letzte_rolle: null,
+    geladen: null,        // Rolle, die gerade im Drucker steckt (ID), null = kein Filament geladen
     buchen_ab: new Date().toISOString(),   // ältere Drucke nicht nachfragen
     warteschlange: [],
     abgleich: [],

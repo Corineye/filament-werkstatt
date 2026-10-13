@@ -821,4 +821,48 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 
 /* ---- Sicherungs-Balken ---- */
 .bu-balken.blau { background: linear-gradient(90deg, rgba(92,200,255,.18), rgba(92,200,255,.05)); border-bottom-color: rgba(92,200,255,.4); }
+
+/* ==== Drucker-Steuerung: geladenes Filament, Zieltemperatur, Lüfter (v0.11) ==== */
+:host { --gruen: #5be37d; --gruen-weich: rgba(91,227,125,.14); }
+.pille.gruen { color: var(--gruen); background: var(--gruen-weich); }
+/* Kachel der geladenen Rolle */
+.kachel.geladen { border: 1.5px solid rgba(91,227,125,.75); background: linear-gradient(160deg, rgba(91,227,125,.16), transparent 60%), var(--flaeche);
+  box-shadow: 0 0 0 1px rgba(91,227,125,.15), 0 0 22px rgba(91,227,125,.18); }
+.kachel.geladen:hover { border-color: var(--gruen); }
+.badge-geladen { position: absolute; top: 12px; left: 12px; z-index: 1; font-size: 10px; font-weight: 700; color: #062012; background: var(--gruen); border-radius: 6px; padding: 2px 7px; letter-spacing: .3px; }
+.mobil .badge-geladen { font-size: 9px; padding: 2px 5px; }
+.kachel.geladen .kachel-achtung { top: 34px; }
+/* Knopf „Geladen“ in der Detailansicht */
+.geladen-knopf { margin-left: 6px; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; color: var(--leise); border: 1px solid var(--rand); vertical-align: middle; }
+.geladen-knopf:hover { color: var(--gruen); border-color: rgba(91,227,125,.5); }
+.geladen-knopf.an { color: #062012; background: var(--gruen); border-color: var(--gruen); }
+/* Karte „Geladenes Filament“ */
+.dr-filament.geladen { border-color: rgba(91,227,125,.45); background: radial-gradient(360px 160px at 0% 0%, rgba(91,227,125,.10), transparent 70%), var(--flaeche); }
+.dr-fil-zeile { display: flex; gap: 14px; align-items: center; }
+.dr-fil-spule { width: 52px; height: 52px; flex: none; display: grid; place-items: center; }
+.dr-fil-leer { width: 46px; height: 46px; border-radius: 50%; border: 1.5px dashed var(--rand); display: grid; place-items: center; color: var(--leise); font-size: 20px; }
+.dr-fil-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.dr-fil-text small { color: var(--leise); font-size: 12px; }
+.dr-fil-wahl { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.dr-fil-wahl .auswahl { flex: 1; min-width: 0; margin: 0; }
+.mobil .dr-fil-wahl { flex-direction: column; align-items: stretch; }
+.dr-filament > .mini { margin: 10px 0 0; }
+/* Zieltemperatur eingeben */
+.dr-temp-fuss { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dr-soll { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.dr-soll input { width: 74px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; font-size: 14px; text-align: right; }
+.dr-soll input:focus { outline: none; border-color: rgba(62,230,168,.6); }
+.dr-soll input.fehler { border-color: var(--rot); background: rgba(255,107,107,.1); }
+.dr-soll .mini { margin: 0; min-width: 62px; }
+.dr-einheit { color: var(--leise); font-size: 13px; }
+.dr-rolle-chip { padding: 4px 10px; font-size: 12px; }
+.dr-soll.breit { display: flex; margin: 0; }
+.dr-soll.breit input { flex: 1; width: auto; padding: 10px 12px; font-size: 15px; }
+/* Lüfter zum Antippen */
+.dr-titel-zusatz { font-weight: 400; margin-left: 8px; font-size: 12px; }
+.dr-l-knopf { position: relative; color: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
+.dr-l-knopf:hover { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.dr-l-stift { position: absolute; top: 6px; right: 8px; font-style: normal; font-size: 11px; color: var(--leise); }
+.dr-stufen { margin: 12px 0 4px; }
+.dr-stufen .chip { min-width: 54px; }
 `;

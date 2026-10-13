@@ -107,7 +107,8 @@ const BuchenAnsicht = {
     return this._daten.rollen.map((r) => {
       let p = 0;
       const gruende = [];
-      if (r.id === letzte) { p += 4; gruende.push("zuletzt benutzt"); }
+      if (r.id === this._daten.geladen) { p += 10; gruende.push("ist geladen"); }   // immer zuerst
+      else if (r.id === letzte) { p += 4; gruende.push("zuletzt benutzt"); }
       if (mats) { if (mats.includes(r.material)) { p += 3; gruende.push(`${zahl(d.duese_c)} °C passt zu ${r.material}`); } else p -= 3; }
       if (r.rest_g != null) { if (r.rest_g >= bedarf) p += 1; else { p -= 4; gruende.push("zu wenig Rest"); } }
       if (r.probiert) p += 0.5;
