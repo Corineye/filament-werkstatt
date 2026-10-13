@@ -10,7 +10,7 @@ const p = await b.newPage();
 const urls = [];
 p.on("request", (r) => urls.push(r.url()));
 p.on("pageerror", (e) => fehler.push(e.message));
-await p.goto("http://localhost:8765/test/test.html?drucker=bereit");
+await p.goto(`http://localhost:${process.env.TEST_PORT || 8765}/test/test.html?drucker=bereit`);
 await p.waitForTimeout(1000);
 const alt = readFileSync(VD, "utf8");
 const v = alt.match(/"(.*)"/)[1];

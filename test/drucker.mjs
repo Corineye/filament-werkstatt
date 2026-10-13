@@ -10,7 +10,7 @@ async function seite(breite, hoehe, szenario) {
   const p = await ctx.newPage();
   p.on("pageerror", (e) => fehler.push(e.message));
   p.on("console", (m) => m.type() === "error" && !m.text().includes("404") && fehler.push(m.text()));
-  await p.goto(`http://localhost:8765/test/test.html?drucker=${szenario}`);
+  await p.goto(`http://localhost:${process.env.TEST_PORT || 8765}/test/test.html?drucker=${szenario}`);
   await p.waitForTimeout(800);
   return p;
 }

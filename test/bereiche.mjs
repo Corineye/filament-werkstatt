@@ -11,7 +11,7 @@ async function seite(breite, hoehe, mobil = false, erwarteteFehler = false) {
   const p = await ctx.newPage();
   p.on("pageerror", (e) => fehler.push(e.message));
   p.on("console", (m) => m.type() === "error" && !m.text().includes("404") && !(erwarteteFehler && m.text().includes("Filament-Werkstatt")) && fehler.push(m.text()));
-  await p.goto("http://localhost:8765/test/test.html?drucker=bereit");
+  await p.goto(`http://localhost:${process.env.TEST_PORT || 8765}/test/test.html?drucker=bereit`);
   await p.waitForTimeout(800);
   // Fertige Testdrucke als verbucht markieren, damit kein Pop-up stört
   await p.evaluate(() => { const x = window.el; x._dialog = null; x._bu = null; x._daten.buchen_ab = "2099-01-01"; x._zeichnen(); });
@@ -23,6 +23,17 @@ const nav = async (p, id) => { await el(p).locator(`.nav-oben [data-id="${id}"]`
 // ---------------- Desktop ----------------
 let p = await seite(1400, 900);
 pruefe((await el(p).locator(".nav-oben .nav-punkt").count()) === 8, "8 Bereiche oben in der Navigation");
+{
+  const lage = await p.evaluate(() => { const r = window.el.shadowRoot, s = r.querySelector(".kopf .kopf-suche"), f = r.querySelector('.nav-oben [data-id="filament"]'); return s && f ? [s.getBoundingClientRect().right, f.getBoundingClientRect().left, r.querySelector(".nav-oben").scrollWidth - r.querySelector(".nav-oben").clientWidth] : null; });
+  pruefe(lage && lage[0] <= lage[1] && lage[2] <= 1, "Kopfzeile: Suche links neben „Filament“, Navigation passt ohne Scrollen");
+  await p.screenshot({ path: `${out}/k0-kopf.png`, clip: { x: 0, y: 0, width: 1400, height: 72 } });
+  await el(p).locator(".kopf .kopf-suche").click();
+  await p.waitForTimeout(250);
+  pruefe((await el(p).locator(".such-box").count()) === 1, "Such-Feld in der Kopfzeile öffnet die Suche");
+  await p.screenshot({ path: `${out}/k1-kopf-suche.png` });
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(200);
+}
 
 // Hilfe
 await nav(p, "hilfe");
@@ -103,6 +114,21 @@ await el(p).locator('[data-aktion="ws-getauscht"][data-id="platte"]').click();
 await p.waitForTimeout(300);
 pruefe(await p.evaluate(() => window.el._daten.wartung.aufgaben.platte.h === 472 && window.el._daten.wartung.teile.find((x) => x.id === "platte").eingebaut_h === 472), "Wartung erledigt und Plattenzähler zurückgesetzt bei 472 h");
 await p.screenshot({ path: `${out}/w4-wartung.png` });
+pruefe((await el(p).locator(".ws-wartung .ws-info-knopf").count()) === (await el(p).locator(".ws-wartung").count()), "Wartung: jede Aufgabe und jedes Verschleißteil hat einen Info-Knopf");
+await el(p).locator('[data-aktion="ws-info"][data-id="a-stangen"]').click();
+await p.waitForTimeout(300);
+t = await el(p).locator(".ws-info").textContent();
+pruefe(t.includes("Kohlefaser") && t.includes("Wofür?") && (await el(p).locator(".ws-info svg.ws-p1s .an").count()) > 0, "Wartung-Info Kohlestangen: Zeichnung mit hervorgehobenen Stangen und Erklärung");
+await el(p).locator(".ws-info").scrollIntoViewIfNeeded();
+await p.screenshot({ path: `${out}/w4b-wartung-info.png` });
+for (const id of ["a-platte", "a-duese", "a-luefter", "a-spindeln", "a-riemen", "a-ptfe", "a-filter", "a-kalibrieren", "t-duese04", "t-socke"]) {
+  await el(p).locator(`[data-aktion="ws-info"][data-id="${id}"]`).click();
+  await p.waitForTimeout(60);
+  if ((await el(p).locator(`.ws-info[data-ws-info="${id}"] .an`).count()) < 1) pruefe(false, `Wartung-Info ${id} mit Zeichnung`);
+}
+await el(p).locator('[data-aktion="ws-info"][data-id="t-socke"]').click();
+await p.waitForTimeout(150);
+pruefe((await el(p).locator(".ws-info").count()) === 0, "Wartung-Info klappt wieder zu");
 // Kosten
 await el(p).locator('[data-aktion="ws-tab"][data-id="kosten"]').click();
 await p.waitForTimeout(300);
@@ -110,6 +136,64 @@ await el(p).locator('[data-ws="e-strompreis"]').fill("0.42");
 await el(p).locator('[data-ws="e-strompreis"]').dispatchEvent("change");
 pruefe(await p.evaluate(() => window.el._daten.einstellungen.strompreis === 0.42), "Strompreis per Regler geändert");
 await p.screenshot({ path: `${out}/w5-kosten.png` });
+// Regler: gelbe Wertbox, antippen zum Eintippen
+{
+  const regler = el(p).locator('[data-ws="e-strompreis"]');
+  const box = await regler.boundingBox();
+  pruefe((await el(p).locator(".regler-wert").count()) === 0, "Regler-Wertbox erst bei Benutzung");
+  await p.mouse.click(box.x + box.width * (0.42 - 0.1) / 0.7, box.y + box.height / 2);
+  await p.waitForTimeout(200);
+  pruefe((await el(p).locator(".regler-wert-knopf").count()) === 1 && /0,4\d/.test(await el(p).locator(".regler-wert-knopf").textContent()), "Regler aktiv: aktueller Wert in der gelben Box");
+  const bw = await el(p).locator(".regler-wert").boundingBox();
+  pruefe(bw.y + bw.height <= box.y + box.height / 2 + 2, "Wertbox sitzt über dem Regler");
+  await p.screenshot({ path: `${out}/r1-regler-box.png` });
+  await el(p).locator(".regler-wert-knopf").click();
+  await p.waitForTimeout(150);
+  await p.keyboard.press("Control+a");
+  await p.keyboard.type("0,377");
+  await p.screenshot({ path: `${out}/r2-regler-eintippen.png` });
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(200);
+  pruefe(await p.evaluate(() => window.el._daten.einstellungen.strompreis === 0.38 && window.el.shadowRoot.querySelector('[data-ws="e-strompreis"]').value === "0.38"), "Eingetippt 0,377 → auf Schrittweite gerundet 0,38 übernommen");
+  pruefe((await el(p).locator("#ws-e-strompreis").textContent()).includes("0,38"), "Abhängige Anzeige geht mit wie beim Ziehen");
+  pruefe((await el(p).locator(".regler-wert").textContent()).includes("gerundet"), "Hinweis: gerundet");
+  await el(p).locator(".regler-wert-knopf").click();
+  await p.keyboard.press("Control+a");
+  await p.keyboard.type("5");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(200);
+  pruefe(await p.evaluate(() => window.el._daten.einstellungen.strompreis === 0.8) && (await el(p).locator(".regler-wert").textContent()).includes("höchstens"), "Zu große Zahl auf Maximum begrenzt");
+  await el(p).locator(".regler-wert-knopf").click();
+  await p.keyboard.press("Control+a");
+  await p.keyboard.type("0,2");
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(150);
+  pruefe(await p.evaluate(() => window.el._daten.einstellungen.strompreis === 0.8) && (await el(p).locator(".regler-wert-knopf").count()) === 1 && (await el(p).locator(".dialog, .such-box").count()) === 0, "Escape bricht das Eintippen ab, ohne sonst etwas zu schließen");
+  await el(p).locator(".regler-wert-knopf").click();
+  await p.keyboard.press("Control+a");
+  await p.keyboard.type("abc");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(150);
+  pruefe((await el(p).locator(".regler-wert-feld.falsch").count()) === 1 && await p.evaluate(() => window.el._daten.einstellungen.strompreis === 0.8), "Keine Zahl: Feld rot, Wert bleibt");
+  await p.keyboard.press("Control+a");
+  await p.keyboard.type("0,25");
+  await p.evaluate(() => window.el._zeichnen());
+  await p.waitForTimeout(150);
+  pruefe((await el(p).locator(".regler-wert-feld").inputValue()) === "0,25", "Neuzeichnen: Box und Eingabe bleiben erhalten");
+  await el(p).locator(".ws-zwei h3, .ws-zwei .leise").first().click();
+  await p.waitForTimeout(200);
+  pruefe(await p.evaluate(() => window.el._daten.einstellungen.strompreis === 0.25) && (await el(p).locator(".regler-wert").count()) === 0, "Woanders hintippen übernimmt die Zahl und schließt die Box");
+  await el(p).locator('[data-ws="e-mindest_g"]').click();
+  await p.waitForTimeout(100);
+  await p.evaluate(() => window.el._zeichnen());
+  await p.waitForTimeout(100);
+  await el(p).locator(".regler-wert-knopf").click();
+  await p.keyboard.press("Control+a");
+  await p.keyboard.type("333");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(200);
+  pruefe(await p.evaluate(() => window.el._daten.einstellungen.mindest_g === 350), "Nach Neuzeichnen: richtiger Regler wiedergefunden, 333 → 350 (Schritt 50)");
+}
 
 // Verbuchte Drucke für Statistik und Kosten
 await p.evaluate(() => {
@@ -236,6 +320,26 @@ await el(p).locator('.mehr-punkt[data-id="werkstatt"]').click();
 await p.waitForTimeout(400);
 pruefe(await p.evaluate(() => window.el._ansicht === "werkstatt"), "Handy: Werkstatt geöffnet");
 await p.screenshot({ path: `${out}/m2-werkstatt.png` });
+await el(p).locator('[data-aktion="ws-tab"][data-id="wartung"]').click();
+await p.waitForTimeout(300);
+await el(p).locator('[data-aktion="ws-info"][data-id="a-riemen"]').tap();
+await p.waitForTimeout(300);
+await el(p).locator(".ws-info").scrollIntoViewIfNeeded();
+pruefe((await el(p).locator(".ws-info").textContent()).includes("Zahnriemen"), "Handy: Wartung-Info Riemen");
+await p.screenshot({ path: `${out}/m2b-wartung-info.png` });
+await el(p).locator('[data-aktion="ws-tab"][data-id="kosten"]').click();
+await p.waitForTimeout(300);
+await el(p).locator('[data-ws="e-mindest_material_g"]').tap();
+await p.waitForTimeout(200);
+pruefe((await el(p).locator(".regler-wert-knopf").count()) === 1, "Handy: Antippen des Reglers zeigt die gelbe Box");
+await el(p).locator(".regler-wert-knopf").tap();
+await p.waitForTimeout(200);
+await el(p).locator(".regler-wert-feld").fill("1234");
+await p.screenshot({ path: `${out}/m2c-regler-eintippen.png` });
+await el(p).locator(".regler-wert-feld").press("Enter");
+await p.waitForTimeout(200);
+pruefe(await p.evaluate(() => window.el._daten.einstellungen.mindest_material_g === 1200) && (await el(p).locator("#ws-e-mindest_material_g").textContent()).includes("1.200"), "Handy: 1234 eingetippt → 1.200 g übernommen");
+await p.screenshot({ path: `${out}/m2d-regler-box.png` });
 await el(p).locator('.nav-unten [data-aktion="mehr"]').click();
 await el(p).locator('.mehr-punkt[data-id="hilfe"]').click();
 await p.waitForTimeout(400);

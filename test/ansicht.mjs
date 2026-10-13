@@ -9,7 +9,7 @@ async function seite(breite, hoehe) {
   const p = await b.newPage({ viewport: { width: breite, height: hoehe }, deviceScaleFactor: 2 });
   p.on("pageerror", (e) => fehler.push(e.message));
   p.on("console", (m) => m.type() === "error" && fehler.push(m.text()));
-  await p.goto("http://localhost:8765/test/test.html");
+  await p.goto(`http://localhost:${process.env.TEST_PORT || 8765}/test/test.html`);
   await p.waitForTimeout(800);
   return p;
 }
