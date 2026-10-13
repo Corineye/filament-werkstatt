@@ -182,6 +182,22 @@ const ExtrasAnsicht = {
         <label class="knopf leise datei-knopf">📂 Einspielen<input type="file" accept=".json,application/json" data-sys="import" hidden></label></div></div>`;
   },
 
+  // ---- Neue Version erkennen (nach einem HACS-Update) ----
+  async _updatePruefen() {
+    const basis = window.__filamentWerkstattBasis;
+    if (!basis || this._neueVersion) return;
+    try {
+      const v = await import(new URL(`filament-werkstatt-version.js?t=${Date.now()}`, basis));
+      if (v.VERSION && v.VERSION !== VERSION) { this._neueVersion = v.VERSION; if (!this._modus && !this._dialog) this._zeichnen(); }
+    } catch (e) { /* offline oder Datei fehlt: beim nächsten Mal */ }
+  },
+  _updateBalkenHtml() {
+    if (!this._neueVersion) return "";
+    return `<div class="bu-balken" data-einmal="update-${esc(this._neueVersion)}">
+      <span class="bu-text">✨ Version ${esc(this._neueVersion)} ist installiert. Neu laden, um sie zu benutzen.</span>
+      <span class="bu-knoepfe"><button class="knopf klein-knopf" data-aktion="update-laden">Neu laden</button></span></div>`;
+  },
+
   // ---- Hilfen ----
   _toastMitKnopf(text, knopf, aktion) {
     this._toastKnopf = { knopf, aktion };
@@ -224,6 +240,9 @@ const ExtrasAnsicht = {
       case "such-werkstatt": this._sucheOffen = false; this._ansicht = "werkstatt"; this._wsZustand().tab = el.dataset.tab; break;
       case "mehr": this._mehrOffen = !this._mehrOffen; break;
       case "mehr-zu": this._mehrOffen = false; break;
+      case "update-laden":
+        if (this._ungespeichert) { clearTimeout(this._speicherTimer); this._speichernJetzt().then(() => location.reload()); } else location.reload();
+        return true;
       case "sich-laden": this._sicherungLaden(); return true;
       case "sich-spaeter": this._daten.einstellungen.sicherung_spaeter = new Date().toISOString(); this._speichern(); break;
       case "sich-import-ok": this._importAusfuehren(); return true;

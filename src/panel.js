@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.8.0";
+const VERSION = "0.8.1";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -152,7 +152,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       this._tasteGlobal = (e) => { if ((e.key === "k" && (e.ctrlKey || e.metaKey)) && this.isConnected && this._daten) { e.preventDefault(); this._sucheOeffnen(); } };
       window.addEventListener("keydown", this._tasteGlobal);
       // Zurück im Tab/App: neuere Daten von einem anderen Gerät holen
-      this._sichtbar = () => { if (document.visibilityState === "visible") this._fremdeAenderungPruefen(); };
+      this._sichtbar = () => { if (document.visibilityState === "visible") { this._fremdeAenderungPruefen(); this._updatePruefen(); } };
+      this._updateTimer = setInterval(() => this._updatePruefen(), 30 * 60000);
       document.addEventListener("visibilitychange", this._sichtbar);
       this._wischenEinrichten();
     }
@@ -818,6 +819,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       <div class="app ${this._mobil ? "mobil" : ""}">
         ${this._kopfHtml()}
         ${this._daten && this._drVerlauf ? this._buBalkenHtml() : ""}
+        ${this._updateBalkenHtml()}
         ${this._daten ? this._sicherungBalkenHtml() : ""}
         <main class="haupt"><div class="ansicht-rein ${this._ansicht === "modelle" ? "voll" : ""}" data-einmal="ansicht-${this._ansicht}">${this._inhaltHtml()}</div></main>
         ${["filament", "inventar"].includes(this._ansicht) && this._daten && !this._modus && !this._mehrOffen && !this._sucheOffen ? `<button class="fab" data-aktion="neu" aria-label="Hinzufügen" title="${this._ansicht === "inventar" ? "Teil hinzufügen" : "Filament hinzufügen"}">+</button>` : ""}
