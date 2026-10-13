@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.8.1";
+const VERSION = "0.9.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 const DRUCKER = "sensor.p1s_01p00c572701906_";
@@ -139,6 +139,15 @@ class FilamentWerkstattPanel extends HTMLElement {
   set panel(_) {}
 
   connectedCallback() {
+    // Home Assistant kann Werte setzen, bevor der Lader das Element definiert hat.
+    // Diese liegen dann als einfache Eigenschaften vor und überdecken die Setter.
+    for (const k of ["narrow", "panel", "route", "hass"]) {
+      if (Object.prototype.hasOwnProperty.call(this, k)) {
+        const wert = this[k];
+        delete this[k];
+        this[k] = wert;
+      }
+    }
     if (!this._ro) {
       this._ro = new ResizeObserver((e) => {
         const mobil = e[0].contentRect.width < 720;
