@@ -10,7 +10,7 @@ async function seite(breite, hoehe, mobil = false) {
   const p = await ctx.newPage();
   p.on("pageerror", (e) => fehler.push(e.message));
   p.on("console", (m) => m.type() === "error" && !m.text().includes("404") && fehler.push(m.text()));
-  await p.goto("http://localhost:8765/test/test.html?drucker=bereit");
+  await p.goto(`http://localhost:${process.env.TEST_PORT || 8765}/test/test.html?drucker=bereit`);
   await p.waitForTimeout(800);
   // Testdrucke liegen vor dem ersten Start: Stichtag zurücksetzen, Verlauf neu laden
   await p.evaluate(() => { const x = window.el; x._daten.buchen_ab = "2000-01-01"; x._buGezeigt = null; x._drVerlaufLaden(); });

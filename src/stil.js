@@ -695,19 +695,50 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .tr-rolle small { color: var(--leise); font-size: 12px; }
 .fb-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: start; }
 .mobil .fb-raster { grid-template-columns: 1fr; }
-.fb-karte { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); overflow: hidden; transition: border-color .2s; }
-.fb-karte.auf { border-color: rgba(255,181,71,.45); }
+.fb-karte { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); overflow: hidden; transition: border-color .2s, background .2s; }
+.fb-karte:hover { border-color: rgba(255,181,71,.45); background: var(--flaeche-hover); }
 .fb-kopf { width: 100%; display: flex; gap: 12px; align-items: center; padding: 10px; text-align: left; }
 .fb-kopf .fb-bild { width: 84px; flex: none; }
 .fb-kopf > span { display: grid; gap: 2px; }
 .fb-kopf small { font-size: 12px; }
-.fb-details { padding: 0 14px 14px; }
 .kal-wahl { margin-bottom: 14px; }
 .kal-kopf { display: flex; gap: 14px; align-items: center; }
 .kal-bild { width: 120px; height: auto; flex: none; border-radius: 12px; background: rgba(0,0,0,.3); }
 .mobil .kal-bild { width: 92px; }
 .kal-liste { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; }
 .kal-liste.fehler li::marker { color: var(--rot); }
+
+/* ---- Hilfe: Beispielrolle, Trockner-Zeichnung, Fehlerbild-Fenster ---- */
+.hi-rollenwahl { margin-top: 16px; }
+.hi-tr-info + .hi-rollenwahl, .hi-bild-karte .hi-rollenwahl { margin-top: 0; }
+.hi-werte { margin-top: 8px; }
+.hi-fb-wahl { max-width: 420px; margin: 0 0 14px; }
+.hi-fb-wahl .hi-rollenwahl { margin-top: 0; }
+.tr-wert { pointer-events: none; }
+.hi-fb-ebene { position: absolute; inset: 0; z-index: 26; display: grid; place-items: center; padding: 20px; }
+.hi-fb-schleier { position: absolute; inset: 0; background: rgba(0,0,0,.6); backdrop-filter: blur(3px); animation: hi-fb-blende .22s ease both; }
+.hi-fb-popup { position: relative; width: min(620px, 100%); max-height: 100%; overflow-y: auto; overscroll-behavior: contain; outline: none;
+  padding: 24px; border-radius: 22px; background: rgba(16,22,20,.98); border: 1px solid rgba(255,181,71,.35); box-shadow: 0 30px 80px rgba(0,0,0,.6);
+  animation: hi-fb-auf .24s cubic-bezier(.2,.8,.2,1) both; }
+.hi-fb-ebene.zu { pointer-events: none; }
+.hi-fb-ebene.zu .hi-fb-schleier { animation: hi-fb-blende-zu .18s ease forwards; }
+.hi-fb-ebene.zu .hi-fb-popup { animation: hi-fb-zu .18s ease forwards; }
+@keyframes hi-fb-blende { from { opacity: 0; } }
+@keyframes hi-fb-blende-zu { to { opacity: 0; } }
+@keyframes hi-fb-auf { from { opacity: 0; transform: translateY(14px) scale(.96); } }
+@keyframes hi-fb-zu { to { opacity: 0; transform: translateY(10px) scale(.97); } }
+.hi-fb-x { position: absolute; top: 12px; right: 12px; background: var(--flaeche-hover); border: 1px solid var(--rand); }
+.hi-fb-x:hover { border-color: rgba(255,181,71,.5); }
+.hi-fb-kopf { display: flex; gap: 16px; align-items: center; padding-right: 40px; }
+.hi-fb-kopf .fb-bild { width: 180px; max-width: 40%; flex: none; }
+.hi-fb-kopf p { margin: 4px 0 0; }
+.hi-fb-ursachen { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; }
+.hi-fb-ursachen li::marker { color: var(--amber); }
+.mobil .hi-fb-ebene { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+.mobil .hi-fb-popup { padding: 18px 16px; border-radius: 18px; }
+.mobil .hi-fb-kopf { flex-direction: column; align-items: flex-start; gap: 10px; padding-right: 36px; }
+.mobil .hi-fb-kopf .fb-bild { width: 150px; max-width: 100%; }
+@media (prefers-reduced-motion: reduce) { .hi-fb-schleier, .hi-fb-popup, .hi-fb-ebene.zu .hi-fb-schleier, .hi-fb-ebene.zu .hi-fb-popup { animation-duration: .01s; } }
 
 /* ---- Werkstatt ---- */
 .ws-kopfzeile { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
@@ -819,6 +850,196 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .suche-punkt { grid-column: 1 / -1; }
 .mobil .nav-unten { z-index: 6; }
 
+/* ==== 3D-Modelle: Orbit, Ausrichtungswürfel, Füllmuster, eigene Winkel, Warteschlange (v0.11) ==== */
+.mod-ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mod-ico .voll { fill: currentColor; stroke: none; }
+.mod-orbit { position: relative; }
+.mod-leiste .mod-orbit-knopf { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 8px; }
+.mod-orbit-knopf .mod-pfeil { font-size: 10px; opacity: .7; transition: transform .2s; }
+.mod-orbit-knopf.an .mod-pfeil { transform: rotate(180deg); }
+.mod-orbit-menue { position: absolute; z-index: 6; top: calc(100% + 8px); right: 0; width: 290px; padding: 6px; border-radius: 16px;
+  background: rgba(14,22,19,.96); border: 1px solid var(--rand); backdrop-filter: blur(16px); box-shadow: 0 18px 40px rgba(0,0,0,.5);
+  animation: dd-rein .18s cubic-bezier(.2,.8,.2,1); transform-origin: top right; }
+.mod-orbit-punkt { width: 100%; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; border-radius: 12px; }
+.mod-orbit-punkt:hover { background: var(--flaeche-hover); }
+.mod-orbit-punkt.an { background: var(--mint-weich); color: var(--mint); }
+.mod-orbit-punkt .mod-ico { width: 24px; height: 24px; }
+.mod-orbit-punkt > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.mod-orbit-punkt strong { font-size: 13px; }
+.mod-orbit-punkt small { font-size: 11px; color: var(--leise); }
+.mod-orbit-trenner { height: 1px; margin: 4px 8px; background: var(--rand); }
+.mod-orbit-tipp { margin: 4px 10px 6px; }
+.mod-schalter { position: relative; width: 30px; height: 18px; flex: none; border-radius: 9px; background: rgba(255,255,255,.14); transition: background .2s; }
+.mod-schalter::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #cfe0d8; transition: transform .2s cubic-bezier(.2,.8,.2,1); }
+.mod-schalter.an { background: var(--mint); }
+.mod-schalter.an::after { transform: translateX(12px); background: #062018; }
+.mobil .mod-orbit-name { display: none; }
+.mobil .mod-orbit { position: static; }
+.mobil .mod-orbit-menue { left: 0; right: 0; width: auto; transform-origin: top center; }
+
+/* Ausrichtungswürfel */
+.mod-wuerfel-ecke { position: absolute; z-index: 2; top: 58px; right: 14px; width: calc(var(--w) * 1.7); height: calc(var(--w) * 1.7); pointer-events: none; }
+.mobil .mod-wuerfel-ecke { top: 104px; right: 4px; }
+.mod-wuerfel { position: absolute; inset: 0; pointer-events: none; touch-action: none; }
+.mod-w-koerper { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; }
+.mod-w-flaeche { position: absolute; left: calc(var(--w) / -2); top: calc(var(--w) / -2); width: var(--w); height: var(--w); display: grid;
+  grid-template-columns: 20% 60% 20%; grid-template-rows: 20% 60% 20%; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: linear-gradient(145deg, rgba(36,56,49,.95), rgba(16,26,23,.95)); border: 1px solid rgba(62,230,168,.38); border-radius: 4px; pointer-events: auto; }
+.mod-w-flaeche.w-oben { background: linear-gradient(145deg, rgba(46,72,62,.96), rgba(22,36,31,.96)); }
+.mod-w-flaeche.w-unten { background: linear-gradient(145deg, rgba(22,30,28,.96), rgba(12,18,16,.96)); }
+.mod-w-zone { padding: 0; border-radius: 2px; display: grid; place-items: center; transition: background .12s; cursor: pointer; }
+.mod-w-zone:hover { background: rgba(62,230,168,.45); }
+.mod-w-zone.flaeche:hover { background: rgba(62,230,168,.22); }
+.mod-w-zone span { font-size: calc(var(--w) * .145); font-weight: 800; letter-spacing: .6px; color: #d7efe5; pointer-events: none; user-select: none; }
+.ziehbar .mod-w-zone { cursor: grab; }
+.mod-wuerfel.zieht .mod-w-zone { cursor: grabbing; }
+.mod-heim { position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; pointer-events: auto;
+  color: var(--leise); background: rgba(8,12,11,.7); border: 1px solid var(--rand); backdrop-filter: blur(8px); transition: color .15s, transform .15s; }
+.mod-heim:hover { color: var(--mint); transform: scale(1.08); }
+.mod-heim .mod-ico { width: 16px; height: 16px; }
+.mod-achsen { position: absolute; left: -14px; bottom: -16px; width: 54px; height: 54px; overflow: visible; pointer-events: none; }
+.mod-achsen line { stroke-width: 2.2; stroke-linecap: round; transition: opacity .2s; }
+.mod-achsen text { font-size: 9px; font-weight: 800; text-anchor: middle; stroke: none; transition: opacity .2s; }
+.mod-achsen .a-x { stroke: #ff6b6b; fill: #ff6b6b; }
+.mod-achsen .a-y { stroke: #4fe08a; fill: #4fe08a; }
+.mod-achsen .a-z { stroke: #5cc8ff; fill: #5cc8ff; }
+.mod-achsen text.a-x, .mod-achsen text.a-y, .mod-achsen text.a-z { stroke: none; }
+
+/* Drehpunkt beim Orbit */
+.mod-drehpunkt { position: absolute; left: -7px; top: -7px; width: 14px; height: 14px; border-radius: 50%; pointer-events: none; z-index: 1; opacity: 0;
+  background: var(--mint); box-shadow: 0 0 0 4px rgba(62,230,168,.25), 0 0 14px rgba(62,230,168,.8); transition: opacity .15s; }
+.mod-drehpunkt.an { opacity: 1; }
+.mod-drehpunkt.mitte { background: var(--amber); box-shadow: 0 0 0 4px rgba(255,181,71,.25), 0 0 14px rgba(255,181,71,.7); }
+.mod-marker.versteckt { display: none; }
+
+/* Warteschlange: immer sichtbar unten in der Seitenleiste */
+.mod-inhalt { padding-bottom: 20px; }
+.mod-fuss { flex: none; padding: 12px 18px 16px; border-top: 1px solid var(--rand); background: linear-gradient(180deg, rgba(8,12,11,.2), rgba(8,12,11,.55)); }
+.mod-ws { box-shadow: 0 6px 20px rgba(62,230,168,.18); }
+.mobil .mod-seite { overflow: visible; }
+.mobil .mod-fuss { position: sticky; z-index: 2; bottom: calc(76px + env(safe-area-inset-bottom)); margin: 0 10px 10px; padding: 8px; border: 1px solid var(--rand); border-radius: 16px;
+  background: rgba(14,22,19,.9); backdrop-filter: blur(14px); box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+
+/* Füllmuster */
+.mod-muster { display: flex; gap: 12px; align-items: flex-start; margin: 6px 0 10px; }
+.mod-muster-vorschau { width: 64px; height: 64px; flex: none; margin-top: 4px; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,.25); border: 1px solid var(--rand); }
+.mod-muster-bild { width: 100%; height: 100%; display: block; animation: blende .25s ease; }
+.mod-muster-bild rect { fill: none; stroke: rgba(255,170,90,.55); stroke-width: .9; }
+.mod-muster-bild path { fill: none; stroke: #d94d59; stroke-width: .75; stroke-linecap: round; }
+.mod-muster-text { flex: 1; min-width: 0; }
+.mod-muster-text p { margin: 6px 0 0; }
+.mod-muster-text .pille { font-size: 10px; padding: 1px 7px; margin-left: 4px; vertical-align: 1px; }
+
+/* Eigene Drehwinkel */
+.mod-dreh-eigen { margin: 8px 0 14px; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.2); border: 1px solid rgba(62,230,168,.25); animation: ansicht-rein .22s ease; }
+.mod-dreh-felder { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mod-dreh-feld { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid var(--rand); transition: border-color .15s, box-shadow .15s; }
+.mod-dreh-feld.aktiv { border-color: rgba(62,230,168,.55); box-shadow: 0 0 0 3px rgba(62,230,168,.1); }
+.mod-dreh-feld span { font-weight: 800; font-size: 13px; }
+.mod-dreh-feld.a-x span { color: #ff6b6b; }
+.mod-dreh-feld.a-y span { color: #4fe08a; }
+.mod-dreh-feld.a-z span { color: #5cc8ff; }
+.mod-dreh-feld input { flex: 1; min-width: 0; width: 100%; padding: 8px 2px; border: none; background: none; color: var(--text); font: inherit; font-size: 16px; text-align: right; font-variant-numeric: tabular-nums; outline: none; -moz-appearance: textfield; }
+.mod-dreh-feld input::-webkit-inner-spin-button { opacity: .4; }
+.mod-dreh-feld small { color: var(--leise); }
+.mod-dreh-schnell { margin: 10px 0 4px; }
+.mod-dreh-schnell .chip { padding: 5px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mod-dreh-eigen .knopf-reihe { margin-top: 8px; }
+
 /* ---- Sicherungs-Balken ---- */
 .bu-balken.blau { background: linear-gradient(90deg, rgba(92,200,255,.18), rgba(92,200,255,.05)); border-bottom-color: rgba(92,200,255,.4); }
+/* ==== Allgemein: Kopfzeilen-Suche, Regler-Wertbox, Wartungs-Infos ==== */
+:host { --gelb: #ffd54a; --gelb-weich: rgba(255,213,74,.14); }
+/* Suche in der Kopfzeile links neben „Filament“ */
+.kopf-suche { display: flex; align-items: center; gap: 8px; flex: none; height: 38px; padding: 0 8px 0 12px; margin-left: 8px; border-radius: 12px;
+  border: 1px solid var(--rand); background: rgba(0,0,0,.28); color: var(--leise); font-size: 14px; transition: border-color .15s, background .15s, color .15s; }
+.kopf-suche:hover, .kopf-suche:focus-visible { border-color: rgba(62,230,168,.5); background: rgba(62,230,168,.06); color: var(--text); outline: none; }
+.kopf-suche-icon { font-size: 15px; }
+.kopf-suche-text { min-width: 64px; text-align: left; }
+.kopf-suche kbd { font: inherit; font-size: 11px; letter-spacing: .3px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--rand); background: rgba(255,255,255,.04); color: var(--leise); }
+.kopf-suche + .nav-oben { margin-left: 0; }
+.nav-oben .nav-punkt { white-space: nowrap; flex: none; }
+@media (max-width: 1400px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
+@media (max-width: 1340px) { .kopf .speicher { font-size: 0; } .kopf .speicher::before { font-size: 14px; } }
+@media (max-width: 1180px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
+@media (max-width: 1640px) { .kopf-suche kbd { display: none; } }
+@media (max-width: 1520px) { .kopf-suche-text { display: none; } .kopf-suche { width: 38px; padding: 0; justify-content: center; margin-left: 4px; } }
+
+/* Regler: aktueller Wert in gelber Box über dem Knopf, antippen zum Eintippen */
+.regler-wert { position: absolute; z-index: 35; transform: translateY(-100%); display: grid; justify-items: center; gap: 2px;
+  padding: 3px; border-radius: 11px; background: var(--gelb); color: #1b1503; box-shadow: 0 0 0 4px rgba(255,213,74,.16), 0 6px 18px rgba(0,0,0,.5);
+  animation: regler-wert-rein .14s ease-out; pointer-events: auto; }
+.regler-wert::after { content: ""; position: absolute; left: var(--spitze, 50%); bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: var(--gelb); transform: rotate(45deg); border-radius: 2px; }
+@keyframes regler-wert-rein { from { opacity: 0; transform: translateY(calc(-100% + 6px)); } }
+.regler-wert-knopf { display: flex; align-items: baseline; gap: 6px; padding: 3px 8px; border-radius: 8px; color: inherit; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; min-height: 28px; }
+.regler-wert-knopf:hover, .regler-wert-knopf:focus-visible { background: rgba(0,0,0,.08); outline: none; }
+.regler-wert-knopf i { font-style: normal; font-weight: 400; font-size: 12px; opacity: .6; }
+.regler-wert small { position: relative; z-index: 1; font-size: 11px; font-weight: 600; padding: 0 6px 2px; white-space: nowrap; opacity: .8; }
+.regler-wert-feld { width: 9ch; min-width: 72px; padding: 5px 8px; border-radius: 8px; border: 2px solid rgba(27,21,3,.55); background: #fff8dc; color: #1b1503;
+  font: inherit; font-weight: 800; font-size: 16px; text-align: center; outline: none; font-variant-numeric: tabular-nums; }
+.regler-wert-feld:focus { border-color: #1b1503; }
+.regler-wert-feld.falsch { border-color: var(--rot); background: #ffe1e1; animation: regler-wackeln .25s; }
+@keyframes regler-wackeln { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+input[type=range]:active::-webkit-slider-thumb { background: var(--gelb); box-shadow: 0 0 0 7px rgba(255,213,74,.2), 0 2px 8px rgba(0,0,0,.4); }
+
+/* Wartung: Info mit kleiner P1S-Zeichnung */
+.ws-wartung { flex-wrap: wrap; }
+.ws-info-knopf { width: 32px; height: 32px; border-radius: 10px; flex: none; display: grid; place-items: center; font-size: 15px; font-weight: 700; color: var(--leise); border: 1px solid var(--rand); }
+.ws-info-knopf:hover { color: var(--text); background: var(--flaeche-hover); }
+.ws-info-knopf.an { color: #1b1503; background: var(--gelb); border-color: var(--gelb); }
+.ws-info { flex: 1 0 100%; display: flex; gap: 14px; align-items: center; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.28); border: 1px solid rgba(255,213,74,.22); animation: blende .2s ease; }
+.ws-info-bild { width: 170px; flex: none; }
+.ws-info-bild svg { width: 100%; height: auto; display: block; }
+.ws-info-text { display: grid; gap: 6px; font-size: 14px; line-height: 1.45; min-width: 0; }
+.ws-info-text p { margin: 0; }
+.ws-info-text b { color: var(--gelb); font-weight: 600; }
+.mobil .ws-info { flex-direction: column; align-items: stretch; }
+.mobil .ws-info-bild { width: min(240px, 100%); align-self: center; }
+.ws-p1s .an { filter: drop-shadow(0 0 3px rgba(255,213,74,.85)); }
+.ws-p1s .ws-p1s-puls { fill: none; stroke: var(--gelb); stroke-width: 1.4; animation: ws-puls 1.8s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ws-puls { from { opacity: .9; transform: scale(.6); } to { opacity: 0; transform: scale(1.6); } }
+
+/* ==== Drucker-Steuerung: geladenes Filament, Zieltemperatur, Lüfter (v0.11) ==== */
+:host { --gruen: #5be37d; --gruen-weich: rgba(91,227,125,.14); }
+.pille.gruen { color: var(--gruen); background: var(--gruen-weich); }
+/* Kachel der geladenen Rolle */
+.kachel.geladen { border: 1.5px solid rgba(91,227,125,.75); background: linear-gradient(160deg, rgba(91,227,125,.16), transparent 60%), var(--flaeche);
+  box-shadow: 0 0 0 1px rgba(91,227,125,.15), 0 0 22px rgba(91,227,125,.18); }
+.kachel.geladen:hover { border-color: var(--gruen); }
+.badge-geladen { position: absolute; top: 12px; left: 12px; z-index: 1; font-size: 10px; font-weight: 700; color: #062012; background: var(--gruen); border-radius: 6px; padding: 2px 7px; letter-spacing: .3px; }
+.mobil .badge-geladen { font-size: 9px; padding: 2px 5px; }
+.kachel.geladen .kachel-achtung { top: 34px; }
+/* Knopf „Geladen“ in der Detailansicht */
+.geladen-knopf { margin-left: 6px; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; color: var(--leise); border: 1px solid var(--rand); vertical-align: middle; }
+.geladen-knopf:hover { color: var(--gruen); border-color: rgba(91,227,125,.5); }
+.geladen-knopf.an { color: #062012; background: var(--gruen); border-color: var(--gruen); }
+/* Karte „Geladenes Filament“ */
+.dr-filament.geladen { border-color: rgba(91,227,125,.45); background: radial-gradient(360px 160px at 0% 0%, rgba(91,227,125,.10), transparent 70%), var(--flaeche); }
+.dr-fil-zeile { display: flex; gap: 14px; align-items: center; }
+.dr-fil-spule { width: 52px; height: 52px; flex: none; display: grid; place-items: center; }
+.dr-fil-leer { width: 46px; height: 46px; border-radius: 50%; border: 1.5px dashed var(--rand); display: grid; place-items: center; color: var(--leise); font-size: 20px; }
+.dr-fil-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.dr-fil-text small { color: var(--leise); font-size: 12px; }
+.dr-fil-wahl { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.dr-fil-wahl .auswahl { flex: 1; min-width: 0; margin: 0; }
+.mobil .dr-fil-wahl { flex-direction: column; align-items: stretch; }
+.dr-filament > .mini { margin: 10px 0 0; }
+/* Zieltemperatur eingeben */
+.dr-temp-fuss { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dr-soll { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.dr-soll input { width: 74px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; font-size: 14px; text-align: right; }
+.dr-soll input:focus { outline: none; border-color: rgba(62,230,168,.6); }
+.dr-soll input.fehler { border-color: var(--rot); background: rgba(255,107,107,.1); }
+.dr-soll .mini { margin: 0; min-width: 62px; }
+.dr-einheit { color: var(--leise); font-size: 13px; }
+.dr-rolle-chip { padding: 4px 10px; font-size: 12px; }
+.dr-soll.breit { display: flex; margin: 0; }
+.dr-soll.breit input { flex: 1; width: auto; padding: 10px 12px; font-size: 15px; }
+/* Lüfter zum Antippen */
+.dr-titel-zusatz { font-weight: 400; margin-left: 8px; font-size: 12px; }
+.dr-l-knopf { position: relative; color: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
+.dr-l-knopf:hover { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.dr-l-stift { position: absolute; top: 6px; right: 8px; font-style: normal; font-size: 11px; color: var(--leise); }
+.dr-stufen { margin: 12px 0 4px; }
+.dr-stufen .chip { min-width: 54px; }
 `;

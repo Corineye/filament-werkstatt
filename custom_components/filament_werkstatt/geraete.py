@@ -48,6 +48,12 @@ DRUCKER_SCHLUESSEL: dict[str, list[tuple[str, str]]] = {
     "licht": [("light", "chamber_light")],
     "kamera": [("camera", "camera"), ("image", "p1p_camera")],
     "titelbild": [("image", "cover_image")],
+    # Zum Einstellen aus der Seite heraus
+    "duese_soll": [("number", "target_nozzle_temperature")],
+    "bett_soll": [("number", "target_bed_temperature")],
+    "f_kopf": [("fan", "cooling_fan")],
+    "f_bauteil": [("fan", "aux_fan")],
+    "f_raum": [("fan", "chamber_fan")],
 }
 
 

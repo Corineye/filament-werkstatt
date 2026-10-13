@@ -40,6 +40,12 @@ setze("binary_sensor.p1s_01p00c572701906_firmware_status", G + "Firmware Status"
 setze("binary_sensor.p1s_01p00c572701906_extruder_filament_status", G + "Extruder Filament Status", "on");
 setze("camera.p1s_01p00c572701906_kamera", G + "Kamera", "streaming", { entity_picture: "/test/kamera.svg?v=1" });
 setze("image.p1s_01p00c572701906_titelbild", G + "Titelbild", "2026-10-13", { entity_picture: "/test/titelbild.svg" });
+// Zum Einstellen: Zieltemperaturen (number) und Lüfter (fan) wie bei ha-bambulab auf Deutsch
+setze("number.p1s_01p00c572701906_zieltemperatur_der_duse", G + "Zieltemperatur der Düse", druckt ? 220 : 0, { min: 0, max: 320, step: 1 });
+setze("number.p1s_01p00c572701906_zieltemperatur_des_druckbett", G + "Zieltemperatur des Druckbett", druckt ? 55 : 0, { min: 0, max: 120, step: 1 });
+setze("fan.p1s_01p00c572701906_druckkopflufter", G + "Druckkopflüfter", druckt ? "on" : "off", { percentage: druckt ? 60 : 0 });
+setze("fan.p1s_01p00c572701906_bauteillufter", G + "Bauteillüfter", druckt ? "on" : "off", { percentage: druckt ? 100 : 0 });
+setze("fan.p1s_01p00c572701906_druckraumlufter", G + "Druckraumlüfter", "off", { percentage: 0 });
 setze("switch.3d_drucker", "3d-Drucker", aus ? "off" : "on");
 setze("sensor.3d_drucker_derzeitiger_verbrauch", "3d-Drucker Derzeitiger Verbrauch", aus ? 0 : druckt ? 142 : 5.5);
 setze("sensor.3d_drucker_heutiger_verbrauch", "3d-Drucker Heutiger Verbrauch", 0.21);
@@ -52,11 +58,17 @@ const drucke = [
 const speicher = {};
 window.wsLog = [];
 window.dienste = [];
+window.dienstDaten = [];
 window.hass = { states, callService: async (domain, dienst, data) => {
   dienste.push(`${domain}.${dienst}:${data.entity_id}`);
+  dienstDaten.push({ domain, dienst, ...data });
   setTimeout(() => {
     const neu = { ...window.hass.states };
-    neu[data.entity_id] = { ...neu[data.entity_id], state: dienst === "turn_on" ? "on" : "off" };
+    const alt = neu[data.entity_id] || { entity_id: data.entity_id, attributes: {} };
+    if (dienst === "set_value") neu[data.entity_id] = { ...alt, state: String(data.value) };
+    else if (dienst === "set_percentage") neu[data.entity_id] = { ...alt, state: data.percentage > 0 ? "on" : "off", attributes: { ...alt.attributes, percentage: data.percentage } };
+    else if (domain === "fan" && dienst === "turn_off") neu[data.entity_id] = { ...alt, state: "off", attributes: { ...alt.attributes, percentage: 0 } };
+    else neu[data.entity_id] = { ...alt, state: dienst === "turn_on" ? "on" : "off" };
     window.hass = { ...window.hass, states: neu };
     window.el.hass = window.hass;
   }, 600);

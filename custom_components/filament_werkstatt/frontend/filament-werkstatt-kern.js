@@ -234,6 +234,7 @@ function werkstattStandard() {
     einstellungen: { ...JSON.parse(JSON.stringify(EINSTELLUNGEN_STANDARD)), sicherung_start: new Date().toISOString() },
     drucke: {},
     letzte_rolle: null,
+    geladen: null,        // Rolle, die gerade im Drucker steckt (ID), null = kein Filament geladen
     buchen_ab: new Date().toISOString(),   // ältere Drucke nicht nachfragen
     warteschlange: [],
     abgleich: [],
@@ -541,7 +542,7 @@ const FEHLERBILDER = [
       { text: "Vibrations-Kalibrierung am Drucker neu laufen lassen." },
     ] },
   { id: "naht", name: "Sichtbare Naht", kurz: "Senkrechte Linie, wo jede Schicht beginnt",
-    ursachen: ["Druckdruck beim Start und Ende der Wand (K-Faktor)"],
+    ursachen: ["Druckaufbau in der Düse am Anfang und Ende der Wand (Pressure Advance / K-Faktor)", "Ungünstige Nahtposition (z. B. „Nächste“ auf glatten Flächen)"],
     loesungen: [
       { text: "Flussdynamik (K-Faktor) kalibrieren (Hilfe › Kalibrierung)." },
       { text: "Naht in eine Ecke legen: Nahtposition „Ausgerichtet“." },
@@ -580,14 +581,22 @@ const FEHL_FRAGEN = {
 // Aus Fortschritt (%) eine Antwort für „Wann?“ vorschlagen
 const wannAusFortschritt = (p) => (p == null ? null : p < 3 ? "erste" : p < 33 ? "frueh" : p < 80 ? "mitte" : "spaet");
 
+// Temperaturturm: unterste (heißeste) Stufe passend zur Düsentemperatur der Rolle
+const kalTempOben = (r) => { const d = r && wert(r, "duese").v; return d ? Math.round((d + 15) / 5) * 5 : 230; };
+// Platzhalter in Kalibrier-Texten mit Werten der Beispielrolle füllen
+function kalText(s, r) {
+  const oben = kalTempOben(r);
+  return s.replace(/\{t_hoch\}/g, oben).replace(/\{t_tief\}/g, oben - 25).replace(/\{material\}/g, (r && r.material) || "PLA");
+}
+
 // Kalibrierungen (Bambu Studio › Kalibrierung)
 const KALIBRIERUNGEN = [
   { id: "temp", name: "Temperaturturm", feld: "duese", icon: "🌡️",
     wozu: "Findet die beste Düsentemperatur für eine Rolle: sauber, ohne Fäden, mit fester Schichthaftung.",
-    so: ["Bambu Studio › Kalibrierung › Temperatur.", "Material wählen, Bereich vorgeben (z. B. 230 → 190 °C bei PLA).", "Drucken. Jede Stufe hat eine andere Temperatur."],
+    so: ["Bambu Studio › Kalibrierung › Temperatur.", "Material wählen, Bereich vorgeben (z. B. {t_hoch} → {t_tief} °C bei {material}).", "Drucken. Jede Stufe hat eine andere Temperatur."],
     achten: ["Unten heiß, oben kalt: die Stufe mit sauberen Brücken, wenig Fäden und ohne Lücken wählen.", "Turm oben abbrechen: wenn er leicht bricht, ist es zu kalt."],
     fehler: ["Fäden an den heißen Stufen (zu heiß oder feucht)", "Brücken hängen durch", "Turm bricht bei kalten Stufen"],
-    bild: `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="38" y="${70 - i * 13}" width="44" height="12" fill="hsl(${10 + i * 28} 70% 55%)"/><text x="88" y="${79 - i * 13}" font-size="7" fill="#8da49a">${230 - i * 5}°</text>`).join("")}</svg>` },
+    bild: (r) => { const oben = kalTempOben(r); return `<svg viewBox="0 0 120 90" class="kal-bild"><rect x="0" y="82" width="120" height="8" fill="#2a3330"/>${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="38" y="${70 - i * 13}" width="44" height="12" fill="hsl(${10 + i * 28} 70% 55%)"/><text x="88" y="${79 - i * 13}" font-size="7" fill="#8da49a">${oben - i * 5}°</text>`).join("")}</svg>`; } },
   { id: "flow", name: "Flow Rate", feld: "flow", icon: "💧",
     wozu: "Stimmt, wie viel Material gefördert wird. Zu viel macht Pickel und raue Deckflächen, zu wenig Lücken.",
     so: ["Bambu Studio › Kalibrierung › Flow-Rate › Durchgang 1.", "Die glatteste Fläche wählen und die Zahl eintragen.", "Optional Durchgang 2 für die Feinabstimmung."],
@@ -625,7 +634,7 @@ const P1S_BEREICHE = [
     einst: [["Geschwindigkeiten", "Außenwand langsamer für schöne Oberflächen, Füllung schnell."], ["Beschleunigung", "Höher = schneller, aber mehr Schwingungen."], ["Geschwindigkeitsprofil am Drucker", "Leise, Standard, Sport, Wahnsinn."]] },
   { id: "bett", n: 5, x: 210, y: 300, name: "Druckbett", live: "bett", einheit: "°C",
     text: "Heizbett mit wechselbarer Platte. Platte und Temperatur entscheiden über Haftung und Elefantenfuß.",
-    einst: [["Druckbetttyp", "Textured PEI für fast alles, Cool Plate für PLA, Engineering für Kleber."], ["Betttemperatur", "PLA 55 °C, PETG 70 °C, ASA 100 °C."], ["Erste Schicht", "Höhe und Tempo der ersten Schicht."]] },
+    einst: [["Druckbetttyp", "Textured PEI für fast alles, Cool Plate für PLA, Engineering Plate mit Klebestift."], ["Betttemperatur", "PLA 55 °C, PETG 70 °C, ASA 100 °C."], ["Erste Schicht", "Höhe und Tempo der ersten Schicht."]] },
   { id: "z", n: 6, x: 76, y: 262, name: "Z-Achse (Spindeln)", live: null,
     text: "Senkt das Bett Schicht für Schicht ab. Hier wirken Schichthöhe und Z-Hop.",
     einst: [["Schichthöhe", "0,2 mm Standard, 0,12 fein, 0,28 schnell (bei 0,4-mm-Düse)."], ["Z-Hop", "Hebt beim Verfahren an, verhindert Anstoßen."]] },
@@ -641,7 +650,7 @@ const P1S_BEREICHE = [
   { id: "kamera", n: 10, x: 58, y: 54, name: "Kamera", live: null,
     text: "Zeigt den Druck live und macht das Endfoto. Die Fehlererkennung (Spaghetti) läuft darüber.",
     einst: [["Druckfehlererkennung", "Am Drucker unter Einstellungen einschalten."]] },
-  { id: "display", n: 11, x: 110, y: 404, name: "Display", live: "schritt",
+  { id: "display", n: 11, x: 110, y: 32, name: "Display", live: "schritt",
     text: "Bedienung am Gerät: Filament laden, Extruder fahren, Geschwindigkeitsprofil, Kalibrierung.",
     einst: [["Extruder fahren", "Vor dem Druck 3× fördern (wird beim Verbuchen eingerechnet)."]] },
   { id: "schneider", n: 12, x: 180, y: 158, name: "Filament-Schneider", live: null,
@@ -684,44 +693,56 @@ function p1sSvg(aktiv) {
     <rect x="58" y="306" width="304" height="8" fill="rgba(62,230,168,.25)"/>
     <!-- kleines Druckteil -->
     <rect x="196" y="268" width="36" height="22" rx="2" fill="#3ee6a8" opacity=".7"/>
-    <!-- Display + Tür -->
-    <rect x="70" y="390" width="80" height="26" rx="4" stroke="#8da49a" stroke-width="1.4" fill="rgba(62,230,168,.06)"/>
-    <path d="M78 403 H110" stroke="#3ee6a8" stroke-width="2"/>
-    <path d="M34 370 H376" ${linie}/>
+    <!-- Display oben an der Front -->
+    <rect x="72" y="26" width="76" height="12" rx="3" stroke="#8da49a" stroke-width="1.4" fill="rgba(62,230,168,.10)" class="p1s-display"/>
+    <!-- Tür unten -->
+    <path d="M34 370 H376" ${linie}/><path d="M186 397 H234" stroke="#5d726a" stroke-width="3" stroke-linecap="round"/>
     ${P1S_BEREICHE.map((b) => `<g class="p1s-punkt ${aktiv === b.id ? "an" : ""}" data-aktion="hi-p1s" data-id="${b.id}" tabindex="0">
       <circle cx="${b.x}" cy="${b.y}" r="16" class="p1s-flaeche"/>
       <circle cx="${b.x}" cy="${b.y}" r="10" class="p1s-ring"/><text x="${b.x}" y="${b.y + 3.5}" text-anchor="middle">${b.n}</text></g>`).join("")}
   </svg>`;
 }
 
-// ---- Sovol-Trockner: Bereiche des Displays ----
+// ---- Sovol-Trockner: Bereiche der Zeichnung ----
+// f = Hover-Fläche [x, y, breite, höhe], b = Nummernpunkt [x, y] (viewBox 440 × 290).
+// Die Display-Werte stehen mittig in ihrer Fläche (y = 221), die Nummer darunter.
+const TR_TEXT_Y = 221;
+const trFeld = (x) => ({ f: [x - 29, TR_TEXT_Y - 12, 58, 24], b: [x, 247], x });
 const TROCKNER_BEREICHE = [
-  { id: "material", name: "Material", x: 92, y: 236, text: "Voreinstellung für das Material. Setzt Temperatur und Zeit. Für eigene Werte „Custom“ wählen und anpassen." },
-  { id: "feuchte", name: "Luftfeuchte", x: 162, y: 236, text: "Relative Feuchte im Trockner. Ziel: unter 15 % für PLA/PETG, unter 10 % für ASA, TPU, PA. Sinkt sie nicht mehr, ist die Rolle trocken." },
-  { id: "soll", name: "Soll-Temperatur", x: 232, y: 236, text: "Die eingestellte Temperatur. Nie über die Erweichungstemperatur, sonst verkleben die Windungen (PLA max. 55 °C)." },
-  { id: "ist", name: "Ist-Temperatur", x: 296, y: 236, text: "Aktuelle Temperatur im Inneren. Sie erreicht den Sollwert nach etwa 20–30 Minuten, die Zeit zählt aber sofort." },
-  { id: "zeit", name: "Restzeit", x: 360, y: 236, text: "Verbleibende Trocknungszeit. Danach Rolle warm luftdicht einpacken oder direkt aus dem Trockner drucken." },
-  { id: "spulen", name: "Zwei Spulenplätze", x: 200, y: 110, text: "Zwei Rollen gleichzeitig. Nur Materialien mit ähnlicher Temperatur zusammen trocknen, sonst nach dem empfindlicheren richten." },
-  { id: "auslass", name: "Filament-Auslass", x: 386, y: 96, text: "Durch die Öffnung kann direkt aus dem Trockner gedruckt werden. Gut für TPU und PETG bei langen Drucken." },
+  { id: "material", name: "Material", ...trFeld(92), text: "Voreinstellung für das Material. Setzt Temperatur und Zeit. Für eigene Werte „Custom“ wählen und anpassen." },
+  { id: "feuchte", name: "Luftfeuchte", ...trFeld(162), text: "Relative Feuchte im Trockner. Ziel: unter 15 % für PLA/PETG, unter 10 % für ASA, TPU, PA. Sinkt sie nicht mehr, ist die Rolle trocken." },
+  { id: "soll", name: "Soll-Temperatur", ...trFeld(232), text: "Die eingestellte Temperatur. Nie über die Erweichungstemperatur, sonst verkleben die Windungen (PLA max. 55 °C)." },
+  { id: "ist", name: "Ist-Temperatur", ...trFeld(296), text: "Aktuelle Temperatur im Inneren. Sie erreicht den Sollwert nach etwa 20–30 Minuten, die Zeit zählt aber sofort." },
+  { id: "zeit", name: "Restzeit", ...trFeld(360), text: "Verbleibende Trocknungszeit. Danach Rolle warm luftdicht einpacken oder direkt aus dem Trockner drucken." },
+  { id: "spulen", name: "Zwei Spulenplätze", f: [34, 32, 372, 160], b: [220, 110], text: "Zwei Rollen gleichzeitig. Nur Materialien mit ähnlicher Temperatur zusammen trocknen, sonst nach dem empfindlicheren richten." },
+  { id: "auslass", name: "Filament-Auslass", f: [192, 2, 56, 58], b: [220, 46], text: "Durch die Öffnung oben in der Mitte kann direkt aus dem Trockner gedruckt werden. Gut für TPU und PETG bei langen Drucken." },
 ];
-function trocknerSvg(aktiv) {
+// Werte im Display passend zur Rolle (r), sonst PETG als Beispiel
+function trocknerWerte(r) {
+  const t = r ? wert(r, "tr_temp").v : null, d = r ? wert(r, "tr_dauer").v : null, f = r ? wert(r, "tr_feuchte").v : null;
+  const soll = t != null ? t : 65, std = d != null ? d : 6, ziel = f != null ? f : 15;
+  const rest = Math.max(0, Math.round(std * 60) - 20);
+  const mat = r && r.material ? String(r.material) : "PETG";
+  return { material: mat.length > 6 ? mat.slice(0, 6) : mat, feuchte: `${Math.max(1, ziel - 3)} %`, soll: `${soll}°`, ist: `${Math.max(20, soll - 2)}°`,
+    zeit: `${String(Math.floor(rest / 60)).padStart(2, "0")}:${String(rest % 60).padStart(2, "0")}` };
+}
+function trocknerSvg(aktiv, r) {
   const l = 'stroke="#8da49a" stroke-width="1.5" fill="none"';
+  const w = trocknerWerte(r);
   const spule = (cx) => `<circle cx="${cx}" cy="110" r="54" stroke="#ffb547" stroke-width="2" fill="rgba(255,181,71,.08)"/>
     <circle cx="${cx}" cy="110" r="40" stroke="#ffb547" stroke-opacity=".5" fill="none"/><circle cx="${cx}" cy="110" r="10" fill="#ffb547" opacity=".6"/>`;
   return `<svg viewBox="0 0 440 290" class="trockner-bild" role="img" aria-label="Zeichnung Sovol Filament-Trockner">
     <rect x="20" y="20" width="400" height="250" rx="22" ${l}/>
     <rect x="34" y="32" width="372" height="160" rx="14" stroke="#5cc8ff" stroke-opacity=".4" stroke-width="1.4" fill="rgba(92,200,255,.05)"/>
     ${spule(130)}${spule(310)}
-    <path d="M386 84 h20" stroke="#ffb547" stroke-width="2"/><circle cx="406" cy="84" r="4" fill="none" stroke="#8da49a"/>
+    <!-- Auslass oben in der Mitte, Filament von der rechten Rolle -->
+    <path d="M310 56 Q300 30 220 28 V6" stroke="#ffb547" stroke-width="2" fill="none"/>
+    <rect x="210" y="8" width="20" height="14" rx="4" stroke="#8da49a" stroke-width="1.5" fill="#0b1210" class="tr-auslass"/><circle cx="220" cy="15" r="3" fill="#ffb547"/>
     <rect x="60" y="206" width="330" height="54" rx="10" fill="rgba(0,0,0,.35)" stroke="#3ee6a8" stroke-opacity=".5"/>
-    <text x="92" y="228" class="tr-wert" text-anchor="middle">PETG</text>
-    <text x="162" y="228" class="tr-wert" text-anchor="middle">12 %</text>
-    <text x="232" y="228" class="tr-wert" text-anchor="middle">65°</text>
-    <text x="296" y="228" class="tr-wert" text-anchor="middle">63°</text>
-    <text x="360" y="228" class="tr-wert" text-anchor="middle">05:40</text>
     ${TROCKNER_BEREICHE.map((b) => `<g class="p1s-punkt ${aktiv === b.id ? "an" : ""}" data-aktion="hi-tr" data-id="${b.id}" tabindex="0">
-      <rect x="${b.x - 30}" y="${b.y - (b.id === "spulen" ? 60 : 12)}" width="60" height="${b.id === "spulen" ? 120 : 24}" rx="8" class="p1s-flaeche"/>
-      <circle cx="${b.x}" cy="${b.y + (b.id === "spulen" ? 70 : 14)}" r="9" class="p1s-ring"/><text x="${b.x}" y="${b.y + (b.id === "spulen" ? 73.5 : 17.5)}" text-anchor="middle">${TROCKNER_BEREICHE.indexOf(b) + 1}</text></g>`).join("")}
+      <rect x="${b.f[0]}" y="${b.f[1]}" width="${b.f[2]}" height="${b.f[3]}" rx="${b.id === "spulen" ? 14 : 8}" class="p1s-flaeche"/>
+      <circle cx="${b.b[0]}" cy="${b.b[1]}" r="9" class="p1s-ring"/><text x="${b.b[0]}" y="${b.b[1]}" text-anchor="middle" dominant-baseline="central">${TROCKNER_BEREICHE.indexOf(b) + 1}</text></g>`).join("")}
+    ${TROCKNER_BEREICHE.filter((b) => b.x).map((b) => `<text x="${b.x}" y="${TR_TEXT_Y}" class="tr-wert" data-wert="${b.id}" text-anchor="middle" dominant-baseline="central">${esc(w[b.id])}</text>`).join("")}
   </svg>`;
 }
 
@@ -1493,19 +1514,50 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .tr-rolle small { color: var(--leise); font-size: 12px; }
 .fb-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; align-items: start; }
 .mobil .fb-raster { grid-template-columns: 1fr; }
-.fb-karte { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); overflow: hidden; transition: border-color .2s; }
-.fb-karte.auf { border-color: rgba(255,181,71,.45); }
+.fb-karte { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); overflow: hidden; transition: border-color .2s, background .2s; }
+.fb-karte:hover { border-color: rgba(255,181,71,.45); background: var(--flaeche-hover); }
 .fb-kopf { width: 100%; display: flex; gap: 12px; align-items: center; padding: 10px; text-align: left; }
 .fb-kopf .fb-bild { width: 84px; flex: none; }
 .fb-kopf > span { display: grid; gap: 2px; }
 .fb-kopf small { font-size: 12px; }
-.fb-details { padding: 0 14px 14px; }
 .kal-wahl { margin-bottom: 14px; }
 .kal-kopf { display: flex; gap: 14px; align-items: center; }
 .kal-bild { width: 120px; height: auto; flex: none; border-radius: 12px; background: rgba(0,0,0,.3); }
 .mobil .kal-bild { width: 92px; }
 .kal-liste { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; }
 .kal-liste.fehler li::marker { color: var(--rot); }
+
+/* ---- Hilfe: Beispielrolle, Trockner-Zeichnung, Fehlerbild-Fenster ---- */
+.hi-rollenwahl { margin-top: 16px; }
+.hi-tr-info + .hi-rollenwahl, .hi-bild-karte .hi-rollenwahl { margin-top: 0; }
+.hi-werte { margin-top: 8px; }
+.hi-fb-wahl { max-width: 420px; margin: 0 0 14px; }
+.hi-fb-wahl .hi-rollenwahl { margin-top: 0; }
+.tr-wert { pointer-events: none; }
+.hi-fb-ebene { position: absolute; inset: 0; z-index: 26; display: grid; place-items: center; padding: 20px; }
+.hi-fb-schleier { position: absolute; inset: 0; background: rgba(0,0,0,.6); backdrop-filter: blur(3px); animation: hi-fb-blende .22s ease both; }
+.hi-fb-popup { position: relative; width: min(620px, 100%); max-height: 100%; overflow-y: auto; overscroll-behavior: contain; outline: none;
+  padding: 24px; border-radius: 22px; background: rgba(16,22,20,.98); border: 1px solid rgba(255,181,71,.35); box-shadow: 0 30px 80px rgba(0,0,0,.6);
+  animation: hi-fb-auf .24s cubic-bezier(.2,.8,.2,1) both; }
+.hi-fb-ebene.zu { pointer-events: none; }
+.hi-fb-ebene.zu .hi-fb-schleier { animation: hi-fb-blende-zu .18s ease forwards; }
+.hi-fb-ebene.zu .hi-fb-popup { animation: hi-fb-zu .18s ease forwards; }
+@keyframes hi-fb-blende { from { opacity: 0; } }
+@keyframes hi-fb-blende-zu { to { opacity: 0; } }
+@keyframes hi-fb-auf { from { opacity: 0; transform: translateY(14px) scale(.96); } }
+@keyframes hi-fb-zu { to { opacity: 0; transform: translateY(10px) scale(.97); } }
+.hi-fb-x { position: absolute; top: 12px; right: 12px; background: var(--flaeche-hover); border: 1px solid var(--rand); }
+.hi-fb-x:hover { border-color: rgba(255,181,71,.5); }
+.hi-fb-kopf { display: flex; gap: 16px; align-items: center; padding-right: 40px; }
+.hi-fb-kopf .fb-bild { width: 180px; max-width: 40%; flex: none; }
+.hi-fb-kopf p { margin: 4px 0 0; }
+.hi-fb-ursachen { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.45; }
+.hi-fb-ursachen li::marker { color: var(--amber); }
+.mobil .hi-fb-ebene { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+.mobil .hi-fb-popup { padding: 18px 16px; border-radius: 18px; }
+.mobil .hi-fb-kopf { flex-direction: column; align-items: flex-start; gap: 10px; padding-right: 36px; }
+.mobil .hi-fb-kopf .fb-bild { width: 150px; max-width: 100%; }
+@media (prefers-reduced-motion: reduce) { .hi-fb-schleier, .hi-fb-popup, .hi-fb-ebene.zu .hi-fb-schleier, .hi-fb-ebene.zu .hi-fb-popup { animation-duration: .01s; } }
 
 /* ---- Werkstatt ---- */
 .ws-kopfzeile { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
@@ -1617,8 +1669,198 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .suche-punkt { grid-column: 1 / -1; }
 .mobil .nav-unten { z-index: 6; }
 
+/* ==== 3D-Modelle: Orbit, Ausrichtungswürfel, Füllmuster, eigene Winkel, Warteschlange (v0.11) ==== */
+.mod-ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mod-ico .voll { fill: currentColor; stroke: none; }
+.mod-orbit { position: relative; }
+.mod-leiste .mod-orbit-knopf { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 8px; }
+.mod-orbit-knopf .mod-pfeil { font-size: 10px; opacity: .7; transition: transform .2s; }
+.mod-orbit-knopf.an .mod-pfeil { transform: rotate(180deg); }
+.mod-orbit-menue { position: absolute; z-index: 6; top: calc(100% + 8px); right: 0; width: 290px; padding: 6px; border-radius: 16px;
+  background: rgba(14,22,19,.96); border: 1px solid var(--rand); backdrop-filter: blur(16px); box-shadow: 0 18px 40px rgba(0,0,0,.5);
+  animation: dd-rein .18s cubic-bezier(.2,.8,.2,1); transform-origin: top right; }
+.mod-orbit-punkt { width: 100%; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; border-radius: 12px; }
+.mod-orbit-punkt:hover { background: var(--flaeche-hover); }
+.mod-orbit-punkt.an { background: var(--mint-weich); color: var(--mint); }
+.mod-orbit-punkt .mod-ico { width: 24px; height: 24px; }
+.mod-orbit-punkt > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.mod-orbit-punkt strong { font-size: 13px; }
+.mod-orbit-punkt small { font-size: 11px; color: var(--leise); }
+.mod-orbit-trenner { height: 1px; margin: 4px 8px; background: var(--rand); }
+.mod-orbit-tipp { margin: 4px 10px 6px; }
+.mod-schalter { position: relative; width: 30px; height: 18px; flex: none; border-radius: 9px; background: rgba(255,255,255,.14); transition: background .2s; }
+.mod-schalter::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #cfe0d8; transition: transform .2s cubic-bezier(.2,.8,.2,1); }
+.mod-schalter.an { background: var(--mint); }
+.mod-schalter.an::after { transform: translateX(12px); background: #062018; }
+.mobil .mod-orbit-name { display: none; }
+.mobil .mod-orbit { position: static; }
+.mobil .mod-orbit-menue { left: 0; right: 0; width: auto; transform-origin: top center; }
+
+/* Ausrichtungswürfel */
+.mod-wuerfel-ecke { position: absolute; z-index: 2; top: 58px; right: 14px; width: calc(var(--w) * 1.7); height: calc(var(--w) * 1.7); pointer-events: none; }
+.mobil .mod-wuerfel-ecke { top: 104px; right: 4px; }
+.mod-wuerfel { position: absolute; inset: 0; pointer-events: none; touch-action: none; }
+.mod-w-koerper { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; }
+.mod-w-flaeche { position: absolute; left: calc(var(--w) / -2); top: calc(var(--w) / -2); width: var(--w); height: var(--w); display: grid;
+  grid-template-columns: 20% 60% 20%; grid-template-rows: 20% 60% 20%; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: linear-gradient(145deg, rgba(36,56,49,.95), rgba(16,26,23,.95)); border: 1px solid rgba(62,230,168,.38); border-radius: 4px; pointer-events: auto; }
+.mod-w-flaeche.w-oben { background: linear-gradient(145deg, rgba(46,72,62,.96), rgba(22,36,31,.96)); }
+.mod-w-flaeche.w-unten { background: linear-gradient(145deg, rgba(22,30,28,.96), rgba(12,18,16,.96)); }
+.mod-w-zone { padding: 0; border-radius: 2px; display: grid; place-items: center; transition: background .12s; cursor: pointer; }
+.mod-w-zone:hover { background: rgba(62,230,168,.45); }
+.mod-w-zone.flaeche:hover { background: rgba(62,230,168,.22); }
+.mod-w-zone span { font-size: calc(var(--w) * .145); font-weight: 800; letter-spacing: .6px; color: #d7efe5; pointer-events: none; user-select: none; }
+.ziehbar .mod-w-zone { cursor: grab; }
+.mod-wuerfel.zieht .mod-w-zone { cursor: grabbing; }
+.mod-heim { position: absolute; left: 0; top: 0; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; pointer-events: auto;
+  color: var(--leise); background: rgba(8,12,11,.7); border: 1px solid var(--rand); backdrop-filter: blur(8px); transition: color .15s, transform .15s; }
+.mod-heim:hover { color: var(--mint); transform: scale(1.08); }
+.mod-heim .mod-ico { width: 16px; height: 16px; }
+.mod-achsen { position: absolute; left: -14px; bottom: -16px; width: 54px; height: 54px; overflow: visible; pointer-events: none; }
+.mod-achsen line { stroke-width: 2.2; stroke-linecap: round; transition: opacity .2s; }
+.mod-achsen text { font-size: 9px; font-weight: 800; text-anchor: middle; stroke: none; transition: opacity .2s; }
+.mod-achsen .a-x { stroke: #ff6b6b; fill: #ff6b6b; }
+.mod-achsen .a-y { stroke: #4fe08a; fill: #4fe08a; }
+.mod-achsen .a-z { stroke: #5cc8ff; fill: #5cc8ff; }
+.mod-achsen text.a-x, .mod-achsen text.a-y, .mod-achsen text.a-z { stroke: none; }
+
+/* Drehpunkt beim Orbit */
+.mod-drehpunkt { position: absolute; left: -7px; top: -7px; width: 14px; height: 14px; border-radius: 50%; pointer-events: none; z-index: 1; opacity: 0;
+  background: var(--mint); box-shadow: 0 0 0 4px rgba(62,230,168,.25), 0 0 14px rgba(62,230,168,.8); transition: opacity .15s; }
+.mod-drehpunkt.an { opacity: 1; }
+.mod-drehpunkt.mitte { background: var(--amber); box-shadow: 0 0 0 4px rgba(255,181,71,.25), 0 0 14px rgba(255,181,71,.7); }
+.mod-marker.versteckt { display: none; }
+
+/* Warteschlange: immer sichtbar unten in der Seitenleiste */
+.mod-inhalt { padding-bottom: 20px; }
+.mod-fuss { flex: none; padding: 12px 18px 16px; border-top: 1px solid var(--rand); background: linear-gradient(180deg, rgba(8,12,11,.2), rgba(8,12,11,.55)); }
+.mod-ws { box-shadow: 0 6px 20px rgba(62,230,168,.18); }
+.mobil .mod-seite { overflow: visible; }
+.mobil .mod-fuss { position: sticky; z-index: 2; bottom: calc(76px + env(safe-area-inset-bottom)); margin: 0 10px 10px; padding: 8px; border: 1px solid var(--rand); border-radius: 16px;
+  background: rgba(14,22,19,.9); backdrop-filter: blur(14px); box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+
+/* Füllmuster */
+.mod-muster { display: flex; gap: 12px; align-items: flex-start; margin: 6px 0 10px; }
+.mod-muster-vorschau { width: 64px; height: 64px; flex: none; margin-top: 4px; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,.25); border: 1px solid var(--rand); }
+.mod-muster-bild { width: 100%; height: 100%; display: block; animation: blende .25s ease; }
+.mod-muster-bild rect { fill: none; stroke: rgba(255,170,90,.55); stroke-width: .9; }
+.mod-muster-bild path { fill: none; stroke: #d94d59; stroke-width: .75; stroke-linecap: round; }
+.mod-muster-text { flex: 1; min-width: 0; }
+.mod-muster-text p { margin: 6px 0 0; }
+.mod-muster-text .pille { font-size: 10px; padding: 1px 7px; margin-left: 4px; vertical-align: 1px; }
+
+/* Eigene Drehwinkel */
+.mod-dreh-eigen { margin: 8px 0 14px; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.2); border: 1px solid rgba(62,230,168,.25); animation: ansicht-rein .22s ease; }
+.mod-dreh-felder { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mod-dreh-feld { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid var(--rand); transition: border-color .15s, box-shadow .15s; }
+.mod-dreh-feld.aktiv { border-color: rgba(62,230,168,.55); box-shadow: 0 0 0 3px rgba(62,230,168,.1); }
+.mod-dreh-feld span { font-weight: 800; font-size: 13px; }
+.mod-dreh-feld.a-x span { color: #ff6b6b; }
+.mod-dreh-feld.a-y span { color: #4fe08a; }
+.mod-dreh-feld.a-z span { color: #5cc8ff; }
+.mod-dreh-feld input { flex: 1; min-width: 0; width: 100%; padding: 8px 2px; border: none; background: none; color: var(--text); font: inherit; font-size: 16px; text-align: right; font-variant-numeric: tabular-nums; outline: none; -moz-appearance: textfield; }
+.mod-dreh-feld input::-webkit-inner-spin-button { opacity: .4; }
+.mod-dreh-feld small { color: var(--leise); }
+.mod-dreh-schnell { margin: 10px 0 4px; }
+.mod-dreh-schnell .chip { padding: 5px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.mod-dreh-eigen .knopf-reihe { margin-top: 8px; }
+
 /* ---- Sicherungs-Balken ---- */
 .bu-balken.blau { background: linear-gradient(90deg, rgba(92,200,255,.18), rgba(92,200,255,.05)); border-bottom-color: rgba(92,200,255,.4); }
+/* ==== Allgemein: Kopfzeilen-Suche, Regler-Wertbox, Wartungs-Infos ==== */
+:host { --gelb: #ffd54a; --gelb-weich: rgba(255,213,74,.14); }
+/* Suche in der Kopfzeile links neben „Filament“ */
+.kopf-suche { display: flex; align-items: center; gap: 8px; flex: none; height: 38px; padding: 0 8px 0 12px; margin-left: 8px; border-radius: 12px;
+  border: 1px solid var(--rand); background: rgba(0,0,0,.28); color: var(--leise); font-size: 14px; transition: border-color .15s, background .15s, color .15s; }
+.kopf-suche:hover, .kopf-suche:focus-visible { border-color: rgba(62,230,168,.5); background: rgba(62,230,168,.06); color: var(--text); outline: none; }
+.kopf-suche-icon { font-size: 15px; }
+.kopf-suche-text { min-width: 64px; text-align: left; }
+.kopf-suche kbd { font: inherit; font-size: 11px; letter-spacing: .3px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--rand); background: rgba(255,255,255,.04); color: var(--leise); }
+.kopf-suche + .nav-oben { margin-left: 0; }
+.nav-oben .nav-punkt { white-space: nowrap; flex: none; }
+@media (max-width: 1400px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
+@media (max-width: 1340px) { .kopf .speicher { font-size: 0; } .kopf .speicher::before { font-size: 14px; } }
+@media (max-width: 1180px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
+@media (max-width: 1640px) { .kopf-suche kbd { display: none; } }
+@media (max-width: 1520px) { .kopf-suche-text { display: none; } .kopf-suche { width: 38px; padding: 0; justify-content: center; margin-left: 4px; } }
+
+/* Regler: aktueller Wert in gelber Box über dem Knopf, antippen zum Eintippen */
+.regler-wert { position: absolute; z-index: 35; transform: translateY(-100%); display: grid; justify-items: center; gap: 2px;
+  padding: 3px; border-radius: 11px; background: var(--gelb); color: #1b1503; box-shadow: 0 0 0 4px rgba(255,213,74,.16), 0 6px 18px rgba(0,0,0,.5);
+  animation: regler-wert-rein .14s ease-out; pointer-events: auto; }
+.regler-wert::after { content: ""; position: absolute; left: var(--spitze, 50%); bottom: -5px; width: 10px; height: 10px; margin-left: -5px; background: var(--gelb); transform: rotate(45deg); border-radius: 2px; }
+@keyframes regler-wert-rein { from { opacity: 0; transform: translateY(calc(-100% + 6px)); } }
+.regler-wert-knopf { display: flex; align-items: baseline; gap: 6px; padding: 3px 8px; border-radius: 8px; color: inherit; font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; min-height: 28px; }
+.regler-wert-knopf:hover, .regler-wert-knopf:focus-visible { background: rgba(0,0,0,.08); outline: none; }
+.regler-wert-knopf i { font-style: normal; font-weight: 400; font-size: 12px; opacity: .6; }
+.regler-wert small { position: relative; z-index: 1; font-size: 11px; font-weight: 600; padding: 0 6px 2px; white-space: nowrap; opacity: .8; }
+.regler-wert-feld { width: 9ch; min-width: 72px; padding: 5px 8px; border-radius: 8px; border: 2px solid rgba(27,21,3,.55); background: #fff8dc; color: #1b1503;
+  font: inherit; font-weight: 800; font-size: 16px; text-align: center; outline: none; font-variant-numeric: tabular-nums; }
+.regler-wert-feld:focus { border-color: #1b1503; }
+.regler-wert-feld.falsch { border-color: var(--rot); background: #ffe1e1; animation: regler-wackeln .25s; }
+@keyframes regler-wackeln { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+input[type=range]:active::-webkit-slider-thumb { background: var(--gelb); box-shadow: 0 0 0 7px rgba(255,213,74,.2), 0 2px 8px rgba(0,0,0,.4); }
+
+/* Wartung: Info mit kleiner P1S-Zeichnung */
+.ws-wartung { flex-wrap: wrap; }
+.ws-info-knopf { width: 32px; height: 32px; border-radius: 10px; flex: none; display: grid; place-items: center; font-size: 15px; font-weight: 700; color: var(--leise); border: 1px solid var(--rand); }
+.ws-info-knopf:hover { color: var(--text); background: var(--flaeche-hover); }
+.ws-info-knopf.an { color: #1b1503; background: var(--gelb); border-color: var(--gelb); }
+.ws-info { flex: 1 0 100%; display: flex; gap: 14px; align-items: center; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.28); border: 1px solid rgba(255,213,74,.22); animation: blende .2s ease; }
+.ws-info-bild { width: 170px; flex: none; }
+.ws-info-bild svg { width: 100%; height: auto; display: block; }
+.ws-info-text { display: grid; gap: 6px; font-size: 14px; line-height: 1.45; min-width: 0; }
+.ws-info-text p { margin: 0; }
+.ws-info-text b { color: var(--gelb); font-weight: 600; }
+.mobil .ws-info { flex-direction: column; align-items: stretch; }
+.mobil .ws-info-bild { width: min(240px, 100%); align-self: center; }
+.ws-p1s .an { filter: drop-shadow(0 0 3px rgba(255,213,74,.85)); }
+.ws-p1s .ws-p1s-puls { fill: none; stroke: var(--gelb); stroke-width: 1.4; animation: ws-puls 1.8s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ws-puls { from { opacity: .9; transform: scale(.6); } to { opacity: 0; transform: scale(1.6); } }
+
+/* ==== Drucker-Steuerung: geladenes Filament, Zieltemperatur, Lüfter (v0.11) ==== */
+:host { --gruen: #5be37d; --gruen-weich: rgba(91,227,125,.14); }
+.pille.gruen { color: var(--gruen); background: var(--gruen-weich); }
+/* Kachel der geladenen Rolle */
+.kachel.geladen { border: 1.5px solid rgba(91,227,125,.75); background: linear-gradient(160deg, rgba(91,227,125,.16), transparent 60%), var(--flaeche);
+  box-shadow: 0 0 0 1px rgba(91,227,125,.15), 0 0 22px rgba(91,227,125,.18); }
+.kachel.geladen:hover { border-color: var(--gruen); }
+.badge-geladen { position: absolute; top: 12px; left: 12px; z-index: 1; font-size: 10px; font-weight: 700; color: #062012; background: var(--gruen); border-radius: 6px; padding: 2px 7px; letter-spacing: .3px; }
+.mobil .badge-geladen { font-size: 9px; padding: 2px 5px; }
+.kachel.geladen .kachel-achtung { top: 34px; }
+/* Knopf „Geladen“ in der Detailansicht */
+.geladen-knopf { margin-left: 6px; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; color: var(--leise); border: 1px solid var(--rand); vertical-align: middle; }
+.geladen-knopf:hover { color: var(--gruen); border-color: rgba(91,227,125,.5); }
+.geladen-knopf.an { color: #062012; background: var(--gruen); border-color: var(--gruen); }
+/* Karte „Geladenes Filament“ */
+.dr-filament.geladen { border-color: rgba(91,227,125,.45); background: radial-gradient(360px 160px at 0% 0%, rgba(91,227,125,.10), transparent 70%), var(--flaeche); }
+.dr-fil-zeile { display: flex; gap: 14px; align-items: center; }
+.dr-fil-spule { width: 52px; height: 52px; flex: none; display: grid; place-items: center; }
+.dr-fil-leer { width: 46px; height: 46px; border-radius: 50%; border: 1.5px dashed var(--rand); display: grid; place-items: center; color: var(--leise); font-size: 20px; }
+.dr-fil-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.dr-fil-text small { color: var(--leise); font-size: 12px; }
+.dr-fil-wahl { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.dr-fil-wahl .auswahl { flex: 1; min-width: 0; margin: 0; }
+.mobil .dr-fil-wahl { flex-direction: column; align-items: stretch; }
+.dr-filament > .mini { margin: 10px 0 0; }
+/* Zieltemperatur eingeben */
+.dr-temp-fuss { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dr-soll { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.dr-soll input { width: 74px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; font-size: 14px; text-align: right; }
+.dr-soll input:focus { outline: none; border-color: rgba(62,230,168,.6); }
+.dr-soll input.fehler { border-color: var(--rot); background: rgba(255,107,107,.1); }
+.dr-soll .mini { margin: 0; min-width: 62px; }
+.dr-einheit { color: var(--leise); font-size: 13px; }
+.dr-rolle-chip { padding: 4px 10px; font-size: 12px; }
+.dr-soll.breit { display: flex; margin: 0; }
+.dr-soll.breit input { flex: 1; width: auto; padding: 10px 12px; font-size: 15px; }
+/* Lüfter zum Antippen */
+.dr-titel-zusatz { font-weight: 400; margin-left: 8px; font-size: 12px; }
+.dr-l-knopf { position: relative; color: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
+.dr-l-knopf:hover { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.dr-l-stift { position: absolute; top: 6px; right: 8px; font-style: normal; font-size: 11px; color: var(--leise); }
+.dr-stufen { margin: 12px 0 4px; }
+.dr-stufen .chip { min-width: 54px; }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -2101,6 +2343,13 @@ const DR_ENTITAETEN = {
   licht: ["Druckraumbeleuchtung", "light.p1s_01p00c572701906_druckraumbeleuchtung"],
   kamera: ["Kamera", "camera.p1s_01p00c572701906_kamera"],
   titelbild: ["Titelbild", "image.p1s_01p00c572701906_titelbild"],
+  // Zum Einstellen (ha-bambulab: number.target_*_temperature, fan.*_fan). Mehrere Namen/IDs je nach Version.
+  duese_soll: ["Zieltemperatur der Düse", "number.p1s_01p00c572701906_zieltemperatur_der_duse"],
+  bett_soll: [["Zieltemperatur des Druckbett", "Zieltemperatur vom Druckbett", "Zieltemperatur des Druckbetts"],
+    "number.p1s_01p00c572701906_zieltemperatur_des_druckbett", "number.p1s_01p00c572701906_zieltemperatur_vom_druckbett"],
+  f_kopf: ["Druckkopflüfter", "fan.p1s_01p00c572701906_druckkopflufter"],
+  f_bauteil: ["Bauteillüfter", "fan.p1s_01p00c572701906_bauteillufter"],
+  f_raum: ["Druckraumlüfter", "fan.p1s_01p00c572701906_druckraumlufter"],
 };
 const DR_STECKDOSE_ENTITAETEN = {
   schalter: ["", "switch.3d_drucker"],
@@ -2127,6 +2376,20 @@ const DR_SCHRITTE = {
 const DR_PLATTEN = { textured_plate: "Textured PEI Plate", cool_plate: "Cool Plate/PLA Plate", engineering_plate: "Engineering Plate",
   hot_plate: "Smooth PEI Plate / High Temp Plate", supertack_plate: "Bambu Cool Plate SuperTack" };
 const DR_DUESEN = { hardened_steel: "Gehärteter Stahl", stainless_steel: "Edelstahl" };
+
+// Zieltemperaturen, die man hier setzen darf (number.set_value). ziel = Sensor mit dem aktuellen Ziel,
+// rolle = Feld der geladenen Rolle für den Schnellknopf, heiss = ab hier nachfragen
+const DR_TEMP = {
+  duese: { name: "Düse", max: 300, ziel: "duese_ziel", ist: "duese", rolle: "duese", heiss: 270 },
+  bett: { name: "Druckbett", max: 110, ziel: "bett_ziel", ist: "bett", rolle: "bett", heiss: 90 },
+};
+// Lüfter-Kachel (Drehzahl-Sensor) → einstellbarer Lüfter (fan.set_percentage / fan.turn_off)
+const DR_LUEFTER = {
+  l_kopf: { f: "f_kopf", name: "Druckkopflüfter", info: "Kühlt das frisch gedruckte Filament direkt an der Düse." },
+  l_bauteil: { f: "f_bauteil", name: "Bauteillüfter", info: "Großer Lüfter an der Seite, kühlt das ganze Bauteil." },
+  l_raum: { f: "f_raum", name: "Druckraumlüfter", info: "Zieht warme Luft aus dem Druckraum. Bei ASA/ABS lieber aus lassen." },
+};
+const DR_LUEFTER_STUFEN = [0, 10, 30, 50, 80, 100];
 
 // Beschreibung eines Druckeintrags „schluessel=wert; …“ lesen
 function druckDaten(eintrag) {
@@ -2180,9 +2443,10 @@ const DruckerAnsicht = {
     // Zuerst, was die Integration bei der Einrichtung gefunden hat
     const konf = this._konfig && this._konfig[steckdose ? "steckdose" : "drucker"];
     if (konf && konf[schluessel] && states[konf[schluessel]]) return (this._drIds[k] = konf[schluessel]);
-    const [name, id] = (steckdose ? DR_STECKDOSE_ENTITAETEN : DR_ENTITAETEN)[schluessel];
-    const voll = steckdose ? (name ? `${DR_STECKDOSE} ${name}` : DR_STECKDOSE) : `${DR_GERAET} ${name}`;
-    const gefunden = this._drNamen[`${id.split(".")[0]}|${voll}`] || (states[id] ? id : null);
+    const [namen, ...ids] = (steckdose ? DR_STECKDOSE_ENTITAETEN : DR_ENTITAETEN)[schluessel];
+    const domain = ids[0].split(".")[0];
+    const gefunden = [].concat(namen).map((name) => this._drNamen[`${domain}|${steckdose ? (name ? `${DR_STECKDOSE} ${name}` : DR_STECKDOSE) : `${DR_GERAET} ${name}`}`]).find(Boolean)
+      || ids.find((id) => states[id]) || null;
     this._drIds[k] = gefunden;
     return gefunden;
   },
@@ -2219,10 +2483,15 @@ const DruckerAnsicht = {
   _drLiveZeichnen() {
     if (this._ansicht !== "drucker") return;
     const live = this.shadowRoot.getElementById("dr-live");
-    if (!live) return;
+    const kopf = this.shadowRoot.getElementById("dr-live-kopf");
+    if (!live || !kopf) return;
+    // Während jemand eine Zieltemperatur tippt, nicht dazwischenfunken
+    const aktiv = this.shadowRoot.activeElement;
+    if (aktiv && aktiv.dataset && aktiv.dataset.drTemp != null && live.contains(aktiv)) { this._drHassNeu(); return; }
     const zustand = this._drZustand();
     if (zustand !== this._drLetzterZustand) { this._zeichnen(); return; }   // z. B. eingeschaltet: alles neu
-    live.innerHTML = this._drLiveHtml();
+    kopf.innerHTML = this._drLiveHtml("kopf");
+    live.innerHTML = this._drLiveHtml("rest");
     this._drKameraPruefen();
   },
 
@@ -2233,7 +2502,9 @@ const DruckerAnsicht = {
     setTimeout(() => this._drKameraPruefen(), 0);
     return `<div class="dr-raster">
         <div class="dr-spalte">
-          <section id="dr-live" class="dr-live">${this._drLiveHtml()}</section>
+          <section id="dr-live-kopf" class="dr-live">${this._drLiveHtml("kopf")}</section>
+          ${this._drFilamentHtml()}
+          <section id="dr-live" class="dr-live">${this._drLiveHtml("rest")}</section>
         </div>
         <div class="dr-spalte">
           ${this._drKameraHtml(zustand)}
@@ -2242,9 +2513,15 @@ const DruckerAnsicht = {
       </div>`;
   },
 
-  _drLiveHtml() {
+  _drLiveHtml(teil) {
     const zustand = this._drZustand();
     const z = (k, nk = 0) => { const v = this._drZ(k); return v == null ? "–" : zahl(v, nk); };
+    if (teil === "kopf") return this._drKopfHtml(zustand, z);
+    return this._drWerteHtml(zustand);
+  },
+
+  // Statuskarte oben (Ring, Name, Restzeit) bzw. „Drucker ist aus“
+  _drKopfHtml(zustand, z) {
     let html = "";
 
     if (zustand === "aus" || zustand === "startet" || zustand === "offline") {
@@ -2282,28 +2559,39 @@ const DruckerAnsicht = {
         html += `<div class="hinweis rot-hinweis">⚠️ Der Drucker meldet einen Fehler. Details stehen in der Bambu-App bzw. am Drucker.</div>`;
       }
     }
+    return html;
+  },
 
+  // Temperaturen, Lüfter, Strom, Infos
+  _drWerteHtml(zustand) {
+    let html = "";
     const aus = ["aus", "startet", "offline"].includes(zustand);
     // Temperaturen
-    const temp = (titel, ist, ziel, max) => {
-      const i = this._drZ(ist), s = this._drZ(ziel);
+    const temp = (titel, k, ist, ziel) => {
+      const max = DR_TEMP[k].max;
+      const i = this._drZ(ist), s = this._drZ(`${k}_soll`) != null ? this._drZ(`${k}_soll`) : this._drZ(ziel);   // einstellbare Entität zuerst
       const heizt = s && i != null && Math.abs(s - i) > 3;
       const breite = Math.max(0, Math.min(100, ((i || 0) / max) * 100));
       return `<div class="dr-temp">
         <div class="dr-temp-kopf"><span>${titel}</span><strong>${i == null ? "–" : zahl(i)} °C</strong></div>
         <div class="dr-balken"><i style="width:${breite}%;background-size:${breite > 0 ? 10000 / breite : 100}% 100%"></i>${s ? `<b style="left:${Math.min(100, (s / max) * 100)}%"></b>` : ""}</div>
-        <small class="${heizt ? "amber" : "leise"}">${s ? `Ziel ${zahl(s)} °C${heizt ? (s > i ? " · heizt auf" : " · kühlt ab") : " · erreicht"}` : "aus"}</small>
+        <div class="dr-temp-fuss"><small class="${heizt ? "amber" : "leise"}">${s ? `Ziel ${zahl(s)} °C${heizt ? (s > i ? " · heizt auf" : " · kühlt ab") : " · erreicht"}` : "aus"}</small>
+          ${this._drSollHtml(k, s)}</div>
       </div>`;
     };
     if (!aus) html += `<div class="dr-karte"><h3 class="dr-titel">🌡️ Temperaturen</h3>
-      ${temp("Düse", "duese", "duese_ziel", 300)}${temp("Druckbett", "bett", "bett_ziel", 110)}</div>`;
+      ${temp("Düse", "duese", "duese", "duese_ziel")}${temp("Druckbett", "bett", "bett", "bett_ziel")}</div>`;
 
     // Lüfter
     const luefter = [["Bauteil", "l_bauteil"], ["Druckkopf", "l_kopf"], ["Hotend", "l_hotend"], ["Druckraum", "l_raum"]].filter(([, k]) => this._drId(k));
     if (luefter.length && !aus) {
-      html += `<div class="dr-karte"><h3 class="dr-titel">🌀 Lüfter</h3><div class="dr-luefter">${luefter.map(([n, k]) => {
-        const v = this._drZ(k) || 0;
-        return `<div class="dr-l"><span class="dr-l-icon ${v > 0 ? "dreht" : ""}" style="--dauer:${v > 0 ? Math.max(0.25, 2 - v / 60) : 0}s">✣</span><strong>${zahl(v)} %</strong><small>${n}</small></div>`;
+      const steuerbar = luefter.some(([, k]) => DR_LUEFTER[k] && this._drId(DR_LUEFTER[k].f));
+      html += `<div class="dr-karte"><h3 class="dr-titel">🌀 Lüfter${steuerbar ? `<span class="leise klein dr-titel-zusatz">zum Einstellen antippen</span>` : ""}</h3><div class="dr-luefter">${luefter.map(([n, k]) => {
+        const f = DR_LUEFTER[k] && this._drId(DR_LUEFTER[k].f) ? DR_LUEFTER[k].f : null;
+        const v = this._drLuefterWert(k) || 0;
+        const inhalt = `<span class="dr-l-icon ${v > 0 ? "dreht" : ""}" style="--dauer:${v > 0 ? Math.max(0.25, 2 - v / 60) : 0}s">✣</span><strong>${zahl(v)} %</strong><small>${n}</small>`;
+        return f ? `<button class="dr-l dr-l-knopf" data-aktion="dr-luefter" data-k="${k}" aria-label="${esc(DR_LUEFTER[k].name)} einstellen, jetzt ${zahl(v)} %">${inhalt}<i class="dr-l-stift" aria-hidden="true">✎</i></button>`
+          : `<div class="dr-l" title="Regelt der Drucker selbst">${inhalt}</div>`;
       }).join("")}</div></div>`;
     }
 
@@ -2526,8 +2814,224 @@ const DruckerAnsicht = {
     setTimeout(pruefen, 500);
   },
 
+  // ---- Geladenes Filament (this._daten.geladen = Rollen-ID oder null) ----
+  _drGeladen() {
+    const id = this._daten && this._daten.geladen;
+    return id ? this._daten.rollen.find((r) => r.id === id) || null : null;
+  },
+  _drLadenSetzen(id) {
+    const alt = this._drGeladen();
+    this._daten.geladen = id || null;
+    this._speichern();
+    const r = this._drGeladen();
+    this._toast(r ? `${r.name} ist jetzt als geladen markiert.` : alt ? `${alt.name} ist nicht mehr geladen.` : "Kein Filament geladen.");
+  },
+  _drFilamentHtml() {
+    if (!this._daten) return "";
+    const r = this._drGeladen();
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const mats = [...new Set(rollen.map((x) => x.material))].sort((a, b) => a.localeCompare(b, "de"));
+    const optionen = mats.map((m) => `<optgroup label="${esc(m)}">${rollen.filter((x) => x.material === m).map((x) =>
+      `<option value="${esc(x.id)}" ${r && x.id === r.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.hersteller)}${x.rest_g != null ? ` · ${zahl(x.rest_g)} g` : ""}</option>`).join("")}</optgroup>`).join("");
+    return `<section class="dr-karte dr-filament ${r ? "geladen" : ""}" id="dr-filament">
+      <h3 class="dr-titel">🧵 Geladenes Filament</h3>
+      <div class="dr-fil-zeile">
+        <span class="dr-fil-spule">${r ? spuleSvg(r) : `<span class="dr-fil-leer" aria-hidden="true">∅</span>`}</span>
+        <span class="dr-fil-text">${r
+          ? `<strong>${esc(r.name)}</strong><small>${esc(r.hersteller)} · ${esc(sorteName(r))} · ${r.rest_g == null ? "nicht gewogen" : `${zahl(r.rest_g)} g übrig`}</small>`
+          : `<strong>Kein Filament geladen</strong><small>Wähle die Rolle, die gerade im Drucker steckt. Sie wird beim Verbuchen zuerst vorgeschlagen.</small>`}</span>
+        ${r ? `<span class="pille gruen">● geladen</span>` : ""}
+      </div>
+      <div class="dr-fil-wahl">
+        <label class="auswahl breit-auswahl"><span>${r ? "Andere Rolle laden" : "Rolle wählen"}</span><select data-dr="geladen">${r ? "" : `<option value="" selected disabled>Rolle wählen …</option>`}${optionen}</select></label>
+        <button class="knopf leise klein-knopf" data-aktion="dr-laden" data-id="" ${r ? "" : "disabled"}>Kein Filament geladen</button>
+      </div>
+      ${r ? `<button class="mini mint-rand" data-aktion="oeffnen-filament" data-id="${esc(r.id)}">Einstellungen der Rolle ›</button>` : ""}
+    </section>`;
+  },
+
+  // ---- Zieltemperatur setzen (number.set_value) -------------------------
+  _drSollHtml(k, s) {
+    if (!this._drId(`${k}_soll`)) return "";
+    const d = DR_TEMP[k];
+    const entwurf = (this._drTempEntwurf || {})[k];
+    const sendet = this._drTempSendet === k;
+    const r = this._drGeladen();
+    const rw = r ? wert(r, d.rolle).v : null;
+    return `<span class="dr-soll">
+      ${rw != null && rw !== s ? `<button class="chip dr-rolle-chip" data-aktion="dr-temp" data-k="${k}" data-wert="${rw}" title="Wert der geladenen Rolle ${esc(r.name)}" ${sendet ? "disabled" : ""}>🧵 ${zahl(rw)} °C</button>` : ""}
+      <input type="number" inputmode="numeric" min="0" max="${d.max}" step="1" data-dr-temp="${k}" value="${esc(entwurf == null ? "" : entwurf)}"
+        placeholder="${s ? zahl(s) : "0"}" aria-label="Neue Zieltemperatur ${d.name} in °C (0 bis ${d.max})" class="${this._drTempFehler === k ? "fehler" : ""}"><span class="dr-einheit">°C</span>
+      <button class="mini mint-rand" data-aktion="dr-temp" data-k="${k}" ${sendet ? "disabled" : ""}>${sendet ? `<span class="dreher klein"></span>` : "Setzen"}</button>
+    </span>`;
+  },
+  _drTempAnfrage(k, roh) {
+    const d = DR_TEMP[k];
+    const text = String(roh == null ? "" : roh).trim().replace(",", ".");
+    const v = Number(text);
+    if (text === "" || !Number.isFinite(v) || v < 0 || v > d.max) {
+      this._drTempFehler = k;
+      this._toast(text === "" ? `Bitte eine Zieltemperatur für ${d.name} eingeben (0–${d.max} °C).` : `${d.name}: nur 0–${d.max} °C möglich.`);
+      return;
+    }
+    this._drTempFehler = null;
+    const w = Math.round(v);
+    this._drTempWunsch = { k, wert: w, warnungen: this._drTempWarnungen(k, w) };
+    if (this._drTempWunsch.warnungen.length) { this._dialog = "dr-temp"; this._zeichnen(); return; }
+    this._drTempSenden();
+  },
+  // Nachfragen nur, wenn es etwas zu bedenken gibt
+  _drTempWarnungen(k, w) {
+    const d = DR_TEMP[k];
+    const liste = [];
+    const druckt = ["running", "pause", "prepare", "slicing"].includes(this._drZustand());
+    if (druckt) liste.push(w === 0 ? { rot: true, text: "Es läuft ein Druck. Mit 0 °C schaltest du die Heizung ab, der Druck misslingt dann." }
+      : { text: "Es läuft ein Druck. Die neue Temperatur gilt sofort für diesen Druck, bis der G-Code sie wieder ändert." });
+    if (w >= d.heiss) liste.push({ text: k === "duese" ? `${w} °C an der Düse ist sehr heiß. Das brauchen nur Materialien wie ASA, PC oder PA.`
+      : `${w} °C am Druckbett ist sehr heiß, nur für ABS, ASA oder PC sinnvoll. Nicht anfassen.` });
+    const r = this._drGeladen();
+    const rw = r ? wert(r, d.rolle).v : null;
+    if (rw != null && w > 0 && Math.abs(w - rw) >= 25) liste.push({ text: `Für die geladene Rolle „${r.name}“ sind ${zahl(rw)} °C eingetragen.` });
+    return liste;
+  },
+  _drTempDialogHtml() {
+    const w = this._drTempWunsch;
+    if (!w) return "";
+    const d = DR_TEMP[w.k];
+    const ist = this._drZ(d.ist), ziel = this._drZ(d.ziel);
+    const rot = w.warnungen.some((x) => x.rot);
+    return `<h2>${d.name} ${w.wert === 0 ? "ausschalten" : `auf ${w.wert} °C setzen`}?</h2>
+      <p class="leise">Jetzt ${ist == null ? "–" : zahl(ist)} °C${ziel ? `, Ziel ${zahl(ziel)} °C` : ", Heizung aus"}.</p>
+      ${w.warnungen.map((x) => `<div class="hinweis ${x.rot ? "rot-hinweis" : "amber"}">${esc(x.text)}</div>`).join("")}
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
+        <button class="knopf ${rot ? "rot-knopf" : ""}" data-aktion="dr-temp-ok">${w.wert === 0 ? "Heizung aus" : `Auf ${w.wert} °C setzen`}</button></div>`;
+  },
+  async _drTempSenden() {
+    const w = this._drTempWunsch;
+    if (!w) return;
+    const d = DR_TEMP[w.k];
+    const id = this._drId(`${w.k}_soll`);
+    this._dialog = null;
+    this._drTempSendet = w.k;
+    this._zeichnen();
+    try {
+      await this._hass.callService("number", "set_value", { entity_id: id, value: w.wert });
+    } catch (e) {
+      this._drTempSendet = null;
+      this._toast(`${d.name}: Senden hat nicht geklappt (${e.message || e}).`);
+      return;
+    }
+    if (this._drTempEntwurf) delete this._drTempEntwurf[w.k];
+    const ok = await this._drWarten(() => this._drZ(`${w.k}_soll`) === w.wert || this._drZ(d.ziel) === w.wert, 10000);
+    this._drTempSendet = null;
+    this._toast(ok ? (w.wert === 0 ? `${d.name}: Heizung ist aus.` : `${d.name}: Ziel ${w.wert} °C übernommen.`)
+      : `${d.name}: ${w.wert} °C gesendet, der Drucker hat es noch nicht bestätigt.`);
+  },
+  // Warten, bis Home Assistant den neuen Zustand meldet
+  _drWarten(pruef, max) {
+    const start = Date.now();
+    return new Promise((fertig) => {
+      const schritt = () => {
+        if (pruef()) fertig(true);
+        else if (Date.now() - start > max) fertig(false);
+        else setTimeout(schritt, 400);
+      };
+      setTimeout(schritt, 400);
+    });
+  },
+
+  // ---- Lüfter einstellen (fan.set_percentage / fan.turn_off) ------------
+  _drLuefterWert(k) {
+    const f = DR_LUEFTER[k] && this._drS(DR_LUEFTER[k].f);
+    if (f && f.state === "off") return 0;
+    if (f && f.attributes && f.attributes.percentage != null && !isNaN(Number(f.attributes.percentage))) return Number(f.attributes.percentage);
+    return this._drZ(k);
+  },
+  _drLuefterDialogHtml() {
+    const k = this._drLuefterK, L = DR_LUEFTER[k];
+    if (!L) return "";
+    const v = this._drLuefterWert(k) || 0;
+    const druckt = ["running", "pause", "prepare", "slicing"].includes(this._drZustand());
+    const sendet = this._drLuefterSendet;
+    return `<h2>🌀 ${L.name}</h2>
+      <p class="leise">Läuft gerade mit <strong class="tx">${zahl(v)} %</strong>. ${esc(L.info)}</p>
+      ${druckt ? `<div class="hinweis amber">Es läuft ein Druck: Der Drucker stellt die Lüfter selbst per G-Code ein und kann deinen Wert beim nächsten Befehl wieder ändern.</div>` : ""}
+      <div class="chips dr-stufen">${DR_LUEFTER_STUFEN.map((p) => `<button class="chip ${p === v ? "an" : ""}" data-aktion="dr-luefter-setzen" data-wert="${p}" ${sendet ? "disabled" : ""}>${p === 0 ? "Aus" : `${p} %`}</button>`).join("")}</div>
+      <div class="feld"><span>Eigener Wert (0–100 %)</span>
+        <span class="dr-soll breit"><input type="number" inputmode="numeric" min="0" max="100" step="10" data-dr-luefter value="${esc(this._drLuefterEntwurf == null ? "" : this._drLuefterEntwurf)}" placeholder="${zahl(v)}" aria-label="${L.name} in Prozent"><span class="dr-einheit">%</span>
+        <button class="knopf klein-knopf" data-aktion="dr-luefter-setzen" ${sendet ? "disabled" : ""}>${sendet ? `<span class="dreher klein"></span> Sendet …` : "Setzen"}</button></span></div>
+      <p class="leise klein">Der Drucker stellt in 10-%-Schritten ein, krumme Werte werden gerundet.</p>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Schließen</button></div>`;
+  },
+  async _drLuefterSetzen(roh) {
+    const k = this._drLuefterK, L = DR_LUEFTER[k];
+    const id = L && this._drId(L.f);
+    if (!id || this._drLuefterSendet) return;
+    const text = String(roh == null ? "" : roh).trim().replace(",", ".").replace("%", "").trim();
+    const v = Number(text);
+    if (text === "" || !Number.isFinite(v) || v < 0 || v > 100) {
+      this._toast(text === "" ? "Bitte einen Wert von 0 bis 100 % eingeben." : `${L.name}: nur 0–100 % möglich.`);
+      return;
+    }
+    const p = Math.round(v / 10) * 10;
+    this._drLuefterSendet = true;
+    this._zeichnen();
+    try {
+      if (p === 0) await this._hass.callService("fan", "turn_off", { entity_id: id });
+      else await this._hass.callService("fan", "set_percentage", { entity_id: id, percentage: p });
+    } catch (e) {
+      this._drLuefterSendet = false;
+      this._toast(`${L.name}: Senden hat nicht geklappt (${e.message || e}).`);
+      return;
+    }
+    this._drLuefterEntwurf = null;
+    const ok = await this._drWarten(() => this._drLuefterWert(k) === p, 8000);
+    this._drLuefterSendet = false;
+    if (this._dialog === "dr-luefter") this._dialog = null;
+    const gerundet = p !== v ? ` (gerundet von ${zahl(v)} %)` : "";
+    this._toast(ok ? (p === 0 ? `${L.name} ist aus.` : `${L.name} läuft mit ${p} %${gerundet}.`)
+      : `${L.name}: ${p} % gesendet, der Drucker hat es noch nicht bestätigt.`);
+  },
+
+  // ---- Eingaben, von panel.js weitergereicht -----------------------------
+  _drEingabe(t) {
+    if (t.dataset.drTemp != null) { (this._drTempEntwurf = this._drTempEntwurf || {})[t.dataset.drTemp] = t.value; t.classList.remove("fehler"); return true; }
+    if (t.dataset.drLuefter != null) { this._drLuefterEntwurf = t.value; return true; }
+    return false;
+  },
+  _drAenderung(t) {
+    if (t.dataset.dr === "geladen") { if (t.value) this._drLadenSetzen(t.value); return true; }
+    return false;
+  },
+  _drTaste(e) {
+    const t = e.target;
+    if (e.key !== "Enter" || !t.dataset) return false;
+    if (t.dataset.drTemp != null) { e.preventDefault(); this._drTempAnfrage(t.dataset.drTemp, t.value); return true; }
+    if (t.dataset.drLuefter != null) { e.preventDefault(); this._drLuefterSetzen(t.value); return true; }
+    return false;
+  },
+
   _drKlick(a, el) {
     switch (a) {
+      case "dr-laden": this._drLadenSetzen(el.dataset.id); return;
+      case "dr-temp": {
+        const k = el.dataset.k;
+        let roh = el.dataset.wert;
+        if (roh == null) {
+          const i = this.shadowRoot.querySelector(`[data-dr-temp="${k}"]`);
+          roh = i ? i.value : "";
+          (this._drTempEntwurf = this._drTempEntwurf || {})[k] = roh;
+        }
+        this._drTempAnfrage(k, roh);
+        return;
+      }
+      case "dr-temp-ok": this._drTempSenden(); return;
+      case "dr-luefter": this._drLuefterK = el.dataset.k; this._drLuefterEntwurf = null; this._dialog = "dr-luefter"; break;
+      case "dr-luefter-setzen": {
+        const i = this.shadowRoot.querySelector("[data-dr-luefter]");
+        this._drLuefterSetzen(el.dataset.wert != null ? el.dataset.wert : i ? i.value : "");
+        return;
+      }
       case "dr-schalten": this._drSchaltZiel = el.dataset.ziel; this._dialog = "dr-schalten"; break;
       case "dr-schalten-ok": this._drSchalten(); return;
       case "dr-live": this._drLive = !this._drLive; break;
@@ -2657,7 +3161,8 @@ const BuchenAnsicht = {
     return this._daten.rollen.map((r) => {
       let p = 0;
       const gruende = [];
-      if (r.id === letzte) { p += 4; gruende.push("zuletzt benutzt"); }
+      if (r.id === this._daten.geladen) { p += 10; gruende.push("ist geladen"); }   // immer zuerst
+      else if (r.id === letzte) { p += 4; gruende.push("zuletzt benutzt"); }
       if (mats) { if (mats.includes(r.material)) { p += 3; gruende.push(`${zahl(d.duese_c)} °C passt zu ${r.material}`); } else p -= 3; }
       if (r.rest_g != null) { if (r.rest_g >= bedarf) p += 1; else { p -= 4; gruende.push("zu wenig Rest"); } }
       if (r.probiert) p += 0.5;
@@ -2979,7 +3484,7 @@ const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "ma
 
 const HilfeAnsicht = {
   _hiZustand() {
-    if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", kalRolle: null, kalWert: null };
+    if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", rolle: null, kalWert: null };
     return this._hi;
   },
 
@@ -2988,13 +3493,23 @@ const HilfeAnsicht = {
     const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml() : this._hiDruckerHtml();
     return `<div class="hi-seite" data-einmal="hi-${h.tab}">
       <div class="chips hi-tabs unter-tabs">${HI_TABS.map(([id, n]) => `<button class="chip ${h.tab === id ? "an" : ""}" data-aktion="hi-tab" data-id="${id}">${n}</button>`).join("")}</div>
-      ${inhalt}</div>`;
+      ${inhalt}${h.tab === "fehler" && fehlerbild(h.fehler) ? this._hiFehlerPopupHtml() : ""}</div>`;
   },
 
-  // Rolle, deren Werte in der Hilfe gezeigt werden: zuletzt verbucht, sonst die erste probierte
+  // Beispielrolle für alle Werte in der Hilfe (eine Auswahl für den ganzen Bereich):
+  // selbst gewählt, sonst die Rolle im Drucker, sonst zuletzt verbucht, sonst die erste probierte
   _hiRolle() {
-    const d = this._daten;
-    return d.rollen.find((r) => r.id === d.letzte_rolle) || d.rollen.find((r) => r.probiert) || d.rollen[0];
+    const d = this._daten, h = this._hiZustand();
+    const id = (x) => x && d.rollen.find((r) => r.id === x);
+    return id(h.rolle) || id(d.geladen) || id(d.letzte_rolle) || d.rollen.find((r) => r.probiert) || d.rollen[0];
+  },
+  // Auswahl der Beispielrolle; gilt sofort in allen Hilfe-Bereichen
+  _hiRollenWahl(titel = "Beispielwerte für") {
+    const d = this._daten, r = this._hiRolle();
+    if (!r) return "";
+    const rollen = d.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    return `<label class="auswahl breit-auswahl hi-rollenwahl"><span>${esc(titel)}</span><select data-hi="rolle">${rollen.map((x) =>
+      `<option value="${esc(x.id)}" ${x.id === r.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.hersteller)}${x.id === d.geladen ? " · im Drucker" : ""}</option>`).join("")}</select></label>`;
   },
 
   _hiDruckerHtml() {
@@ -3013,7 +3528,7 @@ const HilfeAnsicht = {
     }
     const r = this._hiRolle();
     const felder = (HI_FELDER[b.id] || []).map((k) => FELDER.find((f) => f.k === k)).filter(Boolean);
-    const werte = r && felder.length ? `<div class="info-liste oben-abstand"><div class="info-zeile kopfzeile"><span>Bei ${esc(r.name)}</span><span></span></div>
+    const werte = r && felder.length ? `${this._hiRollenWahl()}<div class="info-liste hi-werte">
       ${felder.map((f) => { const w = wert(r, f.k); return `<div class="info-zeile"><span>${esc(f.name)}</span><strong class="${w.quelle === "vorschlag" ? "amber" : ""}">${w.v == null ? "–" : `${zahl(w.v, f.nk || 0)} ${f.e}`}</strong></div>`; }).join("")}
       ${b.id === "bett" ? `<div class="info-zeile"><span>Druckplatte</span><strong>${esc(wert(r, "platte").v || "–")}</strong></div>` : ""}</div>` : "";
     return `<div class="hi-nr">${b.n}</div><h2>${esc(b.name)}</h2><p>${esc(b.text)}</p>${live}
@@ -3027,7 +3542,8 @@ const HilfeAnsicht = {
     const b = TROCKNER_BEREICHE.find((x) => x.id === h.tr) || TROCKNER_BEREICHE[0];
     const rollen = this._daten.rollen.slice().sort((a, c) => (wert(c, "tr_temp").v || 0) - (wert(a, "tr_temp").v || 0));
     return `<div class="hi-raster">
-      <div class="dr-karte hi-bild-karte"><h3 class="dr-titel">Sovol Filament-Trockner · ${this._mobil ? "tippe auf die Felder" : "fahre über die Felder"}</h3>${trocknerSvg(h.tr)}
+      <div class="dr-karte hi-bild-karte"><h3 class="dr-titel">Sovol Filament-Trockner · ${this._mobil ? "tippe auf die Felder" : "fahre über die Felder"}</h3>${trocknerSvg(h.tr, this._hiRolle())}
+        <div class="oben-abstand">${this._hiRollenWahl("Display zeigt Werte für")}</div>
         <div id="hi-tr-info" class="hi-tr-info"><strong>${TROCKNER_BEREICHE.indexOf(b) + 1} · ${esc(b.name)}</strong><span>${esc(b.text)}</span></div></div>
       <div class="dr-karte"><h3 class="dr-titel">Richtwerte je Material</h3>
         <div class="tr-tabelle">${TROCKNEN_TABELLE.map((t) => `<div class="tr-zeile"><strong>${esc(t.m)}</strong>
@@ -3042,37 +3558,86 @@ const HilfeAnsicht = {
   },
 
   _hiFehlerHtml() {
-    const h = this._hi;
     const r = this._hiRolle();
-    return `<p class="leise">Typische Fehlerbilder mit Ursachen und was du änderst. Tippe auf ein Bild für die Lösungen${r ? `, die Werte beziehen sich auf ${esc(r.name)}` : ""}.</p>
-      <div class="fb-raster">${FEHLERBILDER.map((f) => {
-        const auf = h.fehler === f.id;
-        return `<div class="fb-karte ${auf ? "auf" : ""}" data-klapp="fb-${f.id}">
-          <button class="fb-kopf" data-aktion="hi-fehler" data-id="${f.id}">${FB_ZEICHNUNG[f.id] || ""}<span><strong>${esc(f.name)}</strong><small class="leise">${esc(f.kurz)}</small></span></button>
-          ${auf ? `<div class="fb-details"><div class="leise klein">Ursachen: ${esc(f.ursachen.join(" · "))}</div>
-            <ul class="bu-loesungen">${f.loesungen.map((l) => { const a = l.aenderung && r ? aenderungRechnen(r, l.aenderung) : null;
-              return `<li><span class="bu-punkt">•</span><span>${esc(l.text)}${a ? ` <span class="bu-aend">${esc(a.feld.name)}: ${zahl(a.alt, a.feld.nk || 0)} → <strong>${zahl(a.neu, a.feld.nk || 0)}</strong> ${esc(a.feld.e)}</span>` : ""}</span></li>`; }).join("")}</ul></div>` : ""}
-        </div>`;
-      }).join("")}</div>`;
+    return `<p class="leise">Typische Fehlerbilder mit Ursachen und was du änderst. Tippe auf ein Bild für die Lösungen.</p>
+      <div class="hi-fb-wahl">${this._hiRollenWahl("Werte beziehen sich auf")}</div>
+      <div class="fb-raster">${FEHLERBILDER.map((f) => `<div class="fb-karte" data-fb="${f.id}">
+          <button class="fb-kopf" data-aktion="hi-fehler" data-id="${f.id}" aria-haspopup="dialog">${FB_ZEICHNUNG[f.id] || ""}<span><strong>${esc(f.name)}</strong><small class="leise">${esc(f.kurz)}</small></span></button>
+        </div>`).join("")}</div>`;
+  },
+  // Großes Fenster mit Ursachen und Lösungen, mittig über allem (wird in .app gehängt)
+  _hiFehlerPopupHtml() {
+    const f = fehlerbild(this._hi.fehler);
+    if (!f) return "";
+    const r = this._hiRolle();
+    return `<div class="hi-fb-ebene" data-fb-ebene="${f.id}">
+      <div class="hi-fb-schleier" data-aktion="hi-fehler-zu" data-einmal="hi-fb-schleier"></div>
+      <div class="hi-fb-popup" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="hi-fb-titel" data-einmal="hi-fb-${f.id}">
+        <button class="icon-knopf hi-fb-x" data-aktion="hi-fehler-zu" aria-label="Schließen">✕</button>
+        <div class="hi-fb-kopf">${FB_ZEICHNUNG[f.id] || ""}<div><h2 id="hi-fb-titel">${esc(f.name)}</h2><p class="leise">${esc(f.kurz)}</p></div></div>
+        <h3>Ursachen</h3><ul class="hi-fb-ursachen">${f.ursachen.map((u) => `<li>${esc(u)}</li>`).join("")}</ul>
+        <h3>Was du änderst${r ? ` <span class="leise klein">· Werte für ${esc(r.name)}</span>` : ""}</h3>
+        <ul class="bu-loesungen">${f.loesungen.map((l) => { const a = l.aenderung && r ? aenderungRechnen(r, l.aenderung) : null;
+          return `<li><span class="bu-punkt">•</span><span>${esc(l.text)}${a ? ` <span class="bu-aend">${esc(a.feld.name)}: ${zahl(a.alt, a.feld.nk || 0)} → <strong>${zahl(a.neu, a.feld.nk || 0)}</strong> ${esc(a.feld.e)}</span>` : ""}</span></li>`; }).join("")}</ul>
+        ${this._hiRollenWahl("Werte für andere Rolle")}
+      </div></div>`;
+  },
+  // Fenster öffnen, ohne die Seite neu zu zeichnen (kein Flackern)
+  _hiFehlerAuf(id) {
+    const h = this._hi, app = this.shadowRoot.querySelector(".app");
+    if (!fehlerbild(id) || !app) return;
+    const alt = app.querySelector(".hi-fb-ebene");
+    if (alt) alt.remove();
+    h.fehler = id;
+    app.insertAdjacentHTML("beforeend", this._hiFehlerPopupHtml());
+    this._auswahlenBauen();
+    this._hiPopupEinrichten(true);
+  },
+  _hiFehlerZu() {
+    const h = this._hi, ebene = this.shadowRoot.querySelector(".hi-fb-ebene");
+    const id = h.fehler;
+    h.fehler = null;
+    if (!ebene) return;
+    if (ebene.classList.contains("zu")) return;
+    // .still würde die Schließ-Animation abschalten
+    ebene.querySelectorAll(".still").forEach((x) => x.classList.remove("still"));
+    ebene.classList.add("zu");
+    setTimeout(() => {
+      ebene.remove();
+      const k = this.shadowRoot.querySelector(`.fb-karte[data-fb="${id}"] .fb-kopf`);
+      if (k) k.focus({ preventScroll: true });
+    }, 190);
+  },
+  // Fenster aus .haupt nach .app holen (über Navigation und Kopf) und Tastatur einrichten
+  _hiPopupEinrichten(fokus) {
+    const app = this.shadowRoot.querySelector(".app");
+    const ebene = this.shadowRoot.querySelector(".hi-fb-ebene");
+    if (!app || !ebene) return;
+    if (ebene.parentElement !== app) app.appendChild(ebene);
+    if (ebene._hiBereit) return;
+    ebene._hiBereit = true;
+    ebene.addEventListener("keydown", (e) => { if (e.key === "Escape" && !this._ddOffen) { e.stopPropagation(); this._hiFehlerZu(); } });
+    // Fenster ist modal: Fokus hinein, damit Escape und Tab dort wirken
+    const ziel = fokus ? ebene.querySelector(".hi-fb-x") : ebene.querySelector(".hi-fb-popup");
+    if (ziel && !ebene.contains(this.shadowRoot.activeElement)) ziel.focus({ preventScroll: true });
   },
 
   _hiKalHtml() {
     const h = this._hi;
     const k = KALIBRIERUNGEN.find((x) => x.id === h.kal) || KALIBRIERUNGEN[0];
     const f = FELDER.find((x) => x.k === k.feld);
-    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
-    const r = rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+    const r = this._hiRolle();
     const aktuell = wert(r, k.feld).v;
     const w = h.kalWert != null ? h.kalWert : aktuell;
     const kal = (r.kalibriert || {})[k.feld];
     return `<div class="chips kal-wahl unter-tabs">${KALIBRIERUNGEN.map((x) => `<button class="chip ${x.id === k.id ? "an" : ""}" data-aktion="hi-kal" data-id="${x.id}">${x.icon} ${esc(x.name)}</button>`).join("")}</div>
       <div class="hi-raster">
-        <div class="dr-karte" data-einmal="kal-${k.id}"><div class="kal-kopf">${k.bild}<div><h2>${esc(k.name)}</h2><p class="leise">${esc(k.wozu)}</p></div></div>
-          <h3>So geht's</h3><ol class="kal-liste">${k.so.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+        <div class="dr-karte" data-einmal="kal-${k.id}"><div class="kal-kopf">${typeof k.bild === "function" ? k.bild(r) : k.bild}<div><h2>${esc(k.name)}</h2><p class="leise">${esc(k.wozu)}</p></div></div>
+          <h3>So geht's</h3><ol class="kal-liste">${k.so.map((s) => `<li>${esc(kalText(s, r))}</li>`).join("")}</ol>
           <h3>Worauf achten</h3><ul class="kal-liste">${k.achten.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>
           <h3>Typische Fehler</h3><ul class="kal-liste fehler">${k.fehler.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>
         <div class="dr-karte"><h3 class="dr-titel">Ergebnis eintragen</h3>
-          <label class="auswahl breit-auswahl"><span>Rolle</span><select data-hi="rolle">${rollen.map((x) => `<option value="${esc(x.id)}" ${x.id === r.id ? "selected" : ""}>${esc(x.name)} · ${esc(x.hersteller)}</option>`).join("")}</select></label>
+          ${this._hiRollenWahl("Rolle")}
           <div class="mod-regler"><div class="r-kopf"><span>${esc(f.name)}</span><strong id="hi-kal-wert">${w == null ? "–" : `${zahl(w, f.nk || 0)} ${f.e}`}</strong></div>
             <div class="regler-zeile"><button class="rund" data-aktion="hi-kal-schritt" data-d="-1">−</button><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${w == null ? f.min : w}" data-hi="kal-wert"><button class="rund" data-aktion="hi-kal-schritt" data-d="1">+</button></div></div>
           <p class="leise klein">Bisher: ${aktuell == null ? "–" : `${zahl(aktuell, f.nk || 0)} ${f.e}`} (${wert(r, k.feld).quelle === "vorschlag" ? "Vorschlag" : "dein Wert"})${kal ? ` · kalibriert am ${new Date(kal).toLocaleDateString("de-DE")}` : ""}</p>
@@ -3082,6 +3647,7 @@ const HilfeAnsicht = {
 
   // Mausbewegung über der Zeichnung: Info sofort wechseln, ohne alles neu zu zeichnen
   _hiNachZeichnen() {
+    this._hiPopupEinrichten(false);
     const svg = this.shadowRoot.querySelector(".p1s-bild, .trockner-bild");
     if (!svg || svg._hiBereit) return;
     svg._hiBereit = true;
@@ -3097,7 +3663,7 @@ const HilfeAnsicht = {
     this.shadowRoot.querySelectorAll(".p1s-punkt").forEach((g) => g.classList.toggle("an", g.dataset.id === id));
     if (art === "hi-p1s") {
       const box = this.shadowRoot.getElementById("hi-info");
-      if (box) { box.innerHTML = this._hiP1sInfoHtml(); box.classList.remove("wechsel"); void box.offsetWidth; box.classList.add("wechsel"); }
+      if (box) { box.innerHTML = this._hiP1sInfoHtml(); this._auswahlenBauen(); box.classList.remove("wechsel"); void box.offsetWidth; box.classList.add("wechsel"); }
       if (this._mobil && box) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
     } else {
       const b = TROCKNER_BEREICHE.find((x) => x.id === id);
@@ -3109,17 +3675,14 @@ const HilfeAnsicht = {
   _hiKlick(a, el) {
     const h = this._hiZustand();
     switch (a) {
-      case "hi-tab": h.tab = el.dataset.id; break;
+      case "hi-tab": h.tab = el.dataset.id; h.fehler = null; break;
       case "hi-p1s": case "hi-tr": this._hiZeigen(a, el.dataset.id); return;
-      case "hi-fehler": {
-        const id = el.dataset.id;
-        this._klappen(`fb-${id}`, h.fehler === id, () => { h.fehler = h.fehler === id ? null : id; });
-        return;
-      }
+      case "hi-fehler": this._hiFehlerAuf(el.dataset.id); return;
+      case "hi-fehler-zu": this._hiFehlerZu(); return;
       case "hi-kal": h.kal = el.dataset.id; h.kalWert = null; break;
       case "hi-kal-schritt": {
         const k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
-        const r = this._daten.rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+        const r = this._hiRolle();
         const alt = h.kalWert != null ? h.kalWert : (wert(r, k.feld).v ?? f.min);
         h.kalWert = Math.min(f.max, Math.max(f.min, Math.round((alt + Number(el.dataset.d) * f.step) / f.step) * f.step));
         this._hiKalWertZeigen();
@@ -3127,7 +3690,7 @@ const HilfeAnsicht = {
       }
       case "hi-kal-speichern": {
         const k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
-        const r = this._daten.rollen.find((x) => x.id === h.kalRolle) || this._hiRolle();
+        const r = this._hiRolle();
         const w = h.kalWert != null ? h.kalWert : wert(r, k.feld).v;
         if (w == null) return;
         r.eigen = { ...(r.eigen || {}), [k.feld]: w };
@@ -3157,7 +3720,7 @@ const HilfeAnsicht = {
   _hiAenderung(t) {
     const k = t.dataset && t.dataset.hi;
     if (!k) return false;
-    if (k === "rolle") { this._hi.kalRolle = t.value; this._hi.kalWert = null; this._zeichnen(); }
+    if (k === "rolle") { this._hi.rolle = t.value; this._hi.kalWert = null; this._zeichnen(); }
     return true;
   },
 };
@@ -3175,6 +3738,86 @@ const WS_EINSTELLUNGEN = [
   { k: "mindest_g", name: "Nachkaufen je Farbe unter", e: "g", min: 0, max: 1000, step: 50 },
   { k: "mindest_material_g", name: "Nachkaufen je Material unter", e: "g", min: 0, max: 3000, step: 100 },
 ];
+// Wartung: wo sitzt das Teil im P1S, was ist es, wofür ist es gut.
+// teile = hervorgehobene Bereiche in der kleinen Zeichnung (wsP1sMini)
+const WS_WARTUNG_INFO = {
+  platte: { teile: ["platte"], wo: "Auf dem Heizbett unten im Druckraum.",
+    was: "Die abnehmbare, magnetische Federstahlplatte mit Beschichtung (z. B. Textured PEI).",
+    wofuer: "Darauf haftet die erste Schicht. Fingerfett und Klebereste lassen Drucke sich lösen oder an den Ecken hochbiegen." },
+  stangen: { teile: ["stangen"], wo: "Oben im Druckraum: eine quer (X-Achse), je eine links und rechts nach hinten (Y-Achse).",
+    was: "Glatte, schwarze Stangen aus Kohlefaser, auf denen der Druckkopf in Gleitlagern läuft.",
+    wofuer: "Sie führen den Druckkopf leicht und steif. Staub und Abrieb machen Geräusche und Schwingungen. Trocken halten, Kohlefaser nicht ölen." },
+  duese: { teile: ["duese"], wo: "Ganz unten am Druckkopf, direkt über dem Druckbett.",
+    was: "Die Düse am Heizblock, darum die Silikonsocke.",
+    wofuer: "Hier kommt das geschmolzene Filament heraus. Die Socke hält die Wärme am Heizblock und verhindert, dass Plastik daran festklebt und auf den Druck tropft." },
+  luefter: { teile: ["luefter"], wo: "Am Druckkopf (Bauteil- und Hotend-Lüfter), links an der Seite (Hilfslüfter) und hinten oben (Druckraumlüfter).",
+    was: "Die Lüfter des Druckers.",
+    wofuer: "Sie kühlen die frische Schicht und das Hotend und führen warme Luft ab. Verstaubt fördern sie weniger: schlechtere Überhänge oder Hitzestau im Hotend." },
+  spindeln: { teile: ["spindeln"], wo: "Senkrecht im Druckraum, das Druckbett hängt daran.",
+    was: "Die Gewindespindeln der Z-Achse.",
+    wofuer: "Sie fahren das Bett Schicht für Schicht nach unten. Laufen sie trocken oder verschmutzt, wird die Bewegung ruckelig, das zeigt sich als Streifen in der Wand (Z-Banding)." },
+  riemen: { teile: ["riemen"], wo: "Oben links und rechts entlang der Y-Stangen und quer zum Druckkopf, angetrieben von den Motoren hinten.",
+    was: "Die Zahnriemen der X/Y-Bewegung (CoreXY).",
+    wofuer: "Sie ziehen den Druckkopf hin und her. Zu locker gibt ungenaue Maße und Wellen hinter Kanten (Ghosting), zu straff belastet Lager und Motoren." },
+  ptfe: { teile: ["ptfe"], wo: "Von der Spule hinten über den Druckraum bis oben in den Druckkopf, der Schneider sitzt seitlich am Kopf.",
+    was: "Der weiße Teflonschlauch und der Filament-Schneider.",
+    wofuer: "Der Schlauch führt das Filament reibungsarm zum Extruder. Knicke oder Abrieb bremsen es (zu wenig Material), eine stumpfe Klinge schneidet beim Wechsel nicht sauber." },
+  filter: { teile: ["filter"], wo: "Hinten oben am Druckraumlüfter, wo die Luft den Drucker verlässt.",
+    was: "Der Aktivkohlefilter vor dem Druckraumlüfter.",
+    wofuer: "Bindet Gerüche und einen Teil der Dämpfe, vor allem bei ASA und ABS. Ist die Kohle gesättigt, wirkt er kaum noch." },
+  kalibrieren: { teile: ["kopf", "platte", "stangen"], wo: "Der ganze Drucker: Druckkopf, Bett und Achsen.",
+    was: "Die automatische Kalibrierung am Drucker (Bett-Nivellierung, Vibration, Motoren).",
+    wofuer: "Damit die erste Schicht überall gleich dick wird und schnelle Bewegungen sauber bleiben. Sinnvoll nach Transport, Umbau oder Riemenspannen." },
+};
+// Verschleißteile (ERSATZTEILE_STANDARD) mit eigener Erklärung
+const WS_TEIL_INFO = {
+  duese04: { teile: ["duese"], wo: "Ganz unten am Druckkopf.",
+    was: "Die Düse mit 0,4 mm Öffnung aus gehärtetem Stahl.",
+    wofuer: "Bestimmt, wie fein gedruckt wird. Abrieb (vor allem durch Carbon- oder Glow-Filament) weitet die Öffnung, dann werden Wände ungenau und es gibt mehr Fäden." },
+  platte: WS_WARTUNG_INFO.platte,
+  socke: { teile: ["duese"], wo: "Am Heizblock direkt über der Düse.",
+    was: "Die Silikonhülle um den Heizblock.",
+    wofuer: "Hält die Temperatur stabil, schützt vor Luftzug vom Lüfter und vor festklebendem Plastik. Rissig oder verhärtet: tauschen." },
+  ptfe: WS_WARTUNG_INFO.ptfe,
+  filter: WS_WARTUNG_INFO.filter,
+  riemen: WS_WARTUNG_INFO.riemen,
+};
+
+// Kleine Vorderansicht des P1S (im Stil der Hilfe-Zeichnung), gewählte Teile gelb
+function wsP1sMini(an, titel) {
+  const g = new Set(an || []);
+  const gelb = "#ffd54a", grau = "#5d726a", hell = "#8da49a";
+  const f = (id, sonst = grau) => (g.has(id) ? gelb : sonst);
+  const kl = (id) => (g.has(id) ? "an" : "");
+  const sw = (id, normal, hervor) => (g.has(id) ? hervor : normal);
+  const puls = (id, x, y, r = 9) => (g.has(id) ? `<circle cx="${x}" cy="${y}" r="${r}" class="ws-p1s-puls"/>` : "");
+  return `<svg viewBox="0 0 220 180" class="ws-p1s" role="img" aria-label="${esc(titel || "Bambu Lab P1S")}">
+    <defs><pattern id="ws-p1s-raster" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M10 0 H0 V10" stroke="rgba(62,230,168,.06)" fill="none"/></pattern></defs>
+    <rect x="0" y="0" width="220" height="180" fill="url(#ws-p1s-raster)"/>
+    <rect x="12" y="10" width="184" height="162" rx="9" stroke="${grau}" stroke-width="1.3" fill="none"/>
+    <rect x="20" y="18" width="168" height="124" rx="4" stroke="#3ee6a8" stroke-opacity=".3" fill="rgba(62,230,168,.03)"/>
+    <path d="M20 142 H188" stroke="${grau}" stroke-width="1.2"/>
+    <rect x="28" y="152" width="40" height="12" rx="3" stroke="${hell}" fill="rgba(62,230,168,.06)"/><path d="M33 158 H52" stroke="#3ee6a8" stroke-width="1.6"/>
+    <g class="${kl("filter")}"><rect x="132" y="19" width="28" height="17" rx="2" stroke="${f("filter")}" stroke-width="${sw("filter", 1, 1.8)}" fill="${g.has("filter") ? "rgba(255,213,74,.25)" : "rgba(141,164,154,.08)"}"/>
+      <path d="M135 22 L139 33 M141 22 L145 33 M147 22 L151 33 M153 22 L157 33" stroke="${f("filter")}" stroke-opacity=".5" stroke-width=".8"/></g>
+    <g class="${kl("spindeln")}"><path d="M34 34 V138 M174 34 V138" stroke="${f("spindeln", hell)}" stroke-width="${sw("spindeln", 2.2, 3.2)}" stroke-dasharray="2 2.5"/></g>
+    <g class="${kl("riemen")}"><path d="M30 34 L50 22 M178 34 L158 22 M36 52 H88 M120 52 H172" stroke="${f("riemen")}" stroke-width="${sw("riemen", 1.1, 2.2)}" stroke-dasharray="4 2.5" fill="none"/></g>
+    <g class="${kl("stangen")}"><path d="M26 42 L48 27 M182 42 L160 27 M30 47 H178" stroke="${f("stangen", hell)}" stroke-width="${sw("stangen", 2.4, 3.6)}" stroke-linecap="round"/></g>
+    <g class="${kl("ptfe")}"><path d="M104 41 C106 8 200 2 204 66" stroke="${g.has("ptfe") ? gelb : "#ffb547"}" stroke-opacity="${g.has("ptfe") ? 1 : 0.55}" stroke-width="${sw("ptfe", 1.6, 2.6)}" fill="none" stroke-dasharray="${g.has("ptfe") ? "none" : "4 2.5"}"/>
+      <path d="M88 58 L82 63 L90 67" stroke="${f("ptfe")}" stroke-width="${sw("ptfe", 1.2, 2.2)}" fill="none"/></g>
+    <circle cx="204" cy="78" r="10" stroke="#ffb547" stroke-width="1.6" fill="rgba(255,181,71,.12)"/><circle cx="204" cy="78" r="3" fill="#ffb547"/>
+    <g class="${kl("kopf")}"><rect x="88" y="40" width="32" height="34" rx="5" fill="rgba(141,164,154,.12)" stroke="${f("kopf", hell)}" stroke-width="${sw("kopf", 1.4, 2.2)}"/></g>
+    <g class="${kl("luefter")}" stroke="${f("luefter")}" stroke-width="${sw("luefter", 1.1, 1.8)}" fill="none">
+      <circle cx="104" cy="56" r="7"/><path d="M98 56 H110 M104 50 V62" stroke-width="1"/>
+      <rect x="13" y="66" width="7" height="34" rx="2"/><path d="M14 72 H19 M14 78 H19 M14 84 H19 M14 90 H19 M14 96 H19" stroke-width="1"/>
+      <circle cx="146" cy="27.5" r="6" fill="#0b1512"/><path d="M141 27.5 H151 M146 22.5 V32.5" stroke-width="1"/></g>
+    <g class="${kl("duese")}"><path d="M96 74 H112 L109 82 H99 Z" fill="${f("duese", hell)}"/><path d="M102 82 H106 L104 88 Z" fill="${g.has("duese") ? gelb : "#ffb547"}"/></g>
+    <g class="${kl("platte")}"><path d="M42 118 H166 L174 128 H34 Z" fill="${g.has("platte") ? "rgba(255,213,74,.24)" : "rgba(62,230,168,.10)"}" stroke="${g.has("platte") ? gelb : "#3ee6a8"}" stroke-width="${sw("platte", 1.2, 1.9)}"/></g>
+    <rect x="34" y="128" width="140" height="5" fill="rgba(62,230,168,.22)"/>
+    <rect x="94" y="106" width="20" height="13" rx="1.5" fill="#3ee6a8" opacity=".6"/>
+    ${puls("platte", 104, 123, 13)}${puls("stangen", 60, 47, 9)}${puls("riemen", 40, 28, 8)}${puls("duese", 104, 83, 8)}${puls("luefter", 104, 56, 10)}${puls("spindeln", 34, 86, 9)}${puls("ptfe", 160, 12, 8)}${puls("filter", 146, 27.5, 12)}${puls("kopf", 104, 57, 15)}
+  </svg>`;
+}
 const WS_MONATE = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
 
 // Druckname ohne Endung und Plattennummer, damit gleiche Modelle zusammenfallen
@@ -3397,15 +4040,32 @@ const WerkstattAnsicht = {
         <div class="ws-text"><strong>${esc(x.a.name)}</strong><small class="leise">${esc(x.a.text)}</small>
           ${x.neu ? `<small class="amber">Noch nicht erfasst. Tippe auf „Erledigt“, wenn du es zuletzt gemacht hast, dann zählt es ab heute.</small>`
             : `${balken(x.anteil)}<small class="leise">Zuletzt vor ${zahl(x.seitT)} Tagen${x.seitH != null ? ` und ${zahl(x.seitH)} Druckstunden` : ""} · alle ${x.a.alle_h} h oder ${x.a.alle_tage} Tage</small>`}</div>
-        <button class="knopf ${x.faellig ? "" : "leise"} klein-knopf" data-aktion="ws-erledigt" data-id="${x.a.id}">✓ Erledigt</button></div>`).join("")}</div>
+        ${this._wsInfoKnopf("a-" + x.a.id, WS_WARTUNG_INFO[x.a.id], x.a.name)}
+        <button class="knopf ${x.faellig ? "" : "leise"} klein-knopf" data-aktion="ws-erledigt" data-id="${x.a.id}">✓ Erledigt</button>
+        ${this._wsInfoHtml("a-" + x.a.id, WS_WARTUNG_INFO[x.a.id], x.a.name)}</div>`).join("")}</div>
       <h3>⚙️ Verschleißteile</h3>
       <div class="ws-liste">${teile.map((t) => {
         const genutzt = h != null ? Math.max(0, h - (t.eingebaut_h || 0)) : null;
         const anteil = genutzt != null ? genutzt / t.lebensdauer_h : 0;
         return `<div class="ws-wartung dr-karte ${anteil >= 1 ? "dringend" : ""}"><div class="ws-text"><strong>${esc(t.name)}</strong>
           ${genutzt != null ? `${balken(anteil)}<small class="leise">${zahl(genutzt)} von ~${zahl(t.lebensdauer_h)} Druckstunden${t.getauscht_am ? ` · getauscht am ${new Date(t.getauscht_am).toLocaleDateString("de-DE")}` : " · seit Inbetriebnahme"}</small>` : `<small class="leise">Richtwert ~${zahl(t.lebensdauer_h)} Druckstunden</small>`}</div>
-          <button class="knopf leise klein-knopf" data-aktion="ws-getauscht" data-id="${t.id}" ${h == null ? "disabled" : ""}>Getauscht</button></div>`;
+          ${this._wsInfoKnopf("t-" + t.id, WS_TEIL_INFO[t.id], t.name)}
+          <button class="knopf leise klein-knopf" data-aktion="ws-getauscht" data-id="${t.id}" ${h == null ? "disabled" : ""}>Getauscht</button>
+          ${this._wsInfoHtml("t-" + t.id, WS_TEIL_INFO[t.id], t.name)}</div>`;
       }).join("")}</div>`;
+  },
+
+  // Info-Knopf (i) und aufgeklapptes Info-Feld mit Zeichnung
+  _wsInfoKnopf(id, info, name) {
+    if (!info) return "";
+    const an = this._wsZustand().info === id;
+    return `<button class="ws-info-knopf ${an ? "an" : ""}" data-aktion="ws-info" data-id="${esc(id)}" aria-expanded="${an}" aria-label="Was ist das: ${esc(name)}" title="Wo sitzt das, wofür ist das?">i</button>`;
+  },
+  _wsInfoHtml(id, info, name) {
+    if (!info || this._wsZustand().info !== id) return "";
+    return `<div class="ws-info" data-ws-info="${esc(id)}" data-einmal="ws-info-${esc(id)}">
+      <div class="ws-info-bild">${wsP1sMini(info.teile, `${name}: Lage im Bambu Lab P1S`)}</div>
+      <div class="ws-info-text"><p><b>Was ist das?</b> ${esc(info.was)}</p><p><b>Wo?</b> ${esc(info.wo)}</p><p><b>Wofür?</b> ${esc(info.wofuer)}</p></div></div>`;
   },
 
   // ---- Kosten ----
@@ -3501,6 +4161,7 @@ const WerkstattAnsicht = {
         this._toast(`„${d.name}“ steht in der Warteschlange (Platz ${q.length}).`);
         return;
       }
+      case "ws-info": w.info = w.info === el.dataset.id ? null : el.dataset.id; break;
       case "ws-kopieren": this._kopieren(this._wsEinkaufText(), "Einkaufsliste kopiert."); return;
       case "ws-erledigt": {
         const h = this._drZ("stunden");
@@ -4499,12 +5160,352 @@ function schichtBerechnen(s, z, opt) {
     innerste.push(f || letzte);
   }
   if (opt.fuellung > 0 && innerste.length) {
-    const voll = opt.massiv;   // Boden/Deckel: dicht gefüllt
-    const abstand = voll ? breite : Math.max(breite, (breite * 2) / (opt.fuellung / 100));
-    const winkel = ((opt.nr % 2 ? 45 : -45) * Math.PI) / 180;
-    fuellung.push(...fuellLinien(innerste, abstand, winkel));
+    if (opt.massiv) {   // Boden/Deckel: dicht gefüllt, geradlinig
+      const winkel = ((opt.nr % 2 ? 45 : -45) * Math.PI) / 180;
+      fuellung.push(...fuellLinien(innerste, breite, winkel));
+    } else {
+      // Abstand so, dass eine einzelne Linienschar die gewünschte Dichte hätte; jedes Muster rechnet das auf seine Form um
+      const s = Math.max(breite, breite / (opt.fuellung / 100));
+      fuellung.push(...fuellMuster(opt.muster || "grid", innerste, { s, z, nr: opt.nr || 0, hoehe: opt.hoehe || z }));
+    }
   }
   return { z, aussen, innen, fuellung };
+}
+
+// ---- Füllmuster wie in Bambu Studio (Prozess › Stärke › „Sparse infill pattern“) ----
+// Vereinfachte Nachbildung je Schicht; Muster der Gruppe „3d“ ändern sich mit der Höhe.
+const FUELLMUSTER = [
+  { id: "grid", name: "Gitter", bambu: "Grid", gruppe: "2d", text: "Zwei Linienrichtungen in jeder Schicht. Stabil, in vielen Bambu-Profilen voreingestellt." },
+  { id: "zig-zag", name: "Geradlinig", bambu: "Rectilinear", gruppe: "2d", text: "Eine Richtung je Schicht, abwechselnd um 90° gedreht und am Rand verbunden. Schnell und sparsam." },
+  { id: "line", name: "Linie", bambu: "Line", gruppe: "2d", text: "Wie Geradlinig, aber ohne Verbindungen am Rand. Sehr schnell, eher schwach." },
+  { id: "alignedrectilinear", name: "Ausgerichtet geradlinig", bambu: "Aligned Rectilinear", gruppe: "2d", text: "Geradlinig, aber alle Schichten liegen in derselben Richtung übereinander." },
+  { id: "triangles", name: "Dreiecke", bambu: "Triangles", gruppe: "2d", text: "Drei Richtungen in jeder Schicht ergeben Dreiecke. Steif in der Ebene." },
+  { id: "tri-hexagon", name: "Tri-Hexagon", bambu: "Tri-hexagon", gruppe: "2d", text: "Sterne aus Dreiecken und Sechsecken. Steif und gleichmäßig." },
+  { id: "honeycomb", name: "Wabe", bambu: "Honeycomb", gruppe: "2d", text: "Sechseckige Waben. Sehr stabil, druckt aber langsamer." },
+  { id: "2dlattice", name: "2D-Gitter", bambu: "2D Lattice", gruppe: "2d", text: "Rautengitter aus zwei schrägen Richtungen." },
+  { id: "zigzag", name: "Zickzack", bambu: "Zig Zag", gruppe: "2d", text: "Zickzack-Linien, alle in derselben Richtung." },
+  { id: "crosszag", name: "Kreuz-Zickzack", bambu: "Cross Zag", gruppe: "2d", text: "Zickzack-Linien, die je Schicht die Richtung wechseln." },
+  { id: "cubic", name: "Kubisch", bambu: "Cubic", gruppe: "3d", text: "Drei Richtungen, die mit der Höhe wandern: Würfel auf der Spitze. Stabil in alle Richtungen." },
+  { id: "adaptivecubic", name: "Adaptiv kubisch", bambu: "Adaptive Cubic", gruppe: "3d", text: "Kubisch, innen grob und zum Rand hin dichter. Spart Material bei großen Teilen." },
+  { id: "supportcubic", name: "Stützend kubisch", bambu: "Support Cubic", gruppe: "3d", text: "Kubisch, aber nur unter den Deckflächen dicht. Spart Material und Zeit." },
+  { id: "gyroid", name: "Gyroid", bambu: "Gyroid", gruppe: "3d", text: "Wellige Fläche, die sich mit jeder Schicht verschiebt. In alle Richtungen gleich stark." },
+  { id: "3dhoneycomb", name: "3D-Wabe", bambu: "3D Honeycomb", gruppe: "3d", text: "Räumliche Waben aus Oktaederstümpfen: das Muster wechselt mit der Höhe." },
+  { id: "crosshatch", name: "Kreuzschraffur", bambu: "Cross Hatch", gruppe: "3d", text: "Schichtblöcke wechseln die Richtung mit weichem Übergang. Stabil und schnell." },
+  { id: "lockedzag", name: "Verriegelter Zickzack", bambu: "Locked Zag", gruppe: "3d", text: "Zickzack, das sich von Schicht zu Schicht verzahnt." },
+  { id: "lightning", name: "Blitz", bambu: "Lightning", gruppe: "3d", text: "Baumartige Äste nur unter den Deckflächen. Am schnellsten, aber nicht belastbar." },
+  { id: "concentric", name: "Konzentrisch", bambu: "Concentric", gruppe: "kurve", text: "Ringe parallel zur Außenwand. Flexibel, gut für TPU und durchscheinende Teile." },
+  { id: "hilbertcurve", name: "Hilbert-Kurve", bambu: "Hilbert Curve", gruppe: "kurve", text: "Eine einzige raumfüllende Kurve. Dekorativ, z. B. für sichtbare Flächen." },
+  { id: "archimedeanchords", name: "Archimedische Akkorde", bambu: "Archimedean Chords", gruppe: "kurve", text: "Spirale aus kurzen Sehnen von der Mitte nach außen." },
+  { id: "octagramspiral", name: "Oktagramm-Spirale", bambu: "Octagram Spiral", gruppe: "kurve", text: "Sternförmige Spirale mit acht Spitzen. Dekorativ." },
+];
+const FUELLMUSTER_GRUPPEN = { "2d": "Jede Schicht gleich", "3d": "Ändert sich mit der Höhe", kurve: "Kurven und Spiralen" };
+
+// Kanten der Füllfläche in waagerechte Bänder sortieren: schnelles Innen-Prüfen und Zuschneiden
+function bereichIndex(konturen) {
+  const k = [];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const z of konturen) for (let i = 0; i < z.length; i++) {
+    const p = z[i], q = z[(i + 1) % z.length];
+    k.push(p[0], p[1], q[0], q[1]);
+    x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+  }
+  const kanten = new Float64Array(k), n = kanten.length / 4;
+  const nb = Math.max(1, Math.min(512, Math.ceil(n / 3)));
+  const h = (y1 - y0) / nb || 1;
+  const baender = Array.from({ length: nb }, () => []);
+  for (let e = 0; e < n; e++) {
+    const a = kanten[e * 4 + 1], b = kanten[e * 4 + 3];
+    const von = Math.max(0, Math.floor((Math.min(a, b) - y0) / h)), bis = Math.min(nb - 1, Math.floor((Math.max(a, b) - y0) / h));
+    for (let j = von; j <= bis; j++) baender[j].push(e);
+  }
+  return { kanten, baender, y0, h, nb, box: [x0, y0, x1, y1], stempel: new Int32Array(n), runde: 0 };
+}
+function bereichInnen(ix, x, y) {
+  const j = Math.floor((y - ix.y0) / ix.h);
+  if (j < 0 || j >= ix.nb) return false;
+  let drin = false;
+  const k = ix.kanten;
+  for (const e of ix.baender[j]) {
+    const ax = k[e * 4], ay = k[e * 4 + 1], bx = k[e * 4 + 2], by = k[e * 4 + 3];
+    if ((ay > y) !== (by > y) && x < ax + ((y - ay) * (bx - ax)) / (by - ay)) drin = !drin;
+  }
+  return drin;
+}
+// Strecke a→b auf die Fläche zuschneiden (gerade/ungerade-Regel); ohne = Fläche, die ausgespart wird
+function streckeZuschneiden(ix, a, b, aus, ohne) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  if (Math.abs(dx) + Math.abs(dy) < 1e-9) return;
+  const ts = [0, 1], k = ix.kanten, r = ++ix.runde;
+  const von = Math.max(0, Math.floor((Math.min(a[1], b[1]) - ix.y0) / ix.h)), bis = Math.min(ix.nb - 1, Math.floor((Math.max(a[1], b[1]) - ix.y0) / ix.h));
+  for (let j = von; j <= bis; j++) for (const e of ix.baender[j]) {
+    if (ix.stempel[e] === r) continue;
+    ix.stempel[e] = r;
+    const ex = k[e * 4 + 2] - k[e * 4], ey = k[e * 4 + 3] - k[e * 4 + 1];
+    const d = dx * ey - dy * ex;
+    if (Math.abs(d) < 1e-12) continue;
+    const wx = k[e * 4] - a[0], wy = k[e * 4 + 1] - a[1];
+    const t = (wx * ey - wy * ex) / d, u = (wx * dy - wy * dx) / d;
+    if (t > 0 && t < 1 && u >= 0 && u <= 1) ts.push(t);
+  }
+  ts.sort((x, y) => x - y);
+  for (let i = 0; i + 1 < ts.length; i++) {
+    const t0 = ts[i], t1 = ts[i + 1];
+    if (t1 - t0 < 1e-6) continue;
+    const tm = (t0 + t1) / 2, mx = a[0] + dx * tm, my = a[1] + dy * tm;
+    if (!bereichInnen(ix, mx, my) || (ohne && bereichInnen(ohne, mx, my))) continue;
+    aus.push([[a[0] + dx * t0, a[1] + dy * t0], [a[0] + dx * t1, a[1] + dy * t1]]);
+  }
+}
+// Unendliche Linienschar (Winkel in Grad, Abstand, Versatz) über die Fläche
+function linienSchar(box, grad, abstand, versatz = 0) {
+  const w = (grad * Math.PI) / 180, d = [Math.cos(w), Math.sin(w)], n = [-d[1], d[0]];
+  const c = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2], R = Math.hypot(box[2] - box[0], box[3] - box[1]) / 2 + 1;
+  const cn = c[0] * n[0] + c[1] * n[1], cd = c[0] * d[0] + c[1] * d[1];
+  const v = ((versatz % abstand) + abstand) % abstand;
+  const out = [];
+  for (let o = Math.ceil((cn - R - v) / abstand) * abstand + v; o <= cn + R; o += abstand) {
+    out.push([[n[0] * o + d[0] * (cd - R), n[1] * o + d[1] * (cd - R)], [n[0] * o + d[0] * (cd + R), n[1] * o + d[1] * (cd + R)]]);
+  }
+  return out;
+}
+// Zickzack-Linien: Schar in Richtung grad, Zacken mit Periode und Amplitude; versetzt = Nachbarn gespiegelt
+function zickzackSchar(box, grad, abstand, periode, amplitude, phase = 0, gespiegelt = false) {
+  const w = (grad * Math.PI) / 180, d = [Math.cos(w), Math.sin(w)], n = [-d[1], d[0]];
+  const c = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2], R = Math.hypot(box[2] - box[0], box[3] - box[1]) / 2 + periode;
+  const cn = c[0] * n[0] + c[1] * n[1], cd = c[0] * d[0] + c[1] * d[1];
+  const out = [], halb = periode / 2;
+  for (let o = Math.ceil((cn - R) / abstand) * abstand; o <= cn + R; o += abstand) {
+    const vz = gespiegelt && Math.round(o / abstand) % 2 ? -1 : 1;
+    let vor = null;
+    for (let t = Math.floor((cd - R) / halb) * halb + (phase % halb); t <= cd + R; t += halb) {
+      const zacke = (Math.round((t - phase) / halb) % 2 ? 1 : -1) * amplitude * vz;
+      const p = [n[0] * (o + zacke) + d[0] * t, n[1] * (o + zacke) + d[1] * t];
+      if (vor) out.push([vor, p]);
+      vor = p;
+    }
+  }
+  return out;
+}
+
+function fuellMuster(id, konturen, { s, z, nr, hoehe }) {
+  const ix = bereichIndex(konturen), box = ix.box, aus = [];
+  const schneiden = (strecken, ohne) => { for (const [a, b] of strecken) streckeZuschneiden(ix, a, b, aus, ohne); };
+  const kubisch = (S, auch) => { [0, 60, 120].forEach((g, k) => schneiden(linienSchar(box, g, S, z * [1, -1, 1][k] * 1.15), auch)); };
+  switch (id) {
+    case "zig-zag": case "line": case "alignedrectilinear": {
+      const g = id === "alignedrectilinear" ? 45 : nr % 2 ? 45 : -45;
+      schneiden(linienSchar(box, g, s));
+      if (id !== "line") verbinden(aus, ix, s);
+      break;
+    }
+    case "grid": schneiden(linienSchar(box, 45, 2 * s)); schneiden(linienSchar(box, -45, 2 * s)); break;
+    case "2dlattice": schneiden(linienSchar(box, 60, 2 * s)); schneiden(linienSchar(box, 120, 2 * s)); break;
+    case "triangles": [0, 60, 120].forEach((g) => schneiden(linienSchar(box, g, 3 * s))); break;
+    case "tri-hexagon": [0, 60, 120].forEach((g, k) => schneiden(linienSchar(box, g, 3 * s, k === 0 ? 1.5 * s : 0))); break;
+    case "cubic": kubisch(3 * s); break;
+    case "supportcubic": kubisch(z > hoehe * 0.72 ? 3 * s : 6 * s); break;
+    case "adaptivecubic": {
+      // grob überall, fein nur in einem Streifen entlang der Wände
+      kubisch(6 * s);
+      const kern = konturen.map((k) => zugVersetzen(k, 4 * s)).filter(Boolean);
+      const ohne = kern.length ? bereichIndex(kern) : null;
+      if (ohne) [0, 60, 120].forEach((g, k) => schneiden(linienSchar(box, g, 3 * s, z * [1, -1, 1][k] * 1.15), ohne));
+      else kubisch(3 * s);
+      break;
+    }
+    case "honeycomb": {
+      const a = 1.155 * s, hx = 1.5 * a, hy = Math.sqrt(3) * a, st = [];
+      for (let i = Math.floor(box[0] / hx) - 1; i * hx <= box[2] + hx; i++) {
+        for (let j = Math.floor(box[1] / hy) - 1; j * hy <= box[3] + hy; j++) {
+          const cx = i * hx, cy = j * hy + (i & 1 ? hy / 2 : 0);
+          const ecke = (k) => [cx + a * Math.cos((k * Math.PI) / 3), cy + a * Math.sin((k * Math.PI) / 3)];
+          st.push([ecke(0), ecke(1)], [ecke(1), ecke(2)], [ecke(5), ecke(0)]);
+        }
+      }
+      schneiden(st);
+      break;
+    }
+    case "zigzag": schneiden(zickzackSchar(box, 45, s, 2 * s, 0.35 * s)); break;
+    case "crosszag": schneiden(zickzackSchar(box, nr % 2 ? 45 : -45, s, 2 * s, 0.35 * s)); break;
+    case "lockedzag": schneiden(zickzackSchar(box, nr % 2 ? 45 : -45, s, 2 * s, 0.35 * s, Math.floor(nr / 2) % 2 ? s : 0)); break;
+    case "3dhoneycomb": {
+      // Schnitt durch Oktaederstümpfe: Zickzack, dessen Ausschlag mit der Höhe zu- und abnimmt, Richtung wechselt je Lage
+      const P = 2 * s, lage = Math.floor(z / (P / 2)), t = (z % (P / 2)) / (P / 2);
+      const amp = (P / 4) * (lage % 2 ? t : 1 - t);
+      schneiden(zickzackSchar(box, lage % 4 < 2 ? 0 : 90, P / 2, P, amp, 0, true));
+      break;
+    }
+    case "crosshatch": {
+      const H = Math.max(1.6, 2 * s), block = Math.floor(z / H), t = (z % H) / H;
+      const amp = t < 0.35 ? (s / 2) * (1 - t / 0.35) : 0;   // Übergang: Zacken werden flach
+      const g = block % 2 ? 90 : 0;
+      if (amp > 0.05) schneiden(zickzackSchar(box, g, s, s, amp, 0, true));
+      else schneiden(linienSchar(box, g, s));
+      break;
+    }
+    case "gyroid": {
+      // Gyroid-Fläche sin x·cos y + sin y·cos z + sin z·cos x = 0 bei Höhe z, Linien mit Marching Squares
+      const P = 2.4 * s, k = (2 * Math.PI) / P;
+      let zelle = P / 10;
+      const bw = box[2] - box[0] + 2, bh = box[3] - box[1] + 2;
+      while ((bw / zelle) * (bh / zelle) > 60000) zelle *= 1.25;
+      const nx = Math.ceil(bw / zelle) + 1, ny = Math.ceil(bh / zelle) + 1, x0 = box[0] - 1, y0 = box[1] - 1;
+      const sz = Math.sin(k * z), cz = Math.cos(k * z);
+      const f = new Float32Array(nx * ny);
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const x = k * (x0 + i * zelle), y = k * (y0 + j * zelle);
+        f[j * nx + i] = Math.sin(x) * Math.cos(y) + Math.sin(y) * cz + sz * Math.cos(x);
+      }
+      const st = [];
+      const rand = (i1, j1, i2, j2) => {
+        const a = f[j1 * nx + i1], b = f[j2 * nx + i2], t = a / (a - b);
+        return [x0 + (i1 + (i2 - i1) * t) * zelle, y0 + (j1 + (j2 - j1) * t) * zelle];
+      };
+      for (let j = 0; j + 1 < ny; j++) for (let i = 0; i + 1 < nx; i++) {
+        const p = [];
+        const v = [f[j * nx + i], f[j * nx + i + 1], f[(j + 1) * nx + i + 1], f[(j + 1) * nx + i]];
+        if ((v[0] > 0) !== (v[1] > 0)) p.push(rand(i, j, i + 1, j));
+        if ((v[1] > 0) !== (v[2] > 0)) p.push(rand(i + 1, j, i + 1, j + 1));
+        if ((v[2] > 0) !== (v[3] > 0)) p.push(rand(i + 1, j + 1, i, j + 1));
+        if ((v[3] > 0) !== (v[0] > 0)) p.push(rand(i, j + 1, i, j));
+        if (p.length >= 2) st.push([p[0], p[1]]);
+        if (p.length === 4) st.push([p[2], p[3]]);
+      }
+      schneiden(st);
+      break;
+    }
+    case "concentric": {
+      let ringe = konturen.slice();
+      // Ringe wandern nach innen (Löcher nach außen); ein Ring, der ganz außerhalb liegt, endet
+      for (let n = 0; n < 200 && ringe.length; n++) {
+        ringe = ringe.filter((r) => {
+          if (n >= 3 && flaecheZug(r) < 0) return false;   // um Löcher nur ein paar Ringe, den Rest machen die äußeren
+
+          const vorher = aus.length;
+          for (let i = 0; i < r.length; i++) streckeZuschneiden(ix, r[i], r[(i + 1) % r.length], aus);
+          return aus.length > vorher;
+        }).map((r) => zugVersetzen(r, s)).filter(Boolean);
+      }
+      break;
+    }
+    case "hilbertcurve": {
+      const groesse = Math.max(box[2] - box[0], box[3] - box[1]) + 2;
+      let ordnung = Math.ceil(Math.log2(groesse / s));
+      ordnung = Math.max(1, Math.min(7, ordnung));
+      const n = 1 << ordnung, schritt = Math.max(s, groesse / n);
+      const ox = Math.floor((box[0] - 1) / schritt) * schritt, oy = Math.floor((box[1] - 1) / schritt) * schritt;
+      const punkt = (d) => {
+        let x = 0, y = 0, t = d;
+        for (let q = 1; q < n; q *= 2) {
+          const rx = 1 & (t / 2), ry = 1 & (t ^ rx);
+          if (ry === 0) { if (rx === 1) { x = q - 1 - x; y = q - 1 - y; } [x, y] = [y, x]; }
+          x += q * rx; y += q * ry; t = Math.floor(t / 4);
+        }
+        return [ox + (x + 0.5) * schritt, oy + (y + 0.5) * schritt];
+      };
+      const st = [];
+      let vor = punkt(0);
+      for (let d = 1; d < n * n; d++) { const p = punkt(d); st.push([vor, p]); vor = p; }
+      schneiden(st);
+      break;
+    }
+    case "archimedeanchords": case "octagramspiral": {
+      const c = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2], R = Math.hypot(box[2] - box[0], box[3] - box[1]) / 2 + s;
+      const st = [];
+      let vor = c.slice(), th = 0;
+      while (true) {
+        const r = (s * th) / (2 * Math.PI);
+        if (r > R) break;
+        let p;
+        if (id === "archimedeanchords") { th += Math.min(1, Math.max(0.08, (1.6 * s) / Math.max(r, 0.1))); p = [c[0] + r * Math.cos(th), c[1] + r * Math.sin(th)]; }
+        else { th += Math.PI / 8; const zacke = Math.round(th / (Math.PI / 8)) % 2 ? 1 : 0.72; p = [c[0] + r * zacke * Math.cos(th), c[1] + r * zacke * Math.sin(th)]; }
+        st.push([vor, p]); vor = p;
+      }
+      schneiden(st);
+      break;
+    }
+    case "lightning": {
+      // Bäume, die nach oben hin (zu den Deckflächen) weiter verzweigen
+      const L = 5 * s, anteil = 0.25 + 0.75 * Math.min(1, Math.max(0, z / Math.max(hoehe, 0.01))), st = [];
+      const hx = L, hy = L * 0.866;
+      for (let j = Math.floor(box[1] / hy) - 1; j * hy <= box[3] + hy; j++) {
+        for (let i = Math.floor(box[0] / hx) - 1; i * hx <= box[2] + hx; i++) {
+          const cx = i * hx + (j & 1 ? hx / 2 : 0), cy = j * hy;
+          const zufall = Math.abs(Math.sin(i * 12.9898 + j * 78.233) * 43758.5453) % 1;
+          const dreh = zufall * Math.PI * 2;
+          for (let a = 0; a < 3; a++) {
+            const w = dreh + (a * 2 * Math.PI) / 3, len = (L / 2) * anteil;
+            const m = [cx + Math.cos(w) * len, cy + Math.sin(w) * len];
+            st.push([[cx, cy], m]);
+            if (anteil > 0.55) for (const sg of [-0.6, 0.6]) st.push([m, [m[0] + Math.cos(w + sg) * len * 0.45, m[1] + Math.sin(w + sg) * len * 0.45]]);
+          }
+        }
+      }
+      schneiden(st);
+      break;
+    }
+    default: schneiden(linienSchar(box, 45, 2 * s)); schneiden(linienSchar(box, -45, 2 * s));
+  }
+  return aus;
+}
+// Geradlinig: Nachbarlinien am Rand zu einem Zickzack verbinden, wenn die Verbindung innen liegt
+function verbinden(linien, ix, s) {
+  const n = linien.length;
+  for (let i = 1; i < n; i += 2) { const l = linien[i]; linien[i] = [l[1], l[0]]; }
+  for (let i = 0; i + 1 < n; i++) {
+    const a = linien[i][1], b = linien[i + 1][0];
+    if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 2.2 * s && bereichInnen(ix, (a[0] + b[0]) / 2 + (b[1] - a[1]) * 0.001, (a[1] + b[1]) / 2)) linien.push([a, b]);
+  }
+}
+
+// Kleine Vorschau eines Musters als SVG (für die Auswahl)
+function musterVorschauSvg(id, z = 6) {
+  const q = zuegeOrdnen([[[1, 1], [39, 1], [39, 39], [1, 39]]]).map((k) => k.zug);
+  const st = fuellMuster(id, q, { s: 3.2, z, nr: Math.round(z / 0.2), hoehe: 12 });
+  const d = st.map(([a, b]) => `M${a[0].toFixed(2)} ${a[1].toFixed(2)}L${b[0].toFixed(2)} ${b[1].toFixed(2)}`).join("");
+  return `<svg viewBox="0 0 40 40" class="mod-muster-bild" aria-hidden="true"><rect x="1" y="1" width="38" height="38" rx="3"/><path d="${d}"/></svg>`;
+}
+
+// ---- Strahl gegen Dreiecke (Möller–Trumbore): nächster Treffer {t, n} oder null ----
+function strahlTreffer(v, o, d) {
+  let best = Infinity, n = null;
+  for (let i = 0; i < v.length; i += 9) {
+    const e1x = v[i + 3] - v[i], e1y = v[i + 4] - v[i + 1], e1z = v[i + 5] - v[i + 2];
+    const e2x = v[i + 6] - v[i], e2y = v[i + 7] - v[i + 1], e2z = v[i + 8] - v[i + 2];
+    const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < 1e-12) continue;
+    const inv = 1 / det, tx = o[0] - v[i], ty = o[1] - v[i + 1], tz = o[2] - v[i + 2];
+    const u = (tx * px + ty * py + tz * pz) * inv;
+    if (u < 0 || u > 1) continue;
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+    const w = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
+    if (w < 0 || u + w > 1) continue;
+    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    if (t > 0 && t < best) { best = t; n = [e1y * e2z - e1z * e2y, e1z * e2x - e1x * e2z, e1x * e2y - e1y * e2x]; }
+  }
+  return n ? { t: best, n } : null;
+}
+
+// ---- Frei drehen: Winkel in Grad um X, dann Y, dann Z (um die Modellmitte), danach wieder aufs Bett ----
+// Drehmatrix (3×3 zeilenweise) R = Rz · Ry · Rx aus Winkeln in Grad
+function drehMatrix(grad) {
+  const [ax, ay, az] = grad.map((x) => ((Number(x) || 0) * Math.PI) / 180);
+  const cx = Math.cos(ax), sx = Math.sin(ax), cy = Math.cos(ay), sy = Math.sin(ay), cz = Math.cos(az), sz = Math.sin(az);
+  return [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+    sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+    -sy, cy * sx, cy * cx];
+}
+function drehenGrad(v, grad) {
+  const g = meshGrenzen(v), c = [0, 1, 2].map((i) => (g.min[i] + g.max[i]) / 2);
+  const R = drehMatrix(grad);
+  for (let i = 0; i < v.length; i += 3) {
+    const x = v[i] - c[0], y = v[i + 1] - c[1], z = v[i + 2] - c[2];
+    v[i] = R[0] * x + R[1] * y + R[2] * z + c[0];
+    v[i + 1] = R[3] * x + R[4] * y + R[5] * z + c[1];
+    v[i + 2] = R[6] * x + R[7] * y + R[8] * z + c[2];
+  }
+  return aufsBett(v);
 }
 
 // ---- G-Code ------------------------------------------------------------------
@@ -4637,6 +5638,48 @@ const M4 = {
   },
   verschieben(x, y, z) { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1]; },
   eins() { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; },
+  // Drehung (3×3 zeilenweise) um einen Punkt als 4×4
+  drehungUm(R, c) {
+    const t = [0, 1, 2].map((i) => c[i] - (R[i * 3] * c[0] + R[i * 3 + 1] * c[1] + R[i * 3 + 2] * c[2]));
+    return [R[0], R[3], R[6], 0, R[1], R[4], R[7], 0, R[2], R[5], R[8], 0, t[0], t[1], t[2], 1];
+  },
+};
+
+// ---- Vektoren und Quaternionen für die Kamera -----------------------------
+const V3 = {
+  plus: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
+  minus: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  mal: (a, s) => [a[0] * s, a[1] * s, a[2] * s],
+  punkt: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  kreuz: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
+  // Rodrigues: v um die (normierte) Achse k drehen
+  drehen(v, k, w) {
+    const c = Math.cos(w), s = Math.sin(w), kv = V3.kreuz(k, v), d = V3.punkt(k, v) * (1 - c);
+    return [v[0] * c + kv[0] * s + k[0] * d, v[1] * c + kv[1] * s + k[1] * d, v[2] * c + kv[2] * s + k[2] * d];
+  },
+};
+const QU = {
+  // aus Kamera-Basis (Spalten rechts, oben, rück)
+  ausBasis(r, u, b) {
+    const m00 = r[0], m11 = u[1], m22 = b[2], spur = m00 + m11 + m22;
+    let q;
+    if (spur > 0) { const s = Math.sqrt(spur + 1) * 2; q = [(u[2] - b[1]) / s, (b[0] - r[2]) / s, (r[1] - u[0]) / s, s / 4]; }
+    else if (m00 > m11 && m00 > m22) { const s = Math.sqrt(1 + m00 - m11 - m22) * 2; q = [s / 4, (u[0] + r[1]) / s, (b[0] + r[2]) / s, (u[2] - b[1]) / s]; }
+    else if (m11 > m22) { const s = Math.sqrt(1 + m11 - m00 - m22) * 2; q = [(u[0] + r[1]) / s, s / 4, (b[1] + u[2]) / s, (b[0] - r[2]) / s]; }
+    else { const s = Math.sqrt(1 + m22 - m00 - m11) * 2; q = [(b[0] + r[2]) / s, (b[1] + u[2]) / s, s / 4, (r[1] - u[0]) / s]; }
+    return q;
+  },
+  zuBasis([x, y, z, w]) {
+    return { r: [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)], u: [2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)] };
+  },
+  slerp(a, b, t) {
+    let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    if (d < 0) { b = b.map((x) => -x); d = -d; }
+    if (d > 0.9995) { const q = a.map((x, i) => x + (b[i] - x) * t); const l = Math.hypot(...q); return q.map((x) => x / l); }
+    const th = Math.acos(d), s = Math.sin(th), fa = Math.sin((1 - t) * th) / s, fb = Math.sin(t * th) / s;
+    return a.map((x, i) => x * fa + b[i] * fb);
+  },
 };
 
 const MESH_VS = `attribute vec3 p; attribute vec3 n; attribute vec3 c;
@@ -4661,7 +5704,8 @@ class Buehne {
     this.ok = !!gl;
     this.objekte = new Map();
     this.ziel = [BETT_MM / 2, BETT_MM / 2, 10];
-    this.abstand = 420; this.dreh = -0.9; this.neig = 0.65;
+    this.abstand = 420; this.orbitArt = "eingeschraenkt";
+    this._lage(this._richtung(-0.9, 0.65));
     this.zeiger = new Map();
     this.animationen = [];
     if (!gl) return;
@@ -4742,28 +5786,69 @@ class Buehne {
   }
 
   // ---- Kamera ----
-  _auge() {
-    const cp = Math.cos(this.neig);
-    return [this.ziel[0] + this.abstand * cp * Math.cos(this.dreh), this.ziel[1] + this.abstand * cp * Math.sin(this.dreh), this.ziel[2] + this.abstand * Math.sin(this.neig)];
-  }
+  // Lage als Basis: r (rechts), u (oben), Blick f = u × r. Ziel liegt im Abstand vor dem Auge.
+  _f() { return V3.kreuz(this.u, this.r); }
+  _auge() { return V3.minus(this.ziel, V3.mal(this._f(), this.abstand)); }
+  unterBett() { return this._auge()[2] < -0.01; }
   _matrix() {
     const w = this.canvas.width || 1, h = this.canvas.height || 1;
     const p = M4.perspektive(0.7, w / h, Math.max(0.5, this.abstand / 200), this.abstand * 8 + 1000);
-    const v = M4.blick(this._auge(), this.ziel, Math.abs(Math.cos(this.neig)) < 1e-3 ? [0, 1, 0] : [0, 0, 1]);
-    return M4.mal(p, v);
+    return M4.mal(p, M4.blick(this._auge(), this.ziel, this.u));
   }
-  ansicht(art, grenzen) {
+  // Basis aus Blickrichtung zum Auge (e zeigt vom Ziel zum Auge); senkrecht: vorne unten im Bild
+  _basisAus(e) {
+    e = V3.norm(e);
+    const f = V3.mal(e, -1);
+    if (Math.abs(e[2]) > 0.999) {
+      const u = e[2] > 0 ? [0, 1, 0] : [0, -1, 0];
+      return { r: V3.norm(V3.kreuz(f, u)), u };
+    }
+    const r = V3.norm(V3.kreuz(f, [0, 0, 1]));
+    return { r, u: V3.kreuz(r, f) };
+  }
+  _richtung(dreh, neig) { const c = Math.cos(neig); return [c * Math.cos(dreh), c * Math.sin(dreh), Math.sin(neig)]; }
+  _lage(e) { const b = this._basisAus(e); this.r = b.r; this.u = b.u; }
+  // Neigung über dem Bett in Grad (−90 = von unten, 90 = von oben)
+  neigung() { return (Math.asin(Math.max(-1, Math.min(1, -this._f()[2]))) * 180) / Math.PI; }
+
+  ansicht(art, grenzen, animiert = false) {
+    let ziel = this.ziel, abstand = this.abstand;
     if (grenzen) {
       const g = grenzen;
-      this.ziel = [(g.min[0] + g.max[0]) / 2, (g.min[1] + g.max[1]) / 2, (g.min[2] + g.max[2]) / 2];
+      ziel = [(g.min[0] + g.max[0]) / 2, (g.min[1] + g.max[1]) / 2, (g.min[2] + g.max[2]) / 2];
+      this.mitte = ziel.slice();
       const r = Math.max(20, Math.hypot(...g.groesse) / 2);
-      this.abstand = Math.min(900, r / Math.sin(0.35) * 1.15);
+      abstand = Math.min(900, r / Math.sin(0.35) * 1.15);
     }
-    if (art === "oben") { this.neig = 1.5707; this.dreh = -Math.PI / 2; }
-    else if (art === "vorne") { this.neig = 0.05; this.dreh = -Math.PI / 2; }
-    else if (art === "bett") { this.ziel = [BETT_MM / 2, BETT_MM / 2, 0]; this.abstand = 520; this.neig = 0.75; this.dreh = -1.1; }
-    else { this.neig = 0.6; this.dreh = -1.05; }
-    this.neu();
+    let e;
+    if (art === "oben") e = [0, 0, 1];
+    else if (art === "unten") e = [0, 0, -1];
+    else if (art === "vorne") e = this._richtung(-Math.PI / 2, 0.05);
+    else if (art === "bett") { ziel = [BETT_MM / 2, BETT_MM / 2, 0]; abstand = 520; e = this._richtung(-1.1, 0.75); }
+    else e = this._richtung(-1.05, 0.6);
+    this.fliegen(e, ziel, abstand, animiert);
+  }
+
+  // Kamera zu einer Blickrichtung (vom Ziel zum Auge) bringen, wahlweise sanft
+  fliegen(e, ziel = this.ziel, abstand = this.abstand, animiert = true) {
+    const b = this._basisAus(e);
+    if (!animiert || !this.r) {
+      this.r = b.r; this.u = b.u; this.ziel = ziel.slice(); this.abstand = abstand; this.neu();
+      return;
+    }
+    const q0 = QU.ausBasis(this.r, this.u, V3.mal(this._f(), -1)), q1 = QU.ausBasis(b.r, b.u, V3.norm(e));
+    const z0 = this.ziel.slice(), a0 = this.abstand, start = performance.now(), dauer = 520;
+    const nr = (this._flugNr = (this._flugNr || 0) + 1);
+    this.animieren((t) => {
+      if (this._flugNr !== nr) return false;
+      const x = Math.min(1, (t - start) / dauer), k = 1 - Math.pow(1 - x, 3);
+      const q = QU.zuBasis(QU.slerp(q0, q1, k));
+      this.r = V3.norm(q.r); this.u = V3.norm(q.u);
+      this.ziel = z0.map((v, i) => v + (ziel[i] - v) * k);
+      this.abstand = a0 + (abstand - a0) * k;
+      if (x >= 1) { this.r = b.r; this.u = b.u; }
+      return x < 1;
+    });
   }
 
   // Weltpunkt → Bildschirm (CSS-Pixel)
@@ -4779,25 +5864,66 @@ class Buehne {
   // Bildschirmpunkt (CSS-Pixel) → Strahl {von, richtung} in Weltkoordinaten
   strahl(px, py) {
     const r = this.canvas.getBoundingClientRect();
-    const auge = this._auge();
-    const norm = (v) => { const l = Math.hypot(...v) || 1; return v.map((x) => x / l); };
-    const kreuz = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-    const f = norm([this.ziel[0] - auge[0], this.ziel[1] - auge[1], this.ziel[2] - auge[2]]);
-    const oben = Math.abs(Math.cos(this.neig)) < 1e-3 ? [0, 1, 0] : [0, 0, 1];
-    const re = norm(kreuz(f, oben)), ob = kreuz(re, f);
+    const f = this._f(), re = this.r, ob = this.u;
     const t = Math.tan(0.35), x = (px / r.width) * 2 - 1, y = 1 - (py / r.height) * 2;
     const seiten = r.width / Math.max(1, r.height);
-    return { von: auge, richtung: norm([0, 1, 2].map((i) => f[i] + re[i] * x * t * seiten + ob[i] * y * t)) };
+    return { von: this._auge(), richtung: V3.norm([0, 1, 2].map((i) => f[i] + re[i] * x * t * seiten + ob[i] * y * t)) };
   }
 
-  // ---- Bedienung: ziehen = drehen, rechts/zwei Finger = verschieben, Rad/zwei Finger = zoomen ----
+  // ---- Orbit wie in Fusion 360: frei (Trackball) oder eingeschränkt (Drehteller, Z bleibt oben) ----
+  // Gedreht wird um den Drehpunkt: die ganze Kamera (Ziel und Lage) wandert um ihn herum.
+  orbit(dx, dy, punkt) {
+    const p = punkt || this.drehpunkt || this.mitte || this.ziel;
+    const k = 0.008;
+    const umAchse = (achse, w) => {
+      if (!w) return;
+      this.r = V3.drehen(this.r, achse, w); this.u = V3.drehen(this.u, achse, w);
+      this.ziel = V3.plus(p, V3.drehen(V3.minus(this.ziel, p), achse, w));
+    };
+    if (this.orbitArt === "frei") {
+      umAchse(V3.norm(this.u), -dx * k);
+      umAchse(V3.norm(this.r), -dy * k);
+    } else {
+      umAchse([0, 0, 1], -dx * k);
+      // senkrecht nicht überschlagen (auch von unten bis knapp −90°)
+      const jetzt = this.neigung(), w = -dy * k, grenze = 89.5;
+      const neu = Math.max(-grenze, Math.min(grenze, jetzt - (w * 180) / Math.PI));
+      umAchse(V3.norm(this.r), (-(neu - jetzt) * Math.PI) / 180);
+    }
+    // Basis sauber halten
+    const f = V3.norm(this._f());
+    this.r = V3.norm(V3.kreuz(f, this.u)); this.u = V3.kreuz(this.r, f);
+    this.neu();
+  }
+  setzeOrbitArt(art) {
+    this.orbitArt = art === "frei" ? "frei" : "eingeschraenkt";
+    if (this.orbitArt === "eingeschraenkt") {
+      // wieder waagerecht ausrichten (Z zeigt im Bild nach oben)
+      const f = this._f();
+      if (Math.abs(f[2]) < 0.999) { this.r = V3.norm(V3.kreuz(f, [0, 0, 1])); this.u = V3.kreuz(this.r, f); }
+      else { this.r = V3.norm([this.r[0], this.r[1], 0]); this.u = V3.kreuz(this.r, f); }
+      this.neu();
+    }
+  }
+
+  // ---- Bedienung: ziehen = Orbit um den Punkt unter dem Zeiger, rechts/Shift/zwei Finger = verschieben, Rad/zwei Finger = zoomen ----
   _ereignisse() {
     const c = this.canvas;
     c.addEventListener("contextmenu", (e) => e.preventDefault());
     c.addEventListener("wheel", (e) => { e.preventDefault(); this.abstand = Math.min(1500, Math.max(8, this.abstand * Math.exp(e.deltaY * 0.0012))); this.neu(); }, { passive: false });
     c.addEventListener("pointerdown", (e) => {
       c.setPointerCapture(e.pointerId);
-      this.zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, schieben: e.button === 2 || e.shiftKey });
+      const schieben = e.button === 2 || e.button === 1 || e.shiftKey;
+      this.zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, schieben });
+      if (this.zeiger.size === 1 && !schieben) {
+        // Drehpunkt: Stelle des Modells unter dem Zeiger, sonst die Modellmitte
+        const r = c.getBoundingClientRect();
+        const s = this.strahl(e.clientX - r.left, e.clientY - r.top);
+        const t = this.treffen ? this.treffen(s) : null;
+        this.drehpunkt = t != null ? V3.plus(s.von, V3.mal(s.richtung, t)) : (this.mitte || this.ziel).slice();
+        this.drehpunktGetroffen = t != null;
+        this.drehpunktSichtbar = false;
+      } else this.drehpunktSichtbar = false;
     });
     const ende = (e) => {
       const z = this.zeiger.get(e.pointerId);
@@ -4807,6 +5933,7 @@ class Buehne {
         this.antippen(this.strahl(e.clientX - r.left, e.clientY - r.top));
       }
       this.zeiger.delete(e.pointerId); this._pinch = null;
+      if (!this.zeiger.size) { this.drehpunktSichtbar = false; this.neu(); }
     };
     c.addEventListener("pointerup", ende);
     c.addEventListener("pointercancel", ende);
@@ -4823,22 +5950,19 @@ class Buehne {
           this._schieben(mx - this._pinch.mx, my - this._pinch.my);
         }
         this._pinch = { d, mx, my };
+        this.drehpunktSichtbar = false;
         this.neu();
         return;
       }
       z.x = e.clientX; z.y = e.clientY;
       if (z.schieben) this._schieben(dx, dy);
-      else { this.dreh -= dx * 0.008; this.neig = Math.min(1.5707, Math.max(-0.2, this.neig + dy * 0.008)); }
+      else if (Math.hypot(e.clientX - z.x0, e.clientY - z.y0) >= 3) { this.drehpunktSichtbar = true; this.orbit(dx, dy, this.drehpunkt); }
       this.neu();
     });
   }
   _schieben(dx, dy) {
     const f = (this.abstand * 0.0016) * (800 / Math.max(300, this.canvas.clientHeight));
-    const rx = -Math.sin(this.dreh), ry = Math.cos(this.dreh);
-    const sn = Math.sin(this.neig);
-    this.ziel[0] -= (rx * dx) * f - (Math.cos(this.dreh) * sn * dy) * f;
-    this.ziel[1] -= (ry * dx) * f - (Math.sin(this.dreh) * sn * dy) * f;
-    this.ziel[2] += Math.cos(this.neig) * dy * f;
+    this.ziel = V3.plus(this.ziel, V3.plus(V3.mal(this.r, -dx * f), V3.mal(this.u, dy * f)));
   }
 
   neu() {
@@ -4863,6 +5987,10 @@ class Buehne {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     const vp = this._matrix();
     this._letzte = vp;
+    // Von unten: Druckplatte durchscheinend, damit das Teil zu sehen bleibt
+    const unten = this.unterBett(), bett = this.objekte.get("bett"), raster = this.objekte.get("bett-raster");
+    if (bett) bett.alpha = unten ? 0.28 : 1;
+    if (raster) raster.alpha = unten ? 0.4 : 1;
     const liste = [...this.objekte.values()].filter((o) => o.sichtbar).sort((a, b) => (a.alpha < 1) - (b.alpha < 1) || a.reihe - b.reihe);
     for (const o of liste) {
       const pr = o.art === "mesh" ? this.pMesh : this.pLinie;
@@ -4935,7 +6063,31 @@ function insLoch(lokal, loch) {
   return out;
 }
 
-// ---- Zuletzt geöffnete Dateien (nur in diesem Browser) ----------------------
+// ---- Zuletzt geöffnete Dateien ----------------------------------------------
+// Mit der Integration liegen sie auf dem Home-Assistant-Rechner (Medien › 3d-modelle)
+// und jedes Gerät sieht dieselbe Liste. Ohne Integration nur in diesem Browser.
+const MOD_SERVER_URL = "/api/filament_werkstatt/modelle";
+function modServer(hass) {
+  const url = (name) => `${MOD_SERVER_URL}/${encodeURIComponent(name)}`;
+  const pruefen = (r) => { if (!r.ok) throw new Error(`Home Assistant antwortet mit ${r.status}`); return r; };
+  return {
+    aufServer: true,
+    async alle() {
+      const d = await pruefen(await hass.fetchWithAuth(MOD_SERVER_URL)).json();
+      return (d.modelle || []).map((m) => ({ name: m.name, datum: m.zeit, groesse: m.groesse }));
+    },
+    async holen(name) {
+      const r = await hass.fetchWithAuth(url(name));
+      return r.ok ? { name, daten: await r.arrayBuffer() } : null;
+    },
+    async speichern(name, daten) {
+      pruefen(await hass.fetchWithAuth(`${MOD_SERVER_URL}?name=${encodeURIComponent(name)}`,
+        { method: "POST", body: daten, headers: { "Content-Type": "application/octet-stream" } }));
+    },
+    async loeschen(name) { await hass.fetchWithAuth(url(name), { method: "DELETE" }); },
+  };
+}
+
 const MOD_DB = {
   async db() {
     if (this._db) return this._db;
@@ -4986,6 +6138,11 @@ const STUETZEN = [
   { id: "baum-stark", name: "Baum stark" },
   { id: "baum-hybrid", name: "Baum hybrid" },
 ];
+const MOD_ICON = {
+  orbit: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><ellipse cx="12" cy="12" rx="9.6" ry="4.3" transform="rotate(-28 12 12)"/><ellipse cx="12" cy="12" rx="4.3" ry="9.6" transform="rotate(-28 12 12)" opacity=".45"/><circle cx="12" cy="12" r="2.4" class="voll"/><path d="M17.6 4.3l2.9.6-.9 2.8"/></svg>`,
+  orbitEin: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><ellipse cx="12" cy="16" rx="9.4" ry="3.6"/><path d="M12 3v13" stroke-dasharray="2 2"/><circle cx="12" cy="16" r="2.2" class="voll"/><path d="M18.4 11.6l2.6 1.6-2.4 1.8"/></svg>`,
+  haus: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M4 11.5L12 4.5l8 7"/><path d="M6.5 10v9h11v-9"/><path d="M10.5 19v-5h3v5"/></svg>`,
+};
 const SCHICHT_BEREICH = { 0.2: [0.06, 0.14, 0.1], 0.4: [0.08, 0.28, 0.2], 0.6: [0.18, 0.42, 0.3], 0.8: [0.24, 0.56, 0.4] };
 
 const MOD_MAX_BYTES = 200 * 1048576;      // größere Dateien bringen Handys zum Absturz
@@ -5012,8 +6169,11 @@ const ModellAnsicht = {
           <button class="chip" data-aktion="mod-ansicht" data-id="oben">Oben</button>
           <button class="chip" data-aktion="mod-ansicht" data-id="vorne">Vorne</button>
           <button class="chip" data-aktion="mod-ansicht" data-id="bett">Bett</button>
+          ${this._modOrbitHtml()}
           <button class="chip mod-zu" data-aktion="mod-schliessen" aria-label="Modell schließen">✕</button>
         </div>
+        ${this._modWuerfelHtml()}
+        <div id="mod-drehpunkt" class="mod-drehpunkt" aria-hidden="true"></div>
         ${m.tab === "schichten" && m.schichtZahl ? `<div class="mod-schicht-leiste">
           <button class="rund" data-aktion="mod-schicht" data-d="-1" aria-label="Schicht tiefer">−</button>
           <input type="range" min="1" max="${m.schichtZahl}" step="1" value="${m.schichtNr}" data-mod="schicht">
@@ -5021,17 +6181,20 @@ const ModellAnsicht = {
           <span id="mod-schicht-text" class="mod-schicht-text">${this._modSchichtText()}</span>
         </div>` : ""}
         ${m.markieren ? `<div class="mod-markier-hinweis" data-einmal="mod-markier">🎯 Tippe auf die Stelle, an der das Loch beginnt <button class="mini" data-aktion="mod-markieren">Abbrechen</button></div>` : ""}
-        <p class="mod-hilfe leise">${this._mobil ? "Ein Finger drehen · zwei Finger zoomen und schieben" : "Ziehen dreht · Rechtsklick oder Shift schiebt · Mausrad zoomt"}</p>
+        <p class="mod-hilfe leise">${this._mobil ? "Ein Finger dreht um die berührte Stelle · zwei Finger zoomen und schieben" : "Ziehen dreht um die Stelle unter dem Zeiger · Rechtsklick oder Shift schiebt · Mausrad zoomt"}</p>
       </div>
       </div>
       <aside class="mod-seite dr-karte">
         <div class="tabs mod-tabs">${tabs.map(([id, n]) => `<button class="tab ${m.tab === id ? "an" : ""}" data-aktion="mod-tab" data-id="${id}">${n}</button>`).join("")}</div>
         <div class="mod-inhalt">${m.tab === "loecher" ? this._modLoecherHtml() : m.tab === "schichten" ? this._modSchichtenHtml() : this._modUebersichtHtml()}</div>
+        <div class="mod-fuss"><button class="knopf breit mod-ws" data-aktion="ws-aus-modell">＋ In die Warteschlange</button></div>
       </aside>
     </div>`;
   },
 
   _modLeerHtml() {
+    // Liste beim Öffnen des Reiters auffrischen, ein anderes Gerät kann etwas geöffnet haben
+    if (this._modBereit && Date.now() - (this._modZuletztZeit || 0) > 15000) setTimeout(() => this._modZuletztLaden(), 0);
     const zuletzt = this._modZuletzt || [];
     return `<div class="mod-leer">
       <label class="ablage" data-ablage="1">
@@ -5041,7 +6204,9 @@ const ModellAnsicht = {
         <span class="leise">oder tippen, um eine Datei zu wählen</span>
         <span class="leise klein">.stl · .gcode · .gcode.3mf aus Bambu Studio</span>
       </label>
-      ${zuletzt.length ? `<div class="dr-karte"><h3 class="dr-titel">🕘 Zuletzt geöffnet (nur auf diesem Gerät)</h3><div class="dr-verlauf">${zuletzt.map((z) => `
+      ${zuletzt.length ? `<div class="dr-karte"><h3 class="dr-titel">🕘 Zuletzt geöffnet <small class="leise">${this._modZuletztServer
+        ? `auf allen Geräten · ${zahl(zuletzt.reduce((s, z) => s + (z.groesse || 0), 0) / 1048576, 1)} MB belegt`
+        : "nur auf diesem Gerät"}</small></h3><div class="dr-verlauf">${zuletzt.map((z) => `
         <div class="dr-druck mod-zuletzt"><button class="mod-zuletzt-knopf" data-aktion="mod-zuletzt" data-name="${esc(z.name)}"><span class="ld-bild">${/\.stl$/i.test(z.name) ? "🧊" : "🧾"}</span>
           <span class="dr-druck-text"><strong>${esc(z.name)}</strong><small>${new Date(z.datum).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · ${zahl(z.groesse / 1048576, 1)} MB</small></span></button>
           <button class="icon-knopf" data-aktion="mod-zuletzt-weg" data-name="${esc(z.name)}" aria-label="Aus der Liste entfernen">✕</button></div>`).join("")}</div></div>` : ""}
@@ -5062,12 +6227,14 @@ const ModellAnsicht = {
     return `
       <div class="mod-masse">${["X", "Y", "Z"].map((a, i) => `<div class="${zuGross[i] ? "rot" : ""}"><span>${a}</span><strong>${zahl(g[i], 1)}</strong><small>mm</small></div>`).join("")}</div>
       <div class="hinweis ${passt ? "mint" : "rot-hinweis"}">${passt ? "✓ Passt aufs Druckbett (256 × 256 × 256 mm)" : `✕ Zu groß für den P1S: ${["X", "Y", "Z"].filter((_, i) => zuGross[i]).join(", ")} über 256 mm. Drehen hilft nur, wenn eine andere Seite kürzer ist.`}</div>
-      <div class="r-kopf oben-abstand"><span>Drehen (90°)</span></div>
+      <div class="r-kopf oben-abstand"><span>Drehen</span><span class="leise klein">90° oder eigene Winkel</span></div>
       <div class="chips mod-dreh">
-        <button class="chip" data-aktion="mod-drehen" data-achse="0">↻ um X</button>
-        <button class="chip" data-aktion="mod-drehen" data-achse="1">↻ um Y</button>
-        <button class="chip" data-aktion="mod-drehen" data-achse="2">↻ um Z</button>
+        <button class="chip" data-aktion="mod-drehen" data-achse="0">↻ 90° um X</button>
+        <button class="chip" data-aktion="mod-drehen" data-achse="1">↻ 90° um Y</button>
+        <button class="chip" data-aktion="mod-drehen" data-achse="2">↻ 90° um Z</button>
+        <button class="chip ${m.drehEigen ? "an" : ""}" data-aktion="mod-dreh-eigen" aria-expanded="${m.drehEigen ? "true" : "false"}">✎ Benutzerdefiniert</button>
       </div>
+      ${m.drehEigen ? this._modDrehEigenHtml() : ""}
       <h3>⚖️ Gewicht und Rolle</h3>
       <label class="auswahl breit-auswahl"><span>Rolle</span><select data-mod="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${rolle && r.id === rolle.id ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : " · nicht gewogen"}</option>`).join("")}</select></label>
       ${this._modReglerHtml("fuellung", "Füllung", m.fuellung, 0, 100, 5, "%")}
@@ -5078,8 +6245,19 @@ const ModellAnsicht = {
         <div class="info-zeile"><span>Volumen</span><strong>${zahl(m.kenn.volumen / 1000, 1)} cm³</strong></div>
         <div class="info-zeile"><span>Oberfläche</span><strong>${zahl(m.kenn.flaeche / 100, 0)} cm²</strong></div>
         <div class="info-zeile"><span>Dreiecke</span><strong>${zahl(m.kenn.dreiecke)}</strong></div>
-      </div>
-      <button class="knopf breit oben-abstand" data-aktion="ws-aus-modell">＋ In die Warteschlange</button>`;
+      </div>`;
+  },
+
+  // Eigene Winkel je Achse; die Vorschau dreht das Modell schon mit, „Anwenden“ übernimmt es
+  _modDrehEigenHtml() {
+    const w = this._mod.drehWerte || [0, 0, 0];
+    return `<div class="mod-dreh-eigen" data-einmal="mod-dreh-eigen">
+      <div class="mod-dreh-felder">${["X", "Y", "Z"].map((a, i) => `<label class="mod-dreh-feld a-${a.toLowerCase()} ${i === (this._mod.drehFeld ?? 2) ? "aktiv" : ""}"><span>${a}</span>
+        <input type="number" inputmode="decimal" step="0.5" min="-360" max="360" value="${w[i]}" data-mod="dreh-grad" data-achse="${i}" id="mod-dreh-${i}" aria-label="Winkel um ${a} in Grad"><small>°</small></label>`).join("")}</div>
+      <div class="chips mod-dreh-schnell">${[-45, -15, -5, 5, 15, 45].map((g) => `<button class="chip" data-aktion="mod-dreh-plus" data-g="${g}">${g > 0 ? "+" : "−"}${Math.abs(g)}°</button>`).join("")}</div>
+      <p class="leise klein">Die Schnellknöpfe ändern das zuletzt gewählte Feld. Gedreht wird um die Modellmitte, erst X, dann Y, dann Z. Danach steht das Teil wieder auf dem Bett.</p>
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="mod-dreh-null">Zurücksetzen</button><button class="knopf" data-aktion="mod-dreh-anwenden">Anwenden</button></div>
+    </div>`;
   },
 
   _modGewichtHtml(gew, rest, rolle) {
@@ -5118,7 +6296,7 @@ const ModellAnsicht = {
         <strong>${i.gramm ? `${zahl(i.gramm, 1)} g` : "Gewicht unbekannt"}</strong>
         ${rest == null ? `<span class="klein leise">${i.gramm ? "Rolle nicht gewogen, Rest unbekannt." : "Im G-Code steht kein Gewicht."}</span>` : rest >= 0 ? `<span class="klein">✓ Reicht. Danach bleiben etwa ${zahl(rest)} g übrig.</span>` : `<span class="klein">✕ Reicht nicht, es fehlen etwa ${zahl(-rest)} g.</span>`}
       </div>
-      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button><button class="knopf" data-aktion="ws-aus-modell">＋ Warteschlange</button></div>`;
+      <button class="knopf leise breit oben-abstand" data-aktion="mod-tab" data-id="schichten">Schichten ansehen</button>`;
   },
 
   // ---- Löcher ----
@@ -5187,11 +6365,26 @@ const ModellAnsicht = {
       <p class="leise klein">Für ${zahl(m.duese, 1)} mm sind ${zahl(smin, 2)}–${zahl(smax, 2)} mm sinnvoll. Dünner sieht feiner aus und dauert länger.</p>
       ${this._modReglerHtml("waende", "Wände", m.waende, 1, 6, 1, "")}
       ${this._modReglerHtml("fuellung", "Füllung", m.fuellung, 0, 100, 5, "%")}
+      ${this._modMusterHtml()}
       <div class="r-kopf oben-abstand"><span>Stützen</span><button class="mini mint-rand" data-aktion="mod-stuetzen-hilfe">Was ist was?</button></div>
       <div class="chips">${STUETZEN.map((s) => `<button class="chip ${m.stuetzen === s.id ? "an" : ""}" data-aktion="mod-stuetzen" data-id="${s.id}">${s.name}</button>`).join("")}</div>
       <div id="mod-schicht-status">${this._modSchichtStatusHtml()}</div>
       ${this._modLegendeHtml(["aussen", "innen", "fuellung", ...(m.stuetzen !== "keine" ? ["stuetze"] : [])])}
       <p class="leise klein">Vereinfachte Vorschau, kein echter Slicer: Wände, Füllung und Stützen sind angenähert. Für die echten Wege den G-Code aus Bambu Studio laden.</p>`;
+  },
+
+  // Füllmuster wie in Bambu Studio, mit kleiner Vorschau
+  _modMusterHtml() {
+    const m = this._mod, mu = FUELLMUSTER.find((x) => x.id === m.muster) || FUELLMUSTER[0];
+    const gruppen = Object.entries(FUELLMUSTER_GRUPPEN).map(([g, name]) => `<optgroup label="${esc(name)}">${FUELLMUSTER.filter((x) => x.gruppe === g)
+      .map((x) => `<option value="${x.id}" ${x.id === mu.id ? "selected" : ""}>${esc(x.name)}${x.name !== x.bambu ? ` (${esc(x.bambu)})` : ""}</option>`).join("")}</optgroup>`).join("");
+    return `<div class="mod-muster" id="mod-muster">
+      <div class="mod-muster-vorschau" title="So sieht ${esc(mu.name)} in einer Schicht ungefähr aus">${musterVorschauSvg(mu.id)}</div>
+      <div class="mod-muster-text">
+        <label class="auswahl breit-auswahl"><span>Füllmuster</span><select data-mod="muster">${gruppen}</select></label>
+        <p class="leise klein">${esc(mu.text)}${mu.gruppe === "3d" ? " <span class=\"pille mint\">ändert sich je Schicht</span>" : ""}</p>
+      </div>
+    </div>`;
   },
 
   _modSchichtStatusHtml() {
@@ -5243,6 +6436,123 @@ const ModellAnsicht = {
       <button class="knopf leise breit" data-aktion="dialog-zu">Schließen</button>`;
   },
 
+  // ---- Orbit-Knopf mit kleinem Menü (wie in Fusion 360) ----
+  _modOrbitHtml() {
+    const frei = this._modOrbitArt === "frei", offen = !!this._modOrbitMenue;
+    return `<div class="mod-orbit">
+      <button class="chip mod-orbit-knopf ${offen ? "an" : ""}" data-aktion="mod-orbit-menue" aria-haspopup="menu" aria-expanded="${offen}" title="Orbit: ${frei ? "frei" : "eingeschränkt"}">
+        ${frei ? MOD_ICON.orbit : MOD_ICON.orbitEin}<span class="mod-orbit-name">${frei ? "Orbit" : "Eingeschr. Orbit"}</span><span class="mod-pfeil">▾</span></button>
+      ${offen ? `<div class="mod-orbit-menue" role="menu" data-einmal="mod-orbit-menue">
+        <button class="mod-orbit-punkt ${frei ? "an" : ""}" role="menuitemradio" aria-checked="${frei}" data-aktion="mod-orbit-art" data-id="frei">${MOD_ICON.orbit}
+          <span><strong>Orbit</strong><small>Frei in alle Richtungen, auch über Kopf</small></span></button>
+        <button class="mod-orbit-punkt ${frei ? "" : "an"}" role="menuitemradio" aria-checked="${!frei}" data-aktion="mod-orbit-art" data-id="eingeschraenkt">${MOD_ICON.orbitEin}
+          <span><strong>Eingeschränkter Orbit</strong><small>Wie ein Drehteller: oben bleibt oben</small></span></button>
+        <div class="mod-orbit-trenner"></div>
+        <button class="mod-orbit-punkt" role="menuitemcheckbox" aria-checked="${!!this._modWuerfelZiehen}" data-aktion="mod-wuerfel-ziehen">
+          <span class="mod-schalter ${this._modWuerfelZiehen ? "an" : ""}"></span>
+          <span><strong>Würfel ziehen dreht die Ansicht</strong><small>Aus: der Würfel reagiert nur auf Klicks</small></span></button>
+        <p class="mod-orbit-tipp leise klein">Gedreht wird um die Stelle des Modells, auf die du beim Ziehen zeigst. Daneben: um die Modellmitte.</p>
+      </div>` : ""}
+    </div>`;
+  },
+
+  // ---- Ausrichtungswürfel: Flächen, Kanten und Ecken anklickbar ----
+  _modWuerfelHtml() {
+    const S = this._mobil ? 48 : 64;
+    const FL = [
+      { n: [0, 0, 1], x: [1, 0, 0], y: [0, -1, 0], name: "OBEN" },
+      { n: [0, 0, -1], x: [1, 0, 0], y: [0, 1, 0], name: "UNTEN" },
+      { n: [0, -1, 0], x: [1, 0, 0], y: [0, 0, -1], name: "VORNE" },
+      { n: [0, 1, 0], x: [-1, 0, 0], y: [0, 0, -1], name: "HINTEN" },
+      { n: [1, 0, 0], x: [0, 1, 0], y: [0, 0, -1], name: "RECHTS" },
+      { n: [-1, 0, 0], x: [0, -1, 0], y: [0, 0, -1], name: "LINKS" },
+    ];
+    const wortFuer = (d) => [d[1] < 0 ? "vorne" : d[1] > 0 ? "hinten" : "", d[0] < 0 ? "links" : d[0] > 0 ? "rechts" : "", d[2] > 0 ? "oben" : d[2] < 0 ? "unten" : ""].filter(Boolean).join(" ");
+    const flaechen = FL.map((f) => {
+      const m = [...f.x, 0, ...f.y, 0, ...f.n, 0, ...f.n.map((v) => (v * S) / 2), 1];
+      let zonen = "";
+      for (const j of [-1, 0, 1]) for (const i of [-1, 0, 1]) {
+        const d = [0, 1, 2].map((k) => f.n[k] + i * f.x[k] + j * f.y[k]);
+        const art = i === 0 && j === 0 ? "flaeche" : i === 0 || j === 0 ? "kante" : "ecke";
+        const titel = wortFuer(d);
+        zonen += `<button class="mod-w-zone ${art}" ${art === "flaeche" ? "" : `tabindex="-1"`} data-aktion="mod-wuerfel" data-d="${d.join(",")}" title="Ansicht ${titel}" aria-label="Ansicht ${titel}">${art === "flaeche" ? `<span>${f.name}</span>` : ""}</button>`;
+      }
+      return `<div class="mod-w-flaeche w-${f.name.toLowerCase()}" style="transform: matrix3d(${m.map((v) => +v.toFixed(4)).join(",")})">${zonen}</div>`;
+    }).join("");
+    const achsen = [["x", "X"], ["y", "Y"], ["z", "Z"]].map(([k, n]) => `<line id="mod-achse-${k}" class="a-${k}" x1="0" y1="0" x2="0" y2="0"/><text id="mod-achse-${k}-t" class="a-${k}" x="0" y="0">${n}</text>`).join("");
+    return `<div class="mod-wuerfel-ecke ${this._modWuerfelZiehen ? "ziehbar" : ""}" id="mod-wuerfel-ecke" style="--w: ${S}px">
+      <button class="mod-heim" data-aktion="mod-ansicht" data-id="start" title="Startansicht" aria-label="Startansicht">${MOD_ICON.haus}</button>
+      <div class="mod-wuerfel" id="mod-wuerfel" role="group" aria-label="Ausrichtungswürfel">
+        <div class="mod-w-koerper" id="mod-w-koerper" style="transform: ${this._modWuerfelMatrix()}">${flaechen}</div>
+      </div>
+      <svg class="mod-achsen" id="mod-achsen" viewBox="-26 -26 52 52" aria-hidden="true">${achsen}</svg>
+    </div>`;
+  },
+  _modWuerfelMatrix() {
+    const b = this._buehne;
+    if (!b || !b.r) return "rotateX(-60deg) rotateZ(-38deg)";
+    const r = b.r, u = b.u, f = b._f();
+    // Welt → Bildschirm (CSS: y nach unten, z zum Betrachter)
+    return `matrix3d(${[r[0], -u[0], -f[0], 0, r[1], -u[1], -f[1], 0, r[2], -u[2], -f[2], 0, 0, 0, 0, 1].map((v) => +v.toFixed(5)).join(",")})`;
+  },
+  // Würfel, Achsen und Drehpunkt bei jedem Bild nachführen
+  _modWuerfelNachfuehren() {
+    const root = this.shadowRoot, b = this._buehne;
+    if (!b) return;
+    const k = root.getElementById("mod-w-koerper");
+    if (k) k.style.transform = this._modWuerfelMatrix();
+    const f = b._f();
+    for (const [i, a] of ["x", "y", "z"].entries()) {
+      const l = root.getElementById(`mod-achse-${a}`), t = root.getElementById(`mod-achse-${a}-t`);
+      if (!l) continue;
+      const e = [0, 0, 0]; e[i] = 1;
+      const x = V3.punkt(b.r, e) * 17, y = -V3.punkt(b.u, e) * 17, hinten = V3.punkt(f, e) > 0.2;
+      l.setAttribute("x2", x.toFixed(1)); l.setAttribute("y2", y.toFixed(1));
+      t.setAttribute("x", (x * 1.32).toFixed(1)); t.setAttribute("y", (y * 1.32 + 3).toFixed(1));
+      l.style.opacity = t.style.opacity = hinten ? 0.35 : 1;
+    }
+    const p = root.getElementById("mod-drehpunkt");
+    if (p) {
+      const s = b.drehpunktSichtbar && b.drehpunkt ? b.projizieren(b.drehpunkt) : null;
+      p.classList.toggle("an", !!s);
+      p.classList.toggle("mitte", !!s && !b.drehpunktGetroffen);
+      if (s) p.style.transform = `translate(${s[0]}px, ${s[1]}px)`;
+    }
+  },
+  // Würfel ziehen = Orbit um die Modellmitte (wenn eingeschaltet)
+  _modWuerfelZiehenEinrichten() {
+    const w = this.shadowRoot.getElementById("mod-wuerfel");
+    if (!w || w._fw) return;
+    w._fw = true;
+    let z = null;
+    w.addEventListener("pointerdown", (e) => {
+      if (!this._modWuerfelZiehen || !this._buehne) return;
+      z = { id: e.pointerId, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, gezogen: false };
+    });
+    w.addEventListener("pointermove", (e) => {
+      if (!z || e.pointerId !== z.id) return;
+      if (!z.gezogen && Math.hypot(e.clientX - z.x0, e.clientY - z.y0) < 4) return;
+      if (!z.gezogen) { z.gezogen = true; try { w.setPointerCapture(e.pointerId); } catch (x) { /* egal */ } w.classList.add("zieht"); }
+      const b = this._buehne;
+      b.orbit((e.clientX - z.x) * 1.5, (e.clientY - z.y) * 1.5, b.mitte || b.ziel);
+      z.x = e.clientX; z.y = e.clientY;
+    });
+    const ende = () => { if (z && z.gezogen) this._modWuerfelGezogen = performance.now(); z = null; w.classList.remove("zieht"); };
+    w.addEventListener("pointerup", ende);
+    w.addEventListener("pointercancel", ende);
+  },
+  _modMenueZu() {
+    if (!this._modOrbitMenue) return;
+    this._modOrbitMenue = false;
+    const root = this.shadowRoot, menue = root.querySelector(".mod-orbit-menue"), k = root.querySelector(".mod-orbit-knopf");
+    if (menue) menue.remove();
+    if (k) { k.classList.remove("an"); k.setAttribute("aria-expanded", "false"); }
+  },
+  _modEinstellung(k, wert) {
+    try { if (wert === undefined) return localStorage.getItem(`fw-mod-${k}`); localStorage.setItem(`fw-mod-${k}`, String(wert)); } catch (e) { /* privat: dann eben nicht merken */ }
+    return null;
+  },
+
   _modLadenDialogHtml() {
     return `<h2>Datei öffnen</h2>
       <label class="ablage klein-ablage" data-ablage="1">
@@ -5257,8 +6567,17 @@ const ModellAnsicht = {
   _modEinrichten() {
     if (this._modBereit) return;
     this._modBereit = true;
-    MOD_DB.alle().then((l) => { this._modZuletzt = l; if (this._ansicht === "modelle" && !this._mod) this._zeichnen(); });
+    this._modOrbitArt = this._modEinstellung("orbit") === "frei" ? "frei" : "eingeschraenkt";
+    this._modWuerfelZiehen = this._modEinstellung("wuerfel-ziehen") !== "0";
+    this._modZuletztLaden();
     const root = this.shadowRoot;
+    // Eigene Winkel: das zuletzt angetippte Feld bekommt die Schnellknöpfe
+    root.addEventListener("focusin", (e) => {
+      const t = e.target;
+      if (!this._mod || !t.dataset || t.dataset.mod !== "dreh-grad") return;
+      this._mod.drehFeld = Number(t.dataset.achse);
+      root.querySelectorAll(".mod-dreh-feld").forEach((f, i) => f.classList.toggle("aktiv", i === this._mod.drehFeld));
+    });
     root.addEventListener("dragover", (e) => {
       if (this._ansicht !== "modelle") return;
       e.preventDefault();
@@ -5278,7 +6597,33 @@ const ModellAnsicht = {
 
   _modStandard() {
     const rolle = this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => b.rest_g - a.rest_g)[0];
-    return { tab: "uebersicht", fuellung: 15, waende: 2, duese: 0.4, schicht_h: 0.2, stuetzen: "keine", eingesetzt: {}, rolleId: this._modRolleId || (rolle && rolle.id) };
+    const muster = this._modMusterId || this._modEinstellung("muster");
+    return { tab: "uebersicht", fuellung: 15, waende: 2, duese: 0.4, schicht_h: 0.2, stuetzen: "keine", eingesetzt: {}, rolleId: this._modRolleId || (rolle && rolle.id),
+      muster: FUELLMUSTER.some((x) => x.id === muster) ? muster : "grid", drehEigen: false, drehWerte: [0, 0, 0], drehFeld: 2 };
+  },
+  // Speicher für „Zuletzt geöffnet“: auf dem Server, wenn die Integration da ist
+  _modSpeicher() {
+    return this._konfig && this._hass && this._hass.fetchWithAuth ? modServer(this._hass) : MOD_DB;
+  },
+  async _modZuletztLaden() {
+    this._modZuletztZeit = Date.now();
+    const sp = this._modSpeicher();
+    try {
+      if (sp.aufServer && !this._modUmgezogen) {
+        // Einmalig: Modelle, die bisher nur in diesem Browser lagen, auf den Server legen
+        this._modUmgezogen = true;
+        for (const z of (await MOD_DB.alle()).reverse()) {
+          const x = await MOD_DB.holen(z.name);
+          if (x) { await sp.speichern(x.name, x.daten); await MOD_DB.loeschen(z.name); }
+        }
+      }
+      this._modZuletzt = await sp.alle();
+      this._modZuletztServer = !!sp.aufServer;
+    } catch (e) {
+      this._modZuletzt = await MOD_DB.alle();   // Server nicht erreichbar: wenigstens die lokalen
+      this._modZuletztServer = false;
+    }
+    if (this._ansicht === "modelle" && !this._mod) this._zeichnen();
   },
   _modRolle() { const m = this._mod; return this._daten.rollen.find((r) => r.id === (m && m.rolleId)) || null; },
 
@@ -5303,7 +6648,8 @@ const ModellAnsicht = {
         this._modGcode(new TextDecoder().decode(await zip.lesen(g)), name);
       } else if (/\.gcode$/i.test(name)) this._modGcode(new TextDecoder().decode(puffer), name);
       else throw new Error("Unbekanntes Format. Erlaubt sind .stl, .gcode und .gcode.3mf.");
-      MOD_DB.speichern(name, puffer).then(() => MOD_DB.alle()).then((l) => (this._modZuletzt = l));
+      const sp = this._modSpeicher();
+      sp.speichern(name, puffer).catch(() => MOD_DB.speichern(name, puffer)).then(() => this._modZuletztLaden());
     } catch (e) {
       this._mod = null;
       this._toast(e.message || String(e));
@@ -5368,12 +6714,18 @@ const ModellAnsicht = {
     if (!this._buehne) {
       this._buehne = new Buehne();
       if (!this._buehne.ok) { ort.innerHTML = `<div class="dr-kamera-leer">Dieser Browser kann kein WebGL.</div>`; return; }
-      this._buehne.nachZeichnen = () => this._modMarkerSetzen();
+      this._buehne.nachZeichnen = () => { this._modMarkerSetzen(); this._modWuerfelNachfuehren(); };
       this._buehne.antippen = (strahl) => this._modAntippen(strahl);
+      this._buehne.treffen = (strahl) => this._modTreffen(strahl);
+      this._buehne.setzeOrbitArt(this._modOrbitArt);
+      // Ein Tipp in die Ansicht schließt das Orbit-Menü (ohne Neuzeichnen, sonst ginge das Ziehen verloren)
+      this._buehne.canvas.addEventListener("pointerdown", () => this._modMenueZu());
       this._modSzene();
       this._buehne.ansicht("iso", this._mod && this._mod.grenzen);
     }
     ort.appendChild(this._buehne.canvas);
+    this._modWuerfelZiehenEinrichten();
+    this._modWuerfelNachfuehren();
     if (!this._modRo) {
       this._modRo = new ResizeObserver(() => this._buehne && this._buehne.neu());
     }
@@ -5398,6 +6750,7 @@ const ModellAnsicht = {
       this._modGrundriss();
       Object.entries(m.eingesetzt).forEach(([nr, id]) => this._modTeilZeigen(Number(nr), id, false));
       if (m.tab === "schichten") this._modSchichtenStarten();
+      if (m.drehWerte && m.drehWerte.some((x) => Number(x))) setTimeout(() => this._modDrehVorschau(), 0);
     } else {
       this._modGcodeLinien();
     }
@@ -5462,7 +6815,7 @@ const ModellAnsicht = {
   // ---- Schichten: vereinfachtes Slicen im Hintergrund ----
   _modSchichtenStarten() {
     const m = this._mod;
-    const schluessel = `${m.duese}|${m.schicht_h}|${m.waende}|${m.fuellung}|${m.stuetzen}|${m.id}`;
+    const schluessel = `${m.duese}|${m.schicht_h}|${m.waende}|${m.fuellung}|${m.muster}|${m.stuetzen}|${m.id}`;
     if (m.schichtSchluessel === schluessel && (m.schichtFortschritt === 1 || m.schichtLaeuft)) { this._modSchichtAnzeigen(); return; }
     m.schichtSchluessel = schluessel;
     m.schichtLaeuft = true;
@@ -5481,7 +6834,7 @@ const ModellAnsicht = {
       const bis = Math.min(zs.length, i + 8);
       for (; i < bis; i++) {
         const z = zs[i], zz = z + m.schicht_h / 2;
-        const sch = schichtBerechnen(s, z, { duese: m.duese, waende: m.waende, fuellung: m.fuellung, nr: i, massiv: i < massivUnten || i >= zs.length - massivOben });
+        const sch = schichtBerechnen(s, z, { duese: m.duese, waende: m.waende, fuellung: m.fuellung, muster: m.muster, hoehe, nr: i, massiv: i < massivUnten || i >= zs.length - massivOben });
         const add = (a, b, f) => { linien.push(a[0], a[1], zz, b[0], b[1], zz); farben.push(...f, ...f); return Math.hypot(b[0] - a[0], b[1] - a[1]); };
         for (const [art, zuege] of [["aussen", sch.aussen], ["innen", sch.innen]]) {
           for (const zug of zuege) for (let k = 0; k < zug.length; k++) laenge += add(zug[k], zug[(k + 1) % zug.length], LINIEN_FARBEN[art]);
@@ -5603,7 +6956,7 @@ const ModellAnsicht = {
     for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: !schichten });
     if (m.art === "stl" && schichten && m.schichtLinien && m.schichtFortschritt === 1) {
       if (!b.objekte.has("wege") || m.schichtWegeSchluessel !== m.schichtSchluessel) {
-        b.linien("wege", m.schichtLinien, m.schichtFarben, { dunkel: 0.55 });
+        b.linien("wege", m.schichtLinien, m.schichtFarben, { dunkel: 0.32 });   // tiefere Schichten deutlich dunkler, damit das Muster der aktuellen hervorsticht
         m.schichtWegeSchluessel = m.schichtSchluessel;
       }
     } else if (m.art === "stl" && !schichten) b.weg("wege");
@@ -5623,8 +6976,52 @@ const ModellAnsicht = {
   // ---- Ereignisse ----
   _modKlick(a, el) {
     const m = this._mod;
+    if (!["mod-orbit-menue", "mod-orbit-art", "mod-wuerfel-ziehen"].includes(a)) this._modMenueZu();
     switch (a) {
-      case "mod-ansicht": if (this._buehne) this._buehne.ansicht(el.dataset.id, m && m.grenzen); return;
+      case "mod-ansicht": if (this._buehne) this._buehne.ansicht(el.dataset.id, m && m.grenzen, true); return;
+      case "mod-orbit-menue": this._modOrbitMenue = !this._modOrbitMenue; break;
+      case "mod-orbit-art":
+        this._modOrbitArt = el.dataset.id === "frei" ? "frei" : "eingeschraenkt";
+        this._modEinstellung("orbit", this._modOrbitArt);
+        if (this._buehne) this._buehne.setzeOrbitArt(this._modOrbitArt);
+        this._modOrbitMenue = false;
+        this._toast(this._modOrbitArt === "frei" ? "Orbit: frei drehen" : "Eingeschränkter Orbit: oben bleibt oben");
+        break;
+      case "mod-wuerfel-ziehen":
+        this._modWuerfelZiehen = !this._modWuerfelZiehen;
+        this._modEinstellung("wuerfel-ziehen", this._modWuerfelZiehen ? "1" : "0");
+        break;
+      case "mod-wuerfel": {
+        if (performance.now() - (this._modWuerfelGezogen || -1e9) < 350 || !this._buehne) return;   // war Ziehen, kein Klick
+        const b = this._buehne;
+        b.fliegen(el.dataset.d.split(",").map(Number), b.mitte || b.ziel, b.abstand, true);
+        return;
+      }
+      case "mod-dreh-eigen": m.drehEigen = !m.drehEigen; if (!m.drehEigen) { m.drehWerte = [0, 0, 0]; this._modDrehVorschau(); } this._modSeiteNeu(); return;
+      case "mod-dreh-plus": {
+        const i = m.drehFeld ?? 2;
+        m.drehWerte[i] = Math.round(((Number(m.drehWerte[i]) || 0) + Number(el.dataset.g)) * 10) / 10;
+        if (m.drehWerte[i] > 360 || m.drehWerte[i] < -360) m.drehWerte[i] %= 360;
+        const f = this.shadowRoot.getElementById(`mod-dreh-${i}`);
+        if (f) f.value = m.drehWerte[i];
+        this._modDrehVorschau();
+        return;
+      }
+      case "mod-dreh-null":
+        m.drehWerte = [0, 0, 0];
+        [0, 1, 2].forEach((i) => { const f = this.shadowRoot.getElementById(`mod-dreh-${i}`); if (f) f.value = 0; });
+        this._modDrehVorschau();
+        return;
+      case "mod-dreh-anwenden": {
+        if (!m.drehWerte.some((x) => Number(x))) { this._toast("Erst einen Winkel eingeben."); return; }
+        const text = ["X", "Y", "Z"].map((n, i) => (Number(m.drehWerte[i]) ? `${n} ${zahl(Number(m.drehWerte[i]), 1)}°` : "")).filter(Boolean).join(", ");
+        drehenGrad(m.v, m.drehWerte);
+        m.drehWerte = [0, 0, 0];
+        this._modGeometrieNeu();
+        if (this._buehne) this._buehne.ansicht("iso", m.grenzen, true);
+        this._toast(`Gedreht um ${text}.`);
+        break;
+      }
       case "mod-schliessen": this._mod = null; if (this._buehne) for (const n of [...this._buehne.objekte.keys()]) if (!n.startsWith("bett")) this._buehne.weg(n); break;
       case "mod-tab":
         m.tab = el.dataset.id;
@@ -5633,6 +7030,7 @@ const ModellAnsicht = {
         return;
       case "mod-drehen":
         drehen90(m.v, Number(el.dataset.achse), 1);
+        m.drehWerte = [0, 0, 0];
         this._modGeometrieNeu();
         if (this._buehne) this._buehne.ansicht("iso", m.grenzen);
         break;
@@ -5680,10 +7078,12 @@ const ModellAnsicht = {
       case "mod-stuetzen-hilfe": this._dialog = "mod-stuetzen"; break;
       case "mod-schicht": this._modSchichtSetzen((m.schichtNr || 1) + Number(el.dataset.d)); return;
       case "mod-zuletzt":
-        MOD_DB.holen(el.dataset.name).then((x) => x ? this._modDatei(x.daten, x.name) : this._toast("Datei nicht mehr gespeichert."));
+        (this._modZuletztServer ? this._modSpeicher() : MOD_DB).holen(el.dataset.name)
+          .catch(() => null)
+          .then((x) => x ? this._modDatei(x.daten, x.name) : this._toast("Datei nicht mehr gespeichert."));
         return;
       case "mod-zuletzt-weg":
-        MOD_DB.loeschen(el.dataset.name);
+        (this._modZuletztServer ? this._modSpeicher() : MOD_DB).loeschen(el.dataset.name).catch(() => {});
         this._modZuletzt = (this._modZuletzt || []).filter((z) => z.name !== el.dataset.name);
         break;
       default: return;
@@ -5695,22 +7095,10 @@ const ModellAnsicht = {
   _modAntippen(strahl) {
     const m = this._mod;
     if (!m || !m.markieren || m.art !== "stl") return;
-    const v = m.v, o = strahl.von, d = strahl.richtung;
-    let best = Infinity, n = null;
-    for (let i = 0; i < v.length; i += 9) {
-      const e1 = [v[i + 3] - v[i], v[i + 4] - v[i + 1], v[i + 5] - v[i + 2]], e2 = [v[i + 6] - v[i], v[i + 7] - v[i + 1], v[i + 8] - v[i + 2]];
-      const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
-      const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
-      if (Math.abs(det) < 1e-12) continue;
-      const inv = 1 / det, tv = [o[0] - v[i], o[1] - v[i + 1], o[2] - v[i + 2]];
-      const u = (tv[0] * p[0] + tv[1] * p[1] + tv[2] * p[2]) * inv;
-      if (u < 0 || u > 1) continue;
-      const q = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
-      const w = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) * inv;
-      if (w < 0 || u + w > 1) continue;
-      const t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
-      if (t > 0 && t < best) { best = t; n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; }
-    }
+    const o = strahl.von, d = strahl.richtung;
+    const h = strahlTreffer(m.v, o, d);
+    const best = h ? h.t : Infinity;
+    let n = h ? h.n : null;
     if (!n) { this._toast("Da ist kein Modell. Tippe direkt auf die Oberfläche."); return; }
     const treffer = [0, 1, 2].map((i) => o[i] + d[i] * best);
     // Normale zur Kamera drehen = nach außen; Lochachse = größte Komponente
@@ -5723,6 +7111,26 @@ const ModellAnsicht = {
     m.markieren = false;
     m.lochAuswahl = nr;
     this._zeichnen();
+  },
+  // Drehpunkt für den Orbit: Abstand entlang des Strahls bis zum Modell oder null
+  _modTreffen(strahl) {
+    const m = this._mod;
+    if (!m || m.art !== "stl" || !m.v || m.laedt) return null;
+    const h = strahlTreffer(m.v, strahl.von, strahl.richtung);
+    return h ? h.t : null;
+  },
+  // Vorschau für eigene Winkel: das Modell wird nur in der Ansicht gedreht
+  _modDrehVorschau() {
+    const m = this._mod, b = this._buehne;
+    if (!m || !b || m.art !== "stl") return;
+    const aktiv = m.drehWerte && m.drehWerte.some((x) => Number(x));
+    const c = [0, 1, 2].map((i) => (m.grenzen.min[i] + m.grenzen.max[i]) / 2);
+    const mat = aktiv ? M4.drehungUm(drehMatrix(m.drehWerte), c) : M4.eins();
+    b.setze("modell", { m: mat });
+    b.setze("grundriss", { sichtbar: !aktiv });
+    for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: !aktiv && m.tab !== "schichten" });
+    const box = this.shadowRoot.getElementById("mod-marker");
+    if (box) box.classList.toggle("versteckt", !!aktiv);
   },
   _modLochGrenzen(l) {
     const ende = l.oeffnung - l.richtung * l.tiefe;
@@ -5744,6 +7152,13 @@ const ModellAnsicht = {
     if (!k || !this._mod) return false;
     const m = this._mod;
     if (k === "schicht") { this._modSchichtSetzen(Number(t.value)); return true; }
+    if (k === "dreh-grad") {
+      const i = Number(t.dataset.achse), w = Number(String(t.value).replace(",", "."));
+      m.drehFeld = i;
+      m.drehWerte[i] = Number.isFinite(w) ? Math.max(-360, Math.min(360, w)) : 0;
+      this._modDrehVorschau();
+      return true;
+    }
     if (k === "loch-d" || k === "loch-t") {
       const l = m.loecher && m.loecher.find((x) => x.nr === Number(t.dataset.nr));
       if (!l) return true;
@@ -5775,6 +7190,15 @@ const ModellAnsicht = {
     const m = this._mod;
     if (!m) return false;
     if (k === "rolle") { m.rolleId = this._modRolleId = t.value; this._zeichnen(); return true; }
+    if (k === "dreh-grad") return true;
+    if (k === "muster") {
+      if (!FUELLMUSTER.some((x) => x.id === t.value)) return true;
+      m.muster = this._modMusterId = t.value;
+      this._modEinstellung("muster", t.value);
+      this._modSeiteNeu();
+      if (m.art === "stl" && m.tab === "schichten") this._modSchichtenStarten();
+      return true;
+    }
     if (k === "loch-d" || k === "loch-t") {
       const nr = Number(t.dataset.nr);
       if (m.eingesetzt[nr]) this._modTeilZeigen(nr, m.eingesetzt[nr], false);
@@ -5790,7 +7214,7 @@ const ModellAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.10.0";
+const VERSION = "0.11.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
@@ -5948,6 +7372,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       this._updateTimer = setInterval(() => this._updatePruefen(), 30 * 60000);
       document.addEventListener("visibilitychange", this._sichtbar);
       this._wischenEinrichten();
+      this._reglerEinrichten();
     }
     this._ro.observe(this);
     this._zeichnen();
@@ -5970,6 +7395,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       else if (this._dialog && !["bu", "sich-import", "konflikt"].includes(this._dialog)) { this._dialog = null; this._zeichnen(); }
       return;
     }
+    if (this._drTaste(e)) return;
     if (e.key === "Enter" && e.target.id === "global-suche") {
       const erst = this.shadowRoot.querySelector(".such-treffer");
       if (erst) erst.click();
@@ -6071,7 +7497,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   _speicherHtml() {
     const s = this._speicherStatus;
     const text = s === "speichert" ? "Speichert …" : s === "gespeichert" ? "Gespeichert" : s === "fehler" ? (this._konflikt ? "Nicht gespeichert" : this._versuche && this._versuche <= 3 ? "Speichern fehlgeschlagen, neuer Versuch …" : "Speichern fehlgeschlagen") : "";
-    return `<span id="speicher" class="speicher ${s}">${text}</span>`;
+    return `<span id="speicher" class="speicher ${s}" title="${text}">${text}</span>`;
   }
 
   _toast(text) {
@@ -6465,6 +7891,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._invEingabe(t)) return;
     if (this._modEingabe(t)) return;
     if (this._buEingabe(t)) return;
+    if (this._drEingabe(t)) return;
     if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
@@ -6500,6 +7927,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._invAenderung(t)) return;
     if (this._modAenderung(t)) return;
     if (this._buAenderung(t)) return;
+    if (this._drAenderung(t)) return;
     if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
     if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
@@ -6618,6 +8046,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       html = `<div class="app ${this._mobil ? "mobil" : ""}">${this._kopfHtml()}<main class="haupt"><div class="karte fehlerkarte"><h2>Diese Ansicht konnte nicht angezeigt werden</h2>
         <p>${esc(e.message || e)}</p><p class="leise klein">Deine Daten sind nicht betroffen.</p><button class="knopf" data-aktion="ansicht" data-id="filament">Zur Filament-Übersicht</button></div></main></div>`;
     }
+    this._reglerMerken();
     root.innerHTML = `${this._stilFest ? "" : `<style>${STIL}</style>`}${html}`;
     this._nachZeichnen(root, scrollHaupt, fokusId, schonDa);
   }
@@ -6664,6 +8093,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       this._klappNeu = null;
       if (k) this._klappAnimieren(k, true);
     }
+    this._reglerWiederfinden();
   }
 
   // ---- Handy: Detailansicht nach unten wegwischen ------------------------
@@ -6853,13 +8283,208 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._ddOffen = null;
   }
 
+  // ---- Regler: aktueller Wert in einer gelben Box über dem Knopf ----------
+  // Gilt für jeden input[type=range] im Panel, auch für künftige und nach dem
+  // Neuzeichnen. Antippen der Box: genauen Wert eintippen (Enter/Verlassen
+  // übernimmt, Escape bricht ab). Übernommen wird wie beim Ziehen: Wert setzen,
+  // dann „input“ und „change“ auslösen, damit alle abhängigen Anzeigen mitgehen.
+  _reglerEinrichten() {
+    const root = this.shadowRoot;
+    const istRegler = (x) => x && x.matches && x.matches('input[type="range"]');
+    root.addEventListener("pointerdown", (e) => {
+      const r = e.target.closest && e.target.closest('input[type="range"]');
+      const inBox = e.target.closest && e.target.closest(".regler-wert");
+      // Woanders hingetippt, während eine Zahl eingetippt wird: erst übernehmen
+      if (!inBox && this._regler && this._regler.edit) this._reglerUebernehmen();
+      if (r) this._reglerAn(r);
+      else if (!inBox) this._reglerAus();
+    }, true);
+    // Tastatur: Tab auf einen Regler zeigt die Box ebenfalls
+    root.addEventListener("keydown", (e) => { if (e.key === "Tab") this._reglerTab = Date.now(); }, true);
+    root.addEventListener("keyup", (e) => { if (istRegler(e.target) && /^(Arrow|Page|Home|End)/.test(e.key)) this._reglerAn(e.target); }, true);
+    root.addEventListener("focusin", (e) => {
+      if (istRegler(e.target)) { if (Date.now() - (this._reglerTab || 0) < 600) this._reglerAn(e.target); }
+      else if (this._regler && !(e.target.closest && e.target.closest(".regler-wert"))) this._reglerAus();
+    });
+    root.addEventListener("input", (e) => { if (this._regler && e.target === this._regler.el) this._reglerZeigen(); }, true);
+    root.addEventListener("scroll", () => { if (this._regler) this._reglerLage(); }, true);
+    window.addEventListener("resize", () => { if (this._regler) this._reglerLage(); });
+  }
+
+  // Merkmale, an denen derselbe Regler nach dem Neuzeichnen wiedererkannt wird
+  _reglerSchluessel(el) {
+    const teile = [...el.attributes].filter((a) => a.name === "id" || a.name.startsWith("data-")).map((a) => `[${a.name}="${CSS.escape(a.value)}"]`);
+    const sel = `input[type="range"]${teile.join("")}`;
+    return { sel, nr: [...this.shadowRoot.querySelectorAll(sel)].indexOf(el) };
+  }
+
+  _reglerAn(el) {
+    if (this._regler && this._regler.el === el) { this._reglerZeigen(); return; }
+    this._reglerAus();
+    this._regler = { el, edit: false, text: "" };
+    this._reglerZeigen();
+  }
+
+  _reglerAus() {
+    if (!this._regler) return;
+    const box = this._regler.box;
+    this._regler = null;
+    if (box) box.remove();
+  }
+
+  _reglerMerken() {
+    const r = this._regler;
+    if (!r) return;
+    if (r.el.isConnected) r.schl = this._reglerSchluessel(r.el);
+    if (r.edit && r.box) { const f = r.box.querySelector("input"); if (f) r.text = f.value; }
+    r.box = null;
+  }
+
+  _reglerWiederfinden() {
+    const r = this._regler;
+    if (!r) return;
+    if (!r.el.isConnected) {
+      const neu = r.schl && this.shadowRoot.querySelectorAll(r.schl.sel)[r.schl.nr];
+      if (!neu) { this._regler = null; return; }
+      r.el = neu;
+    }
+    this._reglerZeigen();
+  }
+
+  _reglerZahlen(el) {
+    const min = el.min === "" ? 0 : Number(el.min), max = el.max === "" ? 100 : Number(el.max);
+    const step = el.step === "any" ? 0 : (el.step === "" ? 1 : Number(el.step));
+    const nk = step ? Math.min(6, (String(el.step).split(".")[1] || "").length) : 2;
+    return { min, max, step, nk };
+  }
+
+  _reglerText(el, v, tausender = true) {
+    const { nk } = this._reglerZahlen(el);
+    return Number(v).toLocaleString("de-DE", { minimumFractionDigits: nk, maximumFractionDigits: nk, useGrouping: tausender });
+  }
+
+  // Box anlegen bzw. auffrischen
+  _reglerZeigen() {
+    const r = this._regler;
+    if (!r) return;
+    if (!r.el.isConnected) { this._reglerWiederfinden(); return; }
+    const app = this.shadowRoot.querySelector(".app");
+    if (!app) return;
+    if (!r.box || !r.box.isConnected) {
+      r.box = document.createElement("div");
+      r.box.className = "regler-wert";
+      for (const ev of ["click", "input", "change", "keydown", "keyup"]) r.box.addEventListener(ev, (e) => e.stopPropagation());
+      r.box.addEventListener("click", (e) => { if (e.target.closest(".regler-wert-knopf")) this._reglerBearbeiten(); });
+      app.appendChild(r.box);
+      r.inhalt = null;
+    }
+    if (r.edit) {
+      if (r.inhalt !== "edit") {
+        r.inhalt = "edit";
+        const { min, max } = this._reglerZahlen(r.el);
+        r.box.classList.add("edit");
+        r.box.innerHTML = `<input class="regler-wert-feld" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" aria-label="Wert eintippen (${this._reglerText(r.el, min, false)} bis ${this._reglerText(r.el, max, false)})"><small>${esc(this._reglerText(r.el, min))} – ${esc(this._reglerText(r.el, max))}</small>`;
+        const f = r.box.querySelector("input");
+        f.value = r.text;
+        f.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); this._reglerUebernehmen(); }
+          else if (e.key === "Escape") { e.preventDefault(); this._reglerAbbrechen(); }
+        });
+        f.addEventListener("input", () => { r.text = f.value; f.classList.remove("falsch"); });
+        f.addEventListener("blur", () => { if (this._regler === r && r.edit && r.box && r.box.contains(f)) this._reglerUebernehmen(); });
+        f.focus();
+        f.select();
+      }
+    } else {
+      r.box.classList.remove("edit");
+      const text = this._reglerText(r.el, r.el.value);
+      const knopf = r.inhalt === "zeige" && r.box.querySelector(".regler-wert-knopf");
+      if (knopf) knopf.firstChild.textContent = text;
+      else {
+        r.box.innerHTML = `<button type="button" class="regler-wert-knopf" title="Antippen, um eine genaue Zahl einzutippen"><span>${esc(text)}</span><i aria-hidden="true">✎</i></button>${r.hinweis ? `<small>${esc(r.hinweis)}</small>` : ""}`;
+        r.inhalt = "zeige";
+      }
+    }
+    this._reglerLage();
+  }
+
+  // Box mittig über den Reglerknopf setzen, innerhalb der Seite halten
+  _reglerLage() {
+    const r = this._regler;
+    if (!r || !r.box) return;
+    const app = this.shadowRoot.querySelector(".app");
+    const ra = r.el.getBoundingClientRect();
+    if (!app || !ra.width) { r.box.style.visibility = "hidden"; return; }
+    const pa = app.getBoundingClientRect();
+    const { min, max } = this._reglerZahlen(r.el);
+    const anteil = max > min ? Math.min(1, Math.max(0, (Number(r.el.value) - min) / (max - min))) : 0;
+    const knopf = 22;
+    const x = ra.left + knopf / 2 + anteil * (ra.width - knopf) - pa.left;
+    const b = r.box.offsetWidth || 60;
+    const links = Math.max(8, Math.min(pa.width - b - 8, x - b / 2));
+    r.box.style.visibility = "";
+    r.box.style.left = `${links}px`;
+    r.box.style.top = `${ra.top - pa.top + ra.height / 2 - 22}px`;
+    r.box.style.setProperty("--spitze", `${Math.max(10, Math.min(b - 10, x - links))}px`);
+  }
+
+  _reglerBearbeiten() {
+    const r = this._regler;
+    if (!r || r.edit) return;
+    r.edit = true;
+    r.hinweis = null;
+    r.text = this._reglerText(r.el, r.el.value, false);
+    this._reglerZeigen();
+  }
+
+  _reglerAbbrechen() {
+    const r = this._regler;
+    if (!r) return;
+    r.edit = false;
+    this._reglerZeigen();
+    try { r.el.focus({ preventScroll: true }); } catch (e) { /* egal */ }
+  }
+
+  // Eingabe prüfen: Komma oder Punkt, auf min/max begrenzen, auf die Schrittweite runden
+  _reglerUebernehmen() {
+    const r = this._regler;
+    if (!r || !r.edit) return;
+    const roh = String(r.text || "").trim().replace(/\s/g, "");
+    const norm = /,/.test(roh) ? roh.replace(/\./g, "").replace(",", ".") : roh;
+    let v = norm === "" ? NaN : Number(norm);
+    const f = r.box && r.box.querySelector("input");
+    if (!Number.isFinite(v)) {
+      if (f) { f.classList.add("falsch"); f.focus(); }
+      return;
+    }
+    const { min, max, step, nk } = this._reglerZahlen(r.el);
+    const eingegeben = v;
+    if (step) v = min + Math.round((v - min) / step) * step;
+    v = Math.min(max, Math.max(min, v));
+    if (step && min + Math.floor((max - min) / step + 1e-9) * step < v) v = min + Math.floor((max - min) / step + 1e-9) * step;
+    v = Number(v.toFixed(nk));
+    r.hinweis = eingegeben > max ? `höchstens ${this._reglerText(r.el, max)}` : eingegeben < min ? `mindestens ${this._reglerText(r.el, min)}` : Math.abs(eingegeben - v) > 1e-9 ? `gerundet auf ${this._reglerText(r.el, v)}` : null;
+    r.edit = false;
+    r.inhalt = null;
+    const el = r.el;
+    el.value = String(v);
+    this._reglerZeigen();
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    if (this._regler === r && r.hinweis) {
+      clearTimeout(this._reglerHinweisTimer);
+      this._reglerHinweisTimer = setTimeout(() => { if (this._regler === r && !r.edit) { r.hinweis = null; r.inhalt = null; this._reglerZeigen(); } }, 2500);
+    }
+  }
+
   _kopfHtml() {
     return `<header class="kopf">
       ${this._narrow ? `<button class="icon-knopf" data-aktion="menue" aria-label="Menü">☰</button>` : ""}
       <div class="marke"><span class="punkt-leucht"></span>Filament-Werkstatt</div>
+      ${!this._mobil && this._daten ? `<button class="such-knopf kopf-suche" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)"><span class="kopf-suche-icon">🔍</span><span class="kopf-suche-text">Suchen …</span><kbd>Strg K</kbd></button>` : ""}
       ${this._mobil ? "" : this._navHtml("oben")}
       ${this._speicherHtml()}
-      ${this._daten ? `<button class="icon-knopf such-knopf" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)">🔍</button>` : ""}
+      ${this._mobil && this._daten ? `<button class="icon-knopf such-knopf" data-aktion="such-auf" aria-label="Suchen" title="Suchen (Strg+K)">🔍</button>` : ""}
     </header>`;
   }
 
@@ -6949,7 +8574,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     return liste.map((r) => {
       const rest = r.rest_g == null ? "nicht gewogen" : `${zahl(r.rest_g)} g`;
       const p = prozent(r);
-      return `<button class="kachel ${r.probiert ? "" : "offen"}" data-aktion="oeffnen" data-id="${esc(r.id)}">
+      const geladen = r.id === this._daten.geladen;
+      return `<button class="kachel ${r.probiert ? "" : "offen"} ${geladen ? "geladen" : ""}" data-aktion="oeffnen" data-id="${esc(r.id)}">
+        ${geladen ? `<span class="badge-geladen">● geladen</span>` : ""}
         ${r.probiert ? "" : `<span class="badge-offen">noch nicht probiert</span>`}
         ${r.achtung ? `<span class="achtung-punkt kachel-achtung" title="Nach Fehldruck: testen und genau hinschauen">!</span>` : ""}
         <div class="kachel-spule">${spuleSvg(r)}</div>
@@ -6988,6 +8615,9 @@ class FilamentWerkstattPanel extends HTMLElement {
             ${r.probiert
               ? `<span class="pille mint">✓ probiert${r.probiert_am ? ` am ${new Date(r.probiert_am).toLocaleDateString("de-DE")}` : ""}</span>`
               : `<span class="pille amber">noch nicht probiert</span>`}
+            ${r.id === this._daten.geladen
+              ? `<button class="geladen-knopf an" data-aktion="dr-laden" data-id="" title="Antippen: kein Filament mehr geladen">● Geladen</button>`
+              : `<button class="geladen-knopf" data-aktion="dr-laden" data-id="${esc(r.id)}" title="Diese Rolle steckt jetzt im Drucker">Geladen</button>`}
           </div>
           <button class="icon-knopf" data-aktion="schliessen" aria-label="Schließen">✕</button>
         </header>
@@ -7265,6 +8895,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._dialog === "mod-laden") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod"></div><div class="dialog" role="dialog" data-einmal="dialog-mod">${this._modLadenDialogHtml()}</div>`;
     if (this._dialog === "mod-stuetzen") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-mod-s"></div><div class="dialog breit-dialog" role="dialog" data-einmal="dialog-mod-s">${this._modStuetzenHilfeHtml()}</div>`;
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
+    if (this._dialog === "dr-temp") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-t"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-t">${this._drTempDialogHtml()}</div>`;
+    if (this._dialog === "dr-luefter") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-l"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-l">${this._drLuefterDialogHtml()}</div>`;
     if (this._dialog === "dr-druck") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr"></div><div class="dialog" role="dialog" data-einmal="dialog-dr">${this._drDialogHtml()}</div>`;
     const r = this._rolle();
     let inhalt = "";
