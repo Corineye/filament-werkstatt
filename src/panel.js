@@ -688,7 +688,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._modEingabe(t)) return;
     if (this._buEingabe(t)) return;
     if (this._drEingabe(t)) return;
-    if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (this._ksEingabe(t) || this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
       clearTimeout(this._suchTimer);
