@@ -1866,6 +1866,168 @@ input[type=range]:active::-webkit-slider-thumb { background: var(--gelb); box-sh
 .dr-l-stift { position: absolute; top: 6px; right: 8px; font-style: normal; font-size: 11px; color: var(--leise); }
 .dr-stufen { margin: 12px 0 4px; }
 .dr-stufen .chip { min-width: 54px; }
+
+/* ==== Start (Übersicht) und Notizbuch ==== */
+.st-seite { max-width: 1320px; margin: 0 auto; }
+.st-kopf { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.st-kopf h2 { font-size: 24px; letter-spacing: .2px; }
+.st-kopf p { margin: 2px 0 0; }
+.st-lage { font-size: 13px; padding: 6px 14px; }
+.st-raster { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 14px; align-items: stretch; }
+.st-kachel { position: relative; background: var(--flaeche); border: 1px solid var(--rand); border-radius: var(--radius); padding: 16px 18px; backdrop-filter: blur(10px);
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; animation: st-rein .4s cubic-bezier(.2,.8,.2,1) both; transition: border-color .18s, background .18s, transform .18s, box-shadow .18s; }
+.st-kachel[data-aktion] { cursor: pointer; }
+.st-kachel[data-aktion]:hover { border-color: rgba(62,230,168,.35); background: var(--flaeche-hover); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,.25), 0 0 0 1px rgba(62,230,168,.08); }
+.st-kachel[data-aktion]:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.st-kachel.still { animation: none; }
+.st-raster > :nth-child(2) { animation-delay: .04s; } .st-raster > :nth-child(3) { animation-delay: .08s; } .st-raster > :nth-child(4) { animation-delay: .12s; }
+.st-raster > :nth-child(5) { animation-delay: .16s; } .st-raster > :nth-child(n+6) { animation-delay: .2s; }
+@keyframes st-rein { from { opacity: 0; transform: translateY(10px); } }
+.st-kachel-kopf { display: flex; align-items: center; gap: 8px; }
+.st-kachel-kopf h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--leise); letter-spacing: .2px; }
+.st-kachel-kopf .zahl-punkt { margin-left: 0; }
+.st-pfeil { margin-left: auto; color: var(--leise); font-size: 20px; line-height: 1; transition: transform .18s, color .18s; }
+.st-kachel:hover .st-pfeil { color: var(--mint); transform: translateX(3px); }
+.zahl-punkt.rot-punkt { background: var(--rot); color: #2a0606; }
+.st-drucker { grid-column: span 2; }
+.st-warnungen { grid-row: span 2; }
+.st-letzte { grid-column: span 2; }
+.st-warnungen.rot-rand { border-color: rgba(255,107,107,.35); }
+/* Drucker */
+.st-dr { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.st-ring { position: relative; width: 104px; height: 104px; flex: none; }
+.st-ring-text { position: absolute; inset: 0; display: grid; place-content: center; }
+.st-ring-text strong { font-size: 22px; }
+.st-dr-text { flex: 1; min-width: 0; display: grid; gap: 6px; justify-items: start; }
+.st-dr-name { font-size: 19px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-werte { display: grid; grid-template-columns: repeat(2, minmax(0, 120px)); gap: 8px; width: 100%; }
+.st-werte > div { background: rgba(0,0,0,.22); border: 1px solid var(--rand); border-radius: 12px; padding: 7px 10px; display: grid; gap: 1px; }
+.st-werte span { font-size: 11px; color: var(--leise); }
+.st-werte strong { font-size: 15px; }
+.st-werte.st-gross { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.st-werte.st-gross strong { font-size: 20px; }
+.st-titelbild { width: 96px; height: 96px; object-fit: contain; border-radius: 14px; background: rgba(0,0,0,.3); border: 1px solid var(--rand); flex: none; }
+/* Listen in Kacheln */
+.st-liste { display: grid; gap: 6px; }
+.st-warn { display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 11px; border-radius: 12px; background: rgba(0,0,0,.2); border: 1px solid var(--rand); font-size: 13px; line-height: 1.35; transition: background .15s, border-color .15s; }
+.st-warn:hover { background: var(--flaeche-hover); border-color: rgba(255,255,255,.16); }
+.st-warn > span:nth-child(2) { flex: 1; min-width: 0; }
+.st-warn i { font-style: normal; color: var(--leise); }
+.st-warn.rot { color: inherit; border-color: rgba(255,107,107,.35); background: rgba(255,107,107,.08); }
+.st-warn.amber { color: inherit; border-color: rgba(255,181,71,.3); background: var(--amber-weich); }
+.st-warn.leise { color: inherit; }
+.st-warn-icon { flex: none; width: 22px; text-align: center; }
+.st-ruhe { display: grid; place-items: center; gap: 6px; text-align: center; padding: 18px 8px; flex: 1; }
+.st-ruhe span { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; color: var(--mint); background: var(--mint-weich); box-shadow: 0 0 24px rgba(62,230,168,.2); }
+.st-zeile, .st-schlange li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.st-zeile-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.st-zeile-text strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-zeile-text small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-schlange { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.st-nr { width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--mint-weich); color: var(--mint); flex: none; }
+.st-rolle { display: flex; align-items: center; gap: 14px; }
+.st-rolle .spule-svg { width: 58px; height: 58px; flex: none; }
+.st-rolle > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.st-gramm { font-size: 20px; font-weight: 700; margin-top: 2px; }
+.st-gramm.mint { color: var(--mint); }
+.st-rollen { display: grid; gap: 4px; }
+.st-rollen-zeile { display: flex; align-items: center; gap: 10px; padding: 6px 8px; margin: 0 -8px; border-radius: 10px; text-align: left; }
+.st-rollen-zeile:hover { background: var(--flaeche-hover); }
+.st-rollen-zeile .farbtupfer { width: 22px; height: 22px; }
+.st-g { font-weight: 700; font-size: 14px; white-space: nowrap; }
+.st-fotos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.st-foto { display: grid; gap: 3px; text-align: left; min-width: 0; padding: 0; border-radius: 14px; }
+.st-foto-bild { aspect-ratio: 16 / 10; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,.3); border: 1px solid var(--rand); display: grid; place-items: center; font-size: 26px; margin-bottom: 4px; transition: border-color .15s; }
+.st-foto-bild img { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
+.st-foto:hover .st-foto-bild { border-color: rgba(62,230,168,.45); }
+.st-foto:hover img { transform: scale(1.04); }
+.st-foto strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-foto small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-zahl { display: flex; align-items: baseline; gap: 10px; }
+.st-zahl strong { font-size: 34px; font-weight: 700; line-height: 1; }
+.st-zahl strong.mint { color: var(--mint); }
+.st-kurz { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.st-kachel p { margin: 0; }
+.st-kachel > small { font-size: 12px; }
+@media (max-width: 1180px) { .app:not(.mobil) .st-raster { grid-template-columns: repeat(2, minmax(0, 1fr)); } .app:not(.mobil) .st-warnungen { grid-row: auto; } }
+.mobil .st-raster { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.mobil .st-drucker, .mobil .st-letzte { grid-column: auto; }
+.mobil .st-warnungen { grid-row: auto; }
+.mobil .st-kopf h2 { font-size: 21px; }
+.mobil .st-ring { width: 72px; height: 72px; }
+.mobil .st-werte { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.mobil .st-werte > div { padding: 6px 8px; }
+.mobil .st-werte span, .mobil .st-werte strong { white-space: nowrap; }
+.mobil .st-werte strong { font-size: 14px; }
+.mobil .st-ring-text strong { font-size: 16px; }
+.mobil .st-titelbild { width: 52px; height: 52px; border-radius: 10px; }
+.mobil .st-dr { gap: 12px; }
+.mobil .st-dr-name { font-size: 16px; }
+.mobil .st-fotos { gap: 8px; }
+/* Haken (Erinnerung erledigt) */
+.nb-haken { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--leise); flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #062018; transition: background .15s, border-color .15s, transform .1s; }
+.nb-haken:hover { border-color: var(--mint); background: var(--mint-weich); }
+.nb-haken:active { transform: scale(.9); }
+.nb-haken.an { background: var(--mint); border-color: var(--mint); }
+/* Notizbuch */
+.nb-seite { max-width: 1320px; margin: 0 auto; }
+.nb-kopf { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.nb-kopf p { margin: 4px 0 0; }
+.nb-knoepfe { display: flex; gap: 8px; }
+.nb-werkzeug { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; }
+.nb-werkzeug .such-feld { max-width: 320px; }
+.nb-liste { columns: 300px; column-gap: 12px; }
+.nb-liste > * { break-inside: avoid; margin-bottom: 12px; }
+.nb-karte { background: var(--flaeche); border: 1px solid var(--rand); border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(10px); display: grid; gap: 6px; min-width: 0;
+  animation: st-rein .3s cubic-bezier(.2,.8,.2,1) both; transition: border-color .15s; }
+.nb-karte.still { animation: none; }
+.nb-karte:hover { border-color: rgba(255,255,255,.14); }
+.nb-karte-kopf { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.nb-quelle { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); font-weight: 600; }
+.klein-tupfer { width: 12px; height: 12px; border-width: 1px; }
+.q-fehl .nb-quelle { color: var(--rot); }
+.q-eigen .nb-quelle { color: var(--mint); }
+.q-wartung .nb-quelle { color: var(--amber); }
+.nb-titel { font-size: 15px; overflow-wrap: anywhere; }
+.nb-unter { font-size: 12px; margin-top: -4px; }
+.nb-text { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; max-height: 12em; overflow: hidden; }
+.nb-antworten { margin: 4px 0 0; display: grid; gap: 3px; font-size: 12px; padding: 8px 10px; border-radius: 10px; background: rgba(255,107,107,.06); border: 1px solid rgba(255,107,107,.18); }
+.nb-antworten div { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; }
+.nb-antworten dt { color: var(--leise); flex: 1; min-width: 0; }
+
+.nb-antworten dd { margin: 0; overflow-wrap: anywhere; text-align: right; max-width: 60%; font-weight: 600; }
+.nb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.nb-tag { font-size: 12px; color: var(--mint); background: var(--mint-weich); border-radius: 999px; padding: 2px 9px; }
+.nb-tag:hover { filter: brightness(1.2); }
+.nb-fuss { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
+.nb-link { padding: 5px 11px; font-size: 12px; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.nb-aktionen { display: flex; gap: 6px; flex: none; }
+.nb-aktionen .rund { min-width: 30px; height: 30px; font-size: 12px; }
+.nb-erinnerung { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.nb-erinnerung .nb-inhalt { display: grid; gap: 6px; min-width: 0; }
+.nb-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.nb-erinnerung.rot-rand { border-color: rgba(255,107,107,.35); }
+.nb-erinnerung.amber-rand { border-color: rgba(255,181,71,.35); }
+.nb-erinnerung.erledigt { opacity: .6; }
+.nb-erinnerung.erledigt .nb-titel { text-decoration: line-through; color: var(--leise); }
+.nb-edit { border-color: rgba(62,230,168,.45); box-shadow: 0 0 0 1px rgba(62,230,168,.12), 0 10px 30px rgba(0,0,0,.25); gap: 8px; }
+.nb-edit .text { margin-top: 0; }
+.nb-edit .text:focus, .nb-edit input[type="date"]:focus { outline: none; border-color: rgba(62,230,168,.6); }
+.nb-edit textarea { min-height: 110px; }
+.nb-edit .knopf-reihe { margin-top: 6px; }
+.nb-datum { margin: 2px 0 0; }
+.nb-datum input { color-scheme: dark; }
+.nb-schnell .chip, .nb-vorschlaege .chip { padding: 5px 11px; font-size: 12px; }
+.nb-vorschlaege { display: grid; gap: 6px; }
+.nb-linkwahl { margin: 0; }
+.nb-leer { column-span: all; }
+.mobil .nb-liste { columns: 1; }
+.mobil .nb-kopf { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+.mobil .nb-knoepfe .knopf { flex: 1; }
+.mobil .nb-werkzeug { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+.mobil .nb-werkzeug .such-feld { max-width: none; }
+.mobil .nb-chips { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 2px 16px; scrollbar-width: none; }
+.mobil .nb-chips::-webkit-scrollbar { display: none; }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -7256,9 +7418,271 @@ const KunststoffAnsicht = {
 // ============================================================================
 // Start: die wichtigsten aktuellen Infos auf einen Blick, jede Kachel führt zu den Details
 // ============================================================================
+// Hinweise anderer Bereiche (Druck passt nicht auf die Rolle, Raumklima, Trocknen) werden
+// nur benutzt, wenn es die Funktionen gibt. Ein Fehler darin legt die Übersicht nicht lahm.
+const ST_ZUSTAND = {
+  aus: ["Aus", "leise"], startet: ["Startet …", "amber"], offline: ["Nicht erreichbar", "leise"],
+};
+
+// Rückgabe fremder Hinweis-Funktionen vereinheitlichen: String, Objekt oder Liste davon
+function stHinweise(x, std) {
+  if (!x) return [];
+  if (Array.isArray(x)) return x.flatMap((y) => stHinweise(y, std));
+  if (typeof x === "string") return [{ ...std, text: x }];
+  if (typeof x === "object") {
+    const t = x.text || x.titel || x.meldung || x.hinweis;
+    return t ? [{ ...std, text: String(t), stufe: x.stufe || std.stufe }] : [];
+  }
+  return [];
+}
+
 const StartAnsicht = {
-  _stHtml() { return `<div class="karte"><h2>Übersicht</h2><p class="leise">Kommt gleich.</p></div>`; },
-  _stKlick(a, el) { this._zeichnen(); },
+  // Fremde Hilfsfunktion aufrufen, ohne dass ein Fehler darin die Seite stört
+  _stVersuch(f) {
+    try { return f(); } catch (e) { console.warn("Filament-Werkstatt Übersicht:", e); return null; }
+  },
+
+  _stHtml() {
+    const warn = this._stWarnungen();
+    const stunde = new Date().getHours();
+    const gruss = stunde < 5 ? "Gute Nacht" : stunde < 11 ? "Guten Morgen" : stunde < 18 ? "Guten Tag" : "Guten Abend";
+    const datum = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+    const rot = warn.filter((w) => w.stufe === "rot").length;
+    const kachel = [
+      this._stDruckerHtml(),
+      this._stWarnHtml(warn),
+      this._stErinnerungHtml(),
+      this._stGeladenHtml(),
+      this._stSchlangeHtml(),
+      this._stWenigHtml(),
+      this._stLetzteHtml(),
+      this._stKlimaHtml(),
+      this._stEinkaufHtml(),
+      this._stWartungHtml(),
+      this._stShopHtml(),
+    ].filter(Boolean);
+    return `<div class="st-seite">
+      <header class="st-kopf"><div><h2>${gruss}</h2><p class="leise">${esc(datum)}</p></div>
+        <span class="pille ${rot ? "rot" : warn.length ? "amber" : "mint"} st-lage">${warn.length ? `${warn.length} ${warn.length === 1 ? "Hinweis" : "Hinweise"}` : "✓ Alles im grünen Bereich"}</span></header>
+      <div class="st-raster">${kachel.join("")}</div></div>`;
+  },
+
+  // Kachelrahmen: die ganze Kachel ist ein Link, Knöpfe darin haben eigene Ziele
+  _stKachel(klasse, ziel, titel, inhalt, zusatz = "") {
+    const attr = Object.entries(ziel).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
+    return `<section class="st-kachel ${klasse}" ${attr} role="link" tabindex="0" data-einmal="st-${klasse.split(" ")[0]}">
+      <header class="st-kachel-kopf"><h3>${titel}</h3>${zusatz}<span class="st-pfeil" aria-hidden="true">›</span></header>${inhalt}</section>`;
+  },
+
+  // ---- Drucker ----
+  _stDruckerHtml() {
+    return this._stKachel("st-drucker", { aktion: "st-zu", ziel: "drucker" }, "🖨️ Drucker", `<div id="st-drucker">${this._stDruckerInhalt()}</div>`);
+  },
+  _stDruckerInhalt() {
+    const zustand = this._drZustand();
+    const [text, farbe] = DR_STATUS[zustand] || ST_ZUSTAND[zustand] || [zustand, "leise"];
+    const druckt = ["running", "pause", "prepare", "slicing"].includes(zustand);
+    const fortschritt = this._drZ("fortschritt") || 0;
+    const restH = this._drZ("rest_h");
+    const ende = this._drW("ende");
+    const bild = druckt && this._drS("titelbild");
+    const bildUrl = bild && bild.attributes && bild.attributes.entity_picture;
+    const name = this._drW("name");
+    const restText = restH == null ? "–" : restH >= 1 ? `${Math.floor(restH)} h ${Math.round((restH % 1) * 60)} min` : `${Math.round(restH * 60)} min`;
+    const endeText = ende && !isNaN(new Date(ende)) ? new Date(ende).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "–";
+    const ring = druckt || zustand === "finish" ? fortschritt : 0;
+    const fehler = this._drW("hms") === "on" || this._drW("fehler") === "on";
+    const titel = druckt || zustand === "finish" || zustand === "failed" ? name || "Druck"
+      : zustand === "aus" ? "Drucker ist aus" : zustand === "offline" ? "Keine Verbindung" : zustand === "startet" ? "Drucker startet" : "Bereit zum Drucken";
+    return `<div class="st-dr">
+      <div class="st-ring">${ringSvg(ring, farbe === "rot" ? "var(--rot)" : farbe === "amber" ? "var(--amber)" : "var(--mint)")}
+        <div class="st-ring-text"><strong>${druckt || zustand === "finish" ? `${zahl(fortschritt)} %` : zustand === "aus" ? "⏻" : "–"}</strong></div></div>
+      <div class="st-dr-text">
+        <span class="pille ${farbe}">${esc(text)}</span>
+        <strong class="st-dr-name" title="${esc(titel)}">${esc(titel)}</strong>
+        ${druckt ? `<div class="st-werte"><div><span>Restzeit</span><strong>${restText}</strong></div><div><span>Fertig um</span><strong>${endeText}</strong></div></div>`
+          : `<small class="leise">${zustand === "aus" ? "Steckdose ist ausgeschaltet." : zustand === "finish" ? "Druck ist fertig." : "Kein Druck läuft."}</small>`}
+        ${fehler ? `<small class="rot">⚠️ Der Drucker meldet einen Fehler.</small>` : ""}
+      </div>
+      ${bildUrl ? `<img class="st-titelbild" src="${esc(bildUrl)}" alt="Titelbild des Drucks">` : ""}
+    </div>`;
+  },
+  // Live: Druckerkachel höchstens alle 2 s neu füllen, wenn die Übersicht offen ist
+  _stHassNeu() {
+    if (this._ansicht !== "start" || !this._daten || this._modus || this._dialog || this._ddOffen || this._stTimer) return;
+    this._stTimer = setTimeout(() => {
+      this._stTimer = null;
+      const el = this.shadowRoot.getElementById("st-drucker");
+      if (el && this._ansicht === "start") el.innerHTML = this._stDruckerInhalt();
+    }, 2000);
+  },
+
+  // ---- Hinweise aus allen Bereichen ----
+  _stWarnungen() {
+    const l = [];
+    const d = this._daten;
+    if (this._drW("hms") === "on" || this._drW("fehler") === "on") l.push({ icon: "⚠️", text: "Der Drucker meldet einen Fehler.", stufe: "rot", aktion: "st-zu", ziel: "drucker" });
+    if (this._drVerlauf) for (const x of this._buOffene()) {
+      l.push(x.status === "failed"
+        ? { icon: "⛔", text: `„${x.name}“ wurde abgebrochen: Fehldruck verbuchen?`, stufe: "rot", aktion: "bu-start", uid: x.uid, ergebnis: "fehl" }
+        : { icon: "✅", text: `„${x.name}“ ist fertig: Verbrauch verbuchen${x.gewicht != null ? ` (${zahl(x.gewicht, 1)} g)` : ""}`, stufe: "amber", aktion: "bu-start", uid: x.uid });
+    }
+    l.push(...stHinweise(this._stVersuch(() => this._druckWarnung?.()), { icon: "🧵", stufe: "rot", aktion: "st-zu", ziel: "drucker" }));
+    const klima = this._stVersuch(() => this._raumklima?.());
+    if (klima) l.push(...stHinweise(klima.warnungen, { icon: "💧", stufe: "amber", aktion: "st-zu", ziel: "drucker" }));
+    for (const r of d.rollen) {
+      if (r.achtung) l.push({ icon: "❗", text: `${r.name}: nach Fehldruck testen`, stufe: "rot", aktion: "oeffnen-filament", id: r.id });
+      if (this._feuchteHinweis) {
+        for (const h of stHinweise(this._stVersuch(() => this._feuchteHinweis(r)), { icon: "♨️", stufe: "", aktion: "oeffnen-filament", id: r.id })) {
+          l.push({ ...h, text: `${r.name}: ${h.text}`, stufe: h.stufe || "leise" });
+        }
+      }
+    }
+    for (const w of this._wsWartung().filter((x) => x.faellig)) l.push({ icon: "🔧", text: `Wartung fällig: ${w.a.name}`, stufe: "amber", aktion: "such-werkstatt", tab: "wartung" });
+    const rang = { rot: 0, amber: 1 };
+    return l.sort((a, b) => (rang[a.stufe] ?? 2) - (rang[b.stufe] ?? 2));
+  },
+  _stWarnHtml(l) {
+    const inhalt = l.length
+      ? `<div class="st-liste">${l.slice(0, 7).map((w) => `<button class="st-warn ${w.stufe || ""}" data-aktion="${w.aktion}" ${["ziel", "uid", "id", "tab", "ergebnis"].filter((k) => w[k]).map((k) => `data-${k}="${esc(w[k])}"`).join(" ")}>
+          <span class="st-warn-icon">${w.icon}</span><span>${esc(w.text)}</span><i>›</i></button>`).join("")}</div>
+        ${l.length > 7 ? `<small class="leise">und ${l.length - 7} weitere</small>` : ""}`
+      : `<div class="st-ruhe"><span>✓</span><small class="leise">Nichts zu tun: alles verbucht, keine Wartung fällig.</small></div>`;
+    return `<section class="st-kachel st-warnungen ${l.some((w) => w.stufe === "rot") ? "rot-rand" : ""}" data-einmal="st-warnungen">
+      <header class="st-kachel-kopf"><h3>🔔 Hinweise</h3>${l.length ? `<span class="zahl-punkt ${l.some((w) => w.stufe === "rot") ? "rot-punkt" : "amber-punkt"}">${l.length}</span>` : ""}</header>${inhalt}</section>`;
+  },
+
+  // ---- Fällige Erinnerungen aus dem Notizbuch ----
+  _stErinnerungHtml() {
+    const l = this._nbFaellig();
+    if (!l.length) return "";
+    const heute = this._nbHeute();
+    return this._stKachel("st-erinnerung", { aktion: "st-zu", ziel: "notiz", nb: "erinnerung" }, "⏰ Erinnerungen", `<div class="st-liste">${l.slice(0, 4).map((e) => `
+      <div class="st-zeile"><button class="nb-haken" data-aktion="st-erledigt" data-id="${esc(e.id)}" aria-label="Erledigt: ${esc(e.text)}"></button>
+        <span class="st-zeile-text"><strong>${esc(e.text)}</strong><small class="${e.faellig < heute ? "rot" : "amber"}">${e.faellig < heute ? `überfällig seit ${this._nbDatum(e.faellig)}` : "heute fällig"}</small></span></div>`).join("")}</div>
+      ${l.length > 4 ? `<small class="leise">und ${l.length - 4} weitere</small>` : ""}`, `<span class="zahl-punkt amber-punkt">${l.length}</span>`);
+  },
+
+  // ---- Geladene Rolle ----
+  _stGeladenHtml() {
+    const r = this._drGeladen();
+    if (!r) return this._stKachel("st-geladen", { aktion: "st-zu", ziel: "drucker" }, "🧵 Geladen", `<div class="st-rolle"><span class="dr-fil-leer">∅</span><span><strong>Kein Filament geladen</strong><small class="leise">Im Drucker-Bereich wählen</small></span></div>`);
+    const p = prozent(r);
+    return this._stKachel("st-geladen", { aktion: "oeffnen-filament", id: r.id }, "🧵 Geladen", `<div class="st-rolle">${spuleSvg(r)}
+      <span><strong>${esc(r.name)}</strong><small class="leise">${esc(r.hersteller)} · ${esc(sorteName(r))}</small>
+        <span class="st-gramm ${r.rest_g == null ? "leise" : p <= 10 ? "rot" : p <= 20 ? "amber" : "mint"}">${r.rest_g == null ? "nicht gewogen" : `${zahl(r.rest_g)} g übrig`}</span></span></div>`);
+  },
+
+  // ---- Warteschlange: die nächsten drei ----
+  _stSchlangeHtml() {
+    const l = this._wsBestand();
+    const text = { ok: ["reicht", "mint"], knapp: ["knapp", "amber"], fehlt: ["reicht nicht", "rot"], ungewogen: ["nicht gewogen", "amber"], unbekannt: ["?", "leise"], ohne: ["keine Rolle", "amber"] };
+    const inhalt = l.length ? `<ol class="st-schlange">${l.slice(0, 3).map((x) => { const [t, f] = text[x.stufe] || ["", "leise"];
+      return `<li><span class="st-nr">${l.indexOf(x) + 1}</span><span class="st-zeile-text"><strong>${esc(x.a.name)}</strong><small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${x.r ? ` · ${esc(x.r.name)}` : ""}</small></span><span class="pille ${f}">${t}</span></li>`; }).join("")}</ol>
+      ${l.length > 3 ? `<small class="leise">und ${l.length - 3} weitere</small>` : ""}`
+      : `<p class="leise klein">Nichts geplant. Aufträge kommen aus dem 3D-Viewer oder der Bibliothek.</p>`;
+    return this._stKachel("st-schlange-k", { aktion: "st-zu", ziel: "werkstatt", tab: "schlange" }, "📋 Warteschlange", inhalt, l.length ? `<span class="zahl-punkt">${l.length}</span>` : "");
+  },
+
+  // ---- Wenig Filament ----
+  _stWenigHtml() {
+    const l = this._daten.rollen.filter((r) => r.rest_g != null && r.rest_g < FAST_LEER_G).sort((a, b) => a.rest_g - b.rest_g);
+    const inhalt = l.length ? `<div class="st-rollen">${l.slice(0, 4).map((r) => `<button class="st-rollen-zeile" data-aktion="oeffnen-filament" data-id="${esc(r.id)}">
+        <span class="farbtupfer" style="background:${r.hex === "transparent" ? "transparent" : esc(r.hex)}"></span><span class="st-zeile-text"><strong>${esc(r.name)}</strong><small class="leise">${esc(r.hersteller)}</small></span>
+        <span class="${r.rest_g < FAST_LEER_G / 3 ? "rot" : "amber"} st-g">${zahl(r.rest_g)} g</span></button>`).join("")}</div>
+      ${l.length > 4 ? `<small class="leise">und ${l.length - 4} weitere</small>` : ""}`
+      : `<p class="leise klein">Alle gewogenen Rollen haben mehr als ${FAST_LEER_G} g.</p>`;
+    return this._stKachel("st-wenig", { aktion: "st-zu", ziel: "filament", status: "leer" }, "🪫 Fast leer", inhalt, l.length ? `<span class="zahl-punkt amber-punkt">${l.length}</span>` : "");
+  },
+
+  // ---- Letzte Drucke mit Foto ----
+  _stLetzteHtml() {
+    if (!this._drVerlauf) return this._stKachel("st-letzte", { aktion: "st-zu", ziel: "werkstatt", tab: "bibliothek" }, "📸 Letzte Drucke", `<p class="leise klein">Lade Druckverlauf …</p>`);
+    const l = this._buAlle().filter((d) => d.status !== "laeuft").slice(0, 3);
+    if (this._drFotos === undefined) setTimeout(() => this._drFotosLaden(), 0);
+    const inhalt = l.length ? `<div class="st-fotos">${l.map((d) => {
+      const f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+      const g = this._buExtra(d.uid).gebucht;
+      const fehl = (g && g.ergebnis === "fehl") || d.status === "failed";
+      return `<button class="st-foto" data-aktion="zum-druck" data-uid="${esc(d.uid)}" title="${esc(d.name)}">
+        <span class="st-foto-bild" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="" loading="lazy">` : "🧊"}</span>
+        <strong>${esc(d.name)}</strong><small class="${fehl ? "rot" : "leise"}">${fehl ? "Fehldruck · " : ""}${esc((d.zeit || "").split(" ")[0])}</small></button>`; }).join("")}</div>`
+      : `<p class="leise klein">Noch keine Drucke aufgezeichnet.</p>`;
+    return this._stKachel("st-letzte", { aktion: "st-zu", ziel: "werkstatt", tab: "bibliothek" }, "📸 Letzte Drucke", inhalt);
+  },
+
+  // ---- Raumklima (nur wenn ein Bereich es liefert) ----
+  _stKlimaHtml() {
+    const k = this._stVersuch(() => this._raumklima?.());
+    if (!k || (k.temp == null && k.feuchte == null)) return "";
+    const w = stHinweise(k.warnungen, { stufe: "amber" });
+    const feuchtFarbe = k.feuchte == null ? "" : k.feuchte > 60 ? "rot" : k.feuchte > 45 ? "amber" : "mint";
+    return this._stKachel("st-klima", { aktion: "st-zu", ziel: "drucker" }, "🌡️ Raumklima", `<div class="st-werte st-gross">
+      <div><span>Temperatur</span><strong>${k.temp == null ? "–" : `${zahl(Number(k.temp), 1)} °C`}</strong></div>
+      <div><span>Luftfeuchte</span><strong class="${feuchtFarbe}">${k.feuchte == null ? "–" : `${zahl(Number(k.feuchte))} %`}</strong></div></div>
+      ${w.length ? `<small class="amber">${esc(w[0].text)}</small>` : `<small class="leise">Gut für offenes Filament.</small>`}`);
+  },
+
+  // ---- Einkaufsliste ----
+  _stEinkaufHtml() {
+    const l = this._wsEinkauf();
+    const dringend = l.filter((x) => x.dringend).length;
+    return this._stKachel("st-einkauf", { aktion: "st-zu", ziel: "werkstatt", tab: "einkauf" }, "🛒 Einkaufsliste", `<div class="st-zahl"><strong class="${dringend ? "rot" : l.length ? "amber" : "mint"}">${l.length}</strong>
+      <span class="leise">${l.length ? `${l.length === 1 ? "Eintrag" : "Einträge"}${dringend ? `, ${dringend} dringend` : ""}` : "Nichts nachzukaufen"}</span></div>
+      ${l.length ? `<small class="leise st-kurz">${esc(l.slice(0, 3).map((x) => x.titel).join(" · "))}</small>` : ""}`);
+  },
+
+  // ---- Wartung ----
+  _stWartungHtml() {
+    const l = this._wsWartung();
+    const faellig = l.filter((x) => x.faellig);
+    const naechste = l.find((x) => !x.neu && !x.faellig);
+    return this._stKachel("st-wartung", { aktion: "st-zu", ziel: "werkstatt", tab: "wartung" }, "🔧 Wartung", `<div class="st-zahl"><strong class="${faellig.length ? "amber" : "mint"}">${faellig.length || "✓"}</strong>
+      <span class="leise">${faellig.length ? `${faellig.length === 1 ? "Aufgabe" : "Aufgaben"} fällig` : "Nichts fällig"}</span></div>
+      <small class="leise st-kurz">${faellig.length ? esc(faellig.map((x) => x.a.name).join(" · ")) : naechste ? `Als Nächstes: ${esc(naechste.a.name)} (${zahl(Math.min(100, naechste.anteil * 100))} %)` : "Wartung erfassen: Werkstatt › Wartung"}</small>`);
+  },
+
+  // ---- Offene Shop-Aufträge (wenn der Shop sie führt) ----
+  _stShopHtml() {
+    const a = this._daten.shop && this._daten.shop.auftraege;
+    if (!Array.isArray(a)) return "";
+    const fertig = (x) => x && (x.erledigt || x.bezahlt && x.versendet || ["erledigt", "fertig", "versendet", "abgeschlossen", "storniert"].includes(x.status));
+    const offen = a.filter((x) => !fertig(x));
+    return this._stKachel("st-shop", { aktion: "st-zu", ziel: "shop" }, "🛍️ Aufträge", `<div class="st-zahl"><strong class="${offen.length ? "amber" : "mint"}">${offen.length}</strong><span class="leise">${offen.length === 1 ? "offener Auftrag" : "offene Aufträge"}</span></div>
+      ${offen.length ? `<small class="leise st-kurz">${esc(offen.slice(0, 3).map((x) => x.name || x.titel || x.kunde || "Auftrag").join(" · "))}</small>` : ""}`);
+  },
+
+  // ---- Ereignisse ----
+  _stKlick(a, el) {
+    switch (a) {
+      case "st-zu": {
+        if (!this._schliessen()) return;
+        const ziel = el.dataset.ziel;
+        this._ansicht = ziel;
+        this._sucheOffen = false; this._mehrOffen = false; this._filterAuf = false;
+        if (ziel === "werkstatt") {
+          this._wsZustand().tab = el.dataset.tab || "schlange";
+          if (["bibliothek", "fehl"].includes(this._ws.tab)) this._wsFotos();
+        }
+        if (ziel === "filament" && el.dataset.status) { this._f = { sorte: "", hersteller: "", farbe: "", status: el.dataset.status }; this._suche = ""; }
+        if (ziel === "notiz") { const n = this._nbZustand(); n.quelle = el.dataset.nb || "alle"; n.edit = null; }
+        // Neue Ansicht oben beginnen, nicht an der Scrollstelle der Übersicht
+        this._zeichnen();
+        { const h = this.shadowRoot.querySelector(".haupt"); if (h) h.scrollTop = 0; }
+        return;
+      }
+      case "st-erledigt": {
+        const e = (this._daten.erinnerungen || []).find((x) => x.id === el.dataset.id);
+        if (!e) return;
+        e.erledigt = true; e.erledigt_am = new Date().toISOString();
+        this._speichern();
+        this._toast(`Erledigt: ${e.text}`);
+        return;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
 };
 
 // ============================================================================
@@ -7272,9 +7696,354 @@ const ShopAnsicht = {
 // ============================================================================
 // Notizbuch: alle Notizen an einem Ort (Rollen, Fehldrucke, Drucke) plus eigene Einträge und Erinnerungen
 // ============================================================================
+// Gesammelte Notizen bleiben an ihrem Ursprung gespeichert, Bearbeiten hier ändert das Original:
+//   Filament   rolle.notiz
+//   Drucke     daten.drucke[uid].kommentar (Fehldruck: zusätzlich die Antworten aus daten.drucke[uid].fehl)
+//   Wartung    daten.wartung.notizen[aufgabeId]
+// Eigene Einträge:  daten.notizen     = [{ id, titel, text, tags: [], link: { art: "rolle"|"druck"|"modell", id }, am, geaendert }]
+// Erinnerungen:     daten.erinnerungen = [{ id, text, faellig: "JJJJ-MM-TT", erledigt, erledigt_am, link, am }]
+const NB_QUELLEN = [
+  { id: "alle", name: "Alle", icon: "📓" },
+  { id: "eigen", name: "Eigene", icon: "✍️" },
+  { id: "filament", name: "Filament", icon: "🧵" },
+  { id: "fehl", name: "Fehldrucke", icon: "💥" },
+  { id: "druck", name: "Drucke", icon: "🖨️" },
+  { id: "wartung", name: "Wartung", icon: "🔧" },
+  { id: "erinnerung", name: "Erinnerungen", icon: "⏰" },
+];
+
 const NotizAnsicht = {
-  _nbHtml() { return `<div class="karte"><h2>Notizbuch</h2><p class="leise">Kommt gleich.</p></div>`; },
-  _nbKlick(a, el) { this._zeichnen(); },
+  _nbZustand() {
+    if (!this._nb) this._nb = { quelle: "alle", suche: "", edit: null };
+    return this._nb;
+  },
+  // Datum als JJJJ-MM-TT in Ortszeit
+  _nbHeute(plusTage = 0) {
+    const d = new Date(Date.now() + plusTage * 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  },
+  _nbDatum(tag) {
+    if (!tag) return "";
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(tag) ? new Date(`${tag}T12:00:00`) : new Date(tag);
+    return isNaN(d) ? "" : d.toLocaleDateString("de-DE", { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+  },
+  // Offene Erinnerungen, die heute oder früher fällig sind (für die Startseite)
+  _nbFaellig() {
+    const heute = this._nbHeute();
+    return (this._daten.erinnerungen || []).filter((e) => !e.erledigt && e.faellig && e.faellig <= heute).sort((a, b) => a.faellig.localeCompare(b.faellig));
+  },
+
+  // Ziel einer Verknüpfung als Knopf-Attribute
+  _nbLinkZiel(l) {
+    if (!l || !l.art) return null;
+    if (l.art === "rolle") {
+      const r = this._daten.rollen.find((x) => x.id === l.id);
+      return r ? { attr: `data-aktion="oeffnen-filament" data-id="${esc(r.id)}"`, text: r.name, icon: "🧵" } : null;
+    }
+    if (l.art === "druck") {
+      const d = this._buAlle().find((x) => x.uid === l.id);
+      const x = this._buExtra(l.id);
+      const name = (d && d.name) || x.name || (x.hand && x.hand.name);
+      return name || this._drVerlauf ? { attr: `data-aktion="zum-druck" data-uid="${esc(l.id)}"`, text: name || "Druck", icon: "🖨️" } : null;
+    }
+    if (l.art === "modell") return { attr: `data-aktion="nb-modell" data-id="${esc(l.id)}"`, text: l.id, icon: "🧊" };
+    if (l.art === "wartung") return { attr: `data-aktion="such-werkstatt" data-tab="wartung"`, text: "Wartung", icon: "🔧" };
+    return null;
+  },
+
+  // Alle Notizen aus allen Quellen in einer Form
+  _nbAlle() {
+    const d = this._daten, l = [];
+    for (const n of d.notizen || []) {
+      l.push({ key: `eigen:${n.id}`, quelle: "eigen", titel: n.titel || "Ohne Titel", text: n.text || "", tags: n.tags || [], link: n.link, am: n.geaendert || n.am, loeschbar: true });
+    }
+    for (const e of d.erinnerungen || []) {
+      l.push({ key: `erinnerung:${e.id}`, quelle: "erinnerung", titel: e.text, text: "", tags: [], link: e.link, am: e.am, erinnerung: e, loeschbar: true });
+    }
+    for (const r of d.rollen) {
+      if (!(r.notiz || "").trim()) continue;
+      l.push({ key: `rolle:${r.id}`, quelle: "filament", titel: r.name, unter: `${r.hersteller} · ${sorteName(r)}`, text: r.notiz, tags: [], link: { art: "rolle", id: r.id }, am: r.gewogen_am || r.angelegt_am, hex: r.hex });
+    }
+    const verlauf = new Map(this._buAlle().map((x) => [x.uid, x]));
+    for (const [uid, x] of Object.entries(d.drucke || {})) {
+      const fehl = !!x.fehl || (x.gebucht && x.gebucht.ergebnis === "fehl");
+      if (!(x.kommentar || "").trim() && !x.fehl) continue;
+      const v = verlauf.get(uid);
+      const name = (v && v.name) || x.name || (x.hand && x.hand.name) || "Druck";
+      const rolle = x.gebucht && d.rollen.find((r) => r.id === x.gebucht.rolle);
+      l.push({ key: `druck:${uid}`, quelle: fehl ? "fehl" : "druck", titel: name, unter: [v && v.zeit, rolle && rolle.name].filter(Boolean).join(" · "),
+        text: x.kommentar || "", tags: [], link: { art: "druck", id: uid }, am: (v && v.start) || (x.gebucht && x.gebucht.am) || x.start, fehl: x.fehl });
+    }
+    const wn = (d.wartung && d.wartung.notizen) || {};
+    for (const a of WARTUNG_AUFGABEN) {
+      l.push({ key: `wartung:${a.id}`, quelle: "wartung", titel: a.name, unter: `alle ${a.alle_h} h oder ${a.alle_tage} Tage`, text: wn[a.id] || "", tags: [], link: { art: "wartung" },
+        am: (((d.wartung && d.wartung.aufgaben) || {})[a.id] || {}).am, leerErlaubt: true });
+    }
+    return l;
+  },
+  _nbGefiltert() {
+    const z = this._nbZustand();
+    let l = this._nbAlle();
+    // Leere Wartungsnotizen nur im Wartungs-Filter (zum Anlegen), sonst stören sie
+    if (z.quelle !== "wartung") l = l.filter((x) => !x.leerErlaubt || x.text.trim());
+    if (z.quelle !== "alle") l = l.filter((x) => x.quelle === z.quelle);
+    const q = z.suche.trim().replace(/^#/, "");
+    if (q) l = l.filter((x) => suchPunkte(q, `${x.titel} ${x.unter || ""} ${x.text} ${x.tags.join(" ")} ${this._nbFehlText(x.fehl)}`) > 0);
+    // Offene Erinnerungen zuerst (nach Fälligkeit), dann Neuestes, erledigte am Ende
+    const rang = (x) => (x.erinnerung ? (x.erinnerung.erledigt ? 2 : 0) : 1);
+    return l.sort((a, b) => rang(a) - rang(b)
+      || (rang(a) === 0 ? (a.erinnerung.faellig || "9").localeCompare(b.erinnerung.faellig || "9") : 0)
+      || String(b.am || "").localeCompare(String(a.am || "")));
+  },
+  _nbFehlText(f) {
+    if (!f) return "";
+    return [(FEHL_FRAGEN.wann.find((w) => w.id === f.wann) || {}).name, ...(f.ursachen || []).map((id) => (fehlerbild(id) || {}).name)].filter(Boolean).join(" ");
+  },
+  _nbZaehlen() {
+    const l = this._nbAlle().filter((x) => !x.leerErlaubt || x.text.trim());
+    const z = { alle: l.length };
+    for (const x of l) z[x.quelle] = (z[x.quelle] || 0) + 1;
+    z.erinnerung = (this._daten.erinnerungen || []).filter((e) => !e.erledigt).length;
+    return z;
+  },
+
+  _nbHtml() {
+    const z = this._nbZustand();
+    const n = this._nbZaehlen();
+    const faellig = this._nbFaellig().length;
+    return `<div class="nb-seite">
+      <div class="nb-kopf">
+        <div><h2>📓 Notizbuch</h2><p class="leise">Alle Notizen an einem Ort. Änderungen landen dort, wo die Notiz herkommt.</p></div>
+        <div class="nb-knoepfe"><button class="knopf leise" data-aktion="nb-neu" data-art="erinnerung">⏰ Erinnerung</button><button class="knopf" data-aktion="nb-neu" data-art="eigen">＋ Notiz</button></div>
+      </div>
+      <div class="nb-werkzeug">
+        <div class="chips nb-chips" role="tablist">${NB_QUELLEN.map((q) => `<button class="chip ${z.quelle === q.id ? "an" : ""}" data-aktion="nb-quelle" data-id="${q.id}" role="tab" aria-selected="${z.quelle === q.id}">${q.icon} ${q.name}${n[q.id] ? ` <span class="zahl-punkt ${q.id === "erinnerung" && faellig ? "amber-punkt" : ""}">${q.id === "erinnerung" && faellig ? faellig : n[q.id]}</span>` : ""}</button>`).join("")}</div>
+        <input class="such-feld" data-nb="suche" type="search" value="${esc(z.suche)}" placeholder="Notizen durchsuchen …" aria-label="Notizen durchsuchen" autocomplete="off">
+      </div>
+      <div id="nb-liste" class="nb-liste wechsel-rein" data-einmal="nb-${z.quelle}">${this._nbListeHtml()}</div></div>`;
+  },
+  _nbListeHtml() {
+    const z = this._nbZustand();
+    const l = this._nbGefiltert();
+    const neu = z.edit && z.edit.key.endsWith(":neu") ? this._nbEditorHtml(z.edit) : "";
+    if (!l.length && !neu) {
+      const q = NB_QUELLEN.find((x) => x.id === z.quelle);
+      return `<div class="leer-karte dr-karte nb-leer"><span class="gross-icon">${z.suche ? "🔍" : q.icon}</span><strong>${z.suche ? `Nichts gefunden für „${esc(z.suche)}“` : "Hier ist noch nichts"}</strong>
+        <span class="leise">${z.suche ? "Andere Wörter oder einen anderen Filter probieren." : z.quelle === "erinnerung" ? "Erinnerungen an dich selbst, z. B. „Düse prüfen“, erscheinen am Fälligkeitstag auf der Startseite." : "Notizen zu Rollen, Drucken und Wartung tauchen hier automatisch auf."}</span></div>`;
+    }
+    return neu + l.map((x) => (z.edit && z.edit.key === x.key ? this._nbEditorHtml(z.edit) : this._nbKarteHtml(x))).join("");
+  },
+
+  _nbKarteHtml(x) {
+    const q = NB_QUELLEN.find((y) => y.id === x.quelle);
+    const ziel = this._nbLinkZiel(x.link);
+    const k = esc(x.key);
+    if (x.erinnerung) {
+      const e = x.erinnerung, heute = this._nbHeute();
+      const stand = e.erledigt ? ["erledigt", "leise"] : !e.faellig ? ["ohne Datum", "leise"] : e.faellig < heute ? [`überfällig seit ${this._nbDatum(e.faellig)}`, "rot"] : e.faellig === heute ? ["heute", "amber"] : [`fällig ${this._nbDatum(e.faellig)}`, "mint"];
+      return `<article class="nb-karte nb-erinnerung ${e.erledigt ? "erledigt" : ""} ${stand[1]}-rand" data-einmal="nb-${k}">
+        <button class="nb-haken ${e.erledigt ? "an" : ""}" data-aktion="nb-erledigt" data-key="${k}" aria-label="${e.erledigt ? "Wieder öffnen" : "Erledigt"}">${e.erledigt ? "✓" : ""}</button>
+        <div class="nb-inhalt"><strong class="nb-titel">${esc(e.text)}</strong>
+          <div class="nb-meta"><span class="pille ${stand[1]}">⏰ ${esc(stand[0])}</span>${ziel ? `<button class="chip nb-link" ${ziel.attr}>${ziel.icon} ${esc(ziel.text)} ›</button>` : ""}</div></div>
+        <div class="nb-aktionen"><button class="rund" data-aktion="nb-bearbeiten" data-key="${k}" aria-label="Bearbeiten">✎</button><button class="rund" data-aktion="nb-loeschen" data-key="${k}" aria-label="Löschen">🗑</button></div>
+      </article>`;
+    }
+    const f = x.fehl;
+    const antworten = f ? [
+      f.wann && ["Wann", (FEHL_FRAGEN.wann.find((w) => w.id === f.wann) || {}).name],
+      f.bilder && f.bilder.length && ["Aussehen", f.bilder.map((id) => (fehlerbild(id) || {}).name).filter(Boolean).join(", ")],
+      ...FEHL_FRAGEN.extra.filter((q2) => f.extra && f.extra[q2.id]).map((q2) => [q2.frage, f.extra[q2.id] === "?" ? "weiß nicht" : f.extra[q2.id]]),
+      f.ursachen && f.ursachen.length && ["Ursachen", f.ursachen.map((id) => (fehlerbild(id) || {}).name).filter(Boolean).join(", ")],
+      f.geaendert && f.geaendert.length && ["Geändert", f.geaendert.join(", ")],
+    ].filter((y) => y && y[1]) : [];
+    return `<article class="nb-karte q-${x.quelle}" data-einmal="nb-${k}">
+      <header class="nb-karte-kopf"><span class="nb-quelle">${x.hex ? `<span class="farbtupfer klein-tupfer" style="background:${x.hex === "transparent" ? "transparent" : esc(x.hex)}"></span>` : q.icon} ${q.name}</span>
+        ${x.am ? `<small class="leise">${esc(this._nbDatum(x.am))}</small>` : ""}</header>
+      <strong class="nb-titel">${esc(x.titel)}</strong>${x.unter ? `<small class="leise nb-unter">${esc(x.unter)}</small>` : ""}
+      ${x.text.trim() ? `<p class="nb-text">${esc(x.text)}</p>` : x.leerErlaubt || x.fehl ? `<p class="nb-text leise">${x.fehl ? "Noch kein Kommentar." : "Noch keine Notiz."}</p>` : ""}
+      ${antworten.length ? `<dl class="nb-antworten">${antworten.map(([a, b]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}</dd></div>`).join("")}</dl>` : ""}
+      ${x.tags.length ? `<div class="nb-tags">${x.tags.map((t) => `<button class="nb-tag" data-aktion="nb-tag" data-id="${esc(t)}">#${esc(t)}</button>`).join("")}</div>` : ""}
+      <footer class="nb-fuss">${ziel ? `<button class="chip nb-link" ${ziel.attr}>${ziel.icon} ${esc(ziel.text)} ›</button>` : "<span></span>"}
+        <span class="nb-aktionen"><button class="rund" data-aktion="nb-bearbeiten" data-key="${k}" aria-label="Bearbeiten">✎</button>${x.loeschbar ? `<button class="rund" data-aktion="nb-loeschen" data-key="${k}" aria-label="Löschen">🗑</button>` : ""}</span></footer>
+    </article>`;
+  },
+
+  // ---- Bearbeiten (direkt in der Liste) ----
+  _nbEditorHtml(e) {
+    const art = e.key.split(":")[0];
+    const eigen = art === "eigen", erinnerung = art === "erinnerung";
+    const titel = { eigen: e.key.endsWith(":neu") ? "Neue Notiz" : "Notiz bearbeiten", erinnerung: e.key.endsWith(":neu") ? "Neue Erinnerung" : "Erinnerung bearbeiten",
+      rolle: `Notiz zu ${e.titel}`, druck: `Kommentar zu ${e.titel}`, wartung: `Wartungsnotiz: ${e.titel}` }[art];
+    let vorschlaege = "";
+    if (erinnerung && e.key.endsWith(":neu")) {
+      // Wartungsaufgaben als Vorschlag, mit dem Tag, an dem sie fällig werden
+      const auf = (this._daten.wartung && this._daten.wartung.aufgaben) || {};
+      const l = this._wsWartung().slice(0, 3).map((w) => {
+        const z = auf[w.a.id];
+        const tag = z && z.am ? new Date(new Date(z.am).getTime() + w.a.alle_tage * 86400000) : null;
+        const iso = !tag || w.faellig ? this._nbHeute() : `${tag.getFullYear()}-${String(tag.getMonth() + 1).padStart(2, "0")}-${String(tag.getDate()).padStart(2, "0")}`;
+        return `<button class="chip" data-aktion="nb-vorschlag" data-id="${esc(w.a.name)}" data-tag="${iso}">🔧 ${esc(w.a.name)}</button>`;
+      });
+      vorschlaege = `<div class="nb-vorschlaege"><small class="leise">Vorschläge aus der Wartung</small><div class="chips">${l.join("")}</div></div>`;
+    }
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const drucke = this._buAlle().slice(0, 40);
+    const modelle = this._drVerlauf ? this._wsModelle().slice(0, 40) : [];
+    const lw = e.link && e.link.art ? `${e.link.art}:${e.link.id || ""}` : "";
+    const opt = (v, t) => `<option value="${esc(v)}" ${v === lw ? "selected" : ""}>${esc(t)}</option>`;
+    const linkWahl = eigen || erinnerung ? `<label class="auswahl breit-auswahl nb-linkwahl"><span>Verknüpfen mit</span><select data-nb="link">
+        <option value="" ${lw ? "" : "selected"}>Nichts verknüpft</option>
+        <optgroup label="Rollen">${rollen.map((r) => opt(`rolle:${r.id}`, `${r.name} · ${r.hersteller}`)).join("")}</optgroup>
+        ${modelle.length ? `<optgroup label="Modelle">${modelle.map((m) => opt(`modell:${m.name}`, m.name)).join("")}</optgroup>` : ""}
+        ${drucke.length ? `<optgroup label="Drucke">${drucke.map((d) => opt(`druck:${d.uid}`, `${d.name}${d.zeit ? ` · ${d.zeit}` : ""}`)).join("")}</optgroup>` : ""}
+        ${erinnerung ? `<optgroup label="Werkstatt">${opt("wartung:", "Wartungsplan")}</optgroup>` : ""}
+      </select></label>` : "";
+    return `<article class="nb-karte nb-edit" data-einmal="nb-edit-${esc(e.key)}">
+      <strong class="nb-titel">${esc(titel)}</strong>
+      ${eigen ? `<input class="text" data-nb="titel" value="${esc(e.titel)}" placeholder="Titel" maxlength="120">` : ""}
+      ${erinnerung ? `<input class="text" data-nb="titel" value="${esc(e.titel)}" placeholder="Woran soll ich dich erinnern?" maxlength="160">${vorschlaege}
+        <label class="feld nb-datum"><span>Fällig am</span><input type="date" data-nb="faellig" value="${esc(e.faellig || "")}"></label>
+        <div class="chips nb-schnell">${[["Heute", 0], ["Morgen", 1], ["In 1 Woche", 7], ["In 1 Monat", 30]].map(([t, n]) => `<button class="chip ${e.faellig === this._nbHeute(n) ? "an" : ""}" data-aktion="nb-tag-in" data-id="${n}">${t}</button>`).join("")}</div>`
+        : `<textarea data-nb="text" rows="${eigen ? 6 : 5}" maxlength="4000" placeholder="${eigen ? "Was willst du festhalten?" : "Notiz …"}">${esc(e.text)}</textarea>`}
+      ${eigen ? `<input class="text" data-nb="tags" value="${esc(e.tags)}" placeholder="Schlagworte, mit Komma getrennt (z. B. petg, tipp)">` : ""}
+      ${linkWahl}
+      ${art === "druck" && e.fehl ? `<small class="leise">Die Antworten aus dem Fehldruck-Fragebogen bleiben erhalten.</small>` : ""}
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="nb-abbrechen">Abbrechen</button><button class="knopf" data-aktion="nb-speichern">Speichern</button></div>
+    </article>`;
+  },
+
+  _nbBearbeiten(key) {
+    const x = this._nbAlle().find((y) => y.key === key);
+    if (!x) return;
+    const e = x.erinnerung;
+    this._nbZustand().edit = { key, titel: x.titel, text: x.text, tags: x.tags.join(", "), link: x.link || null, faellig: e ? e.faellig || "" : "", fehl: !!x.fehl };
+  },
+
+  _nbSpeichern() {
+    const z = this._nbZustand(), e = z.edit;
+    if (!e) return;
+    const [art, ...rest] = e.key.split(":");
+    const id = rest.join(":");
+    const d = this._daten, jetzt = new Date().toISOString();
+    const text = (e.text || "").trim();
+    if (art === "eigen") {
+      const tags = [...new Set((e.tags || "").split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean))];
+      const titel = (e.titel || "").trim();
+      if (!titel && !text) { this._toast("Bitte einen Titel oder Text eingeben."); return; }
+      d.notizen = d.notizen || [];
+      if (id === "neu") d.notizen.unshift({ id: `n-${Date.now().toString(36)}`, titel, text, tags, link: e.link || null, am: jetzt, geaendert: jetzt });
+      else { const n = d.notizen.find((x) => x.id === id); if (n) Object.assign(n, { titel, text, tags, link: e.link || null, geaendert: jetzt }); }
+    } else if (art === "erinnerung") {
+      const titel = (e.titel || "").trim();
+      if (!titel) { this._toast("Woran soll ich dich erinnern?"); return; }
+      d.erinnerungen = d.erinnerungen || [];
+      if (id === "neu") d.erinnerungen.push({ id: `e-${Date.now().toString(36)}`, text: titel, faellig: e.faellig || "", erledigt: false, link: e.link || null, am: jetzt });
+      else { const n = d.erinnerungen.find((x) => x.id === id); if (n) Object.assign(n, { text: titel, faellig: e.faellig || "", link: e.link || null }); }
+    } else if (art === "rolle") {
+      const r = d.rollen.find((x) => x.id === id);
+      if (r) r.notiz = text;
+    } else if (art === "druck") {
+      d.drucke = d.drucke || {};
+      d.drucke[id] = { ...(d.drucke[id] || {}), kommentar: text };
+    } else if (art === "wartung") {
+      const n = { ...((d.wartung && d.wartung.notizen) || {}) };
+      if (text) n[id] = text; else delete n[id];
+      d.wartung = { ...d.wartung, notizen: n };
+    }
+    z.edit = null;
+    this._speichern();
+    this._toast(art === "erinnerung" ? "Erinnerung gespeichert." : art === "eigen" ? "Notiz gespeichert." : "Gespeichert, auch beim Original.");
+  },
+
+  _nbListeNeu() {
+    const box = this.shadowRoot.getElementById("nb-liste");
+    if (box) box.innerHTML = this._nbListeHtml();
+  },
+  _nbFokus() {
+    setTimeout(() => {
+      const i = this.shadowRoot.querySelector('.nb-edit [data-nb="titel"], .nb-edit [data-nb="text"]');
+      if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* Datumsfeld */ } }
+    }, 0);
+  },
+
+  _nbKlick(a, el) {
+    const z = this._nbZustand();
+    switch (a) {
+      case "nb-quelle": z.quelle = el.dataset.id; break;
+      case "nb-neu": {
+        const art = el.dataset.art;
+        if (this._ansicht !== "notiz") { if (!this._schliessen()) return; this._ansicht = "notiz"; }
+        z.edit = { key: `${art}:neu`, titel: "", text: "", tags: "", link: null, faellig: art === "erinnerung" ? this._nbHeute(1) : "" };
+        if (z.quelle !== "alle" && z.quelle !== art) z.quelle = art;
+        z.suche = "";
+        this._zeichnen(); this._nbFokus();
+        return;
+      }
+      case "nb-bearbeiten": this._nbBearbeiten(el.dataset.key); this._zeichnen(); this._nbFokus(); return;
+      case "nb-abbrechen": z.edit = null; break;
+      case "nb-speichern": this._nbSpeichern(); return;
+      case "nb-loeschen": {
+        const [art, id] = el.dataset.key.split(":");
+        const liste = art === "eigen" ? this._daten.notizen : this._daten.erinnerungen;
+        const i = (liste || []).findIndex((x) => x.id === id);
+        if (i < 0) return;
+        if (!confirm(art === "eigen" ? "Diese Notiz löschen?" : "Diese Erinnerung löschen?")) return;
+        liste.splice(i, 1);
+        this._speichern();
+        this._toast("Gelöscht.");
+        return;
+      }
+      case "nb-erledigt": {
+        const id = el.dataset.key.split(":")[1];
+        const e = (this._daten.erinnerungen || []).find((x) => x.id === id);
+        if (!e) return;
+        e.erledigt = !e.erledigt;
+        if (e.erledigt) e.erledigt_am = new Date().toISOString(); else delete e.erledigt_am;
+        this._speichern();
+        break;
+      }
+      case "nb-tag": z.suche = el.dataset.id; break;
+      case "nb-tag-in": if (z.edit) z.edit.faellig = this._nbHeute(Number(el.dataset.id)); break;
+      case "nb-vorschlag": if (z.edit) { z.edit.titel = el.dataset.id; z.edit.faellig = el.dataset.tag; z.edit.link = { art: "wartung" }; } break;
+      case "nb-modell": {
+        if (!this._schliessen()) return;
+        this._ansicht = "werkstatt";
+        const w = this._wsZustand();
+        w.tab = "bibliothek"; w.suche = el.dataset.id;
+        this._wsFotos();
+        break;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+
+  // Tippen: nur den Entwurf merken bzw. die Liste filtern, nicht alles neu zeichnen
+  _nbEingabe(t) {
+    const k = t.dataset && t.dataset.nb;
+    if (!k) return false;
+    const z = this._nbZustand();
+    if (k === "suche") {
+      z.suche = t.value;
+      clearTimeout(this._nbSuchTimer);
+      this._nbSuchTimer = setTimeout(() => this._nbListeNeu(), 80);
+    } else if (z.edit && ["titel", "text", "tags", "faellig"].includes(k)) {
+      z.edit[k] = t.value;
+      if (k === "faellig") this.shadowRoot.querySelectorAll('[data-aktion="nb-tag-in"]').forEach((c) => c.classList.toggle("an", this._nbHeute(Number(c.dataset.id)) === t.value));
+    }
+    return true;
+  },
+  _nbAenderung(t) {
+    const k = t.dataset && t.dataset.nb;
+    if (!k) return false;
+    const z = this._nbZustand();
+    if (k === "link" && z.edit) {
+      const v = t.value, i = v.indexOf(":");
+      z.edit.link = v ? { art: v.slice(0, i), id: v.slice(i + 1) } : null;
+      this._zeichnen();
+    }
+    return true;
+  },
 };
 // ---------------------------------------------------------------------------
 // Die Seite selbst: ein Web-Component, das Home Assistant als Panel lädt.
@@ -7409,7 +8178,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const erstes = !this._hass;
     this._hass = hass;
     if (erstes) this._laden();
-    else { this._drHassNeu(); this._buHassNeu(); }
+    else { this._drHassNeu(); this._buHassNeu(); this._stHassNeu(); }
   }
   set narrow(n) {
     if (this._narrow !== !!n) { this._narrow = !!n; this._zeichnen(); }
@@ -7967,6 +8736,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._buEingabe(t)) return;
     if (this._drEingabe(t)) return;
     if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (this._nbEingabe(t)) return;
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
       clearTimeout(this._suchTimer);
@@ -8003,6 +8773,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._buAenderung(t)) return;
     if (this._drAenderung(t)) return;
     if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
+    if (this._nbAenderung(t)) return;
     if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
