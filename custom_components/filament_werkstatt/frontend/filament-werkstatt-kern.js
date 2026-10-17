@@ -3956,7 +3956,7 @@ const DruckerAnsicht = {
   // Statuskarte oben (Ring, Name, Zeitleiste) bzw. „Drucker ist aus“, darunter die Steuerung
   _drKopfHtml(zustand, z) {
     let html = "";
-    const warnung = this._druckWarnung();
+    const warnung = (() => { try { return this._druckWarnung(); } catch (e) { console.warn("Filament-Werkstatt:", e); return null; } })();
     if (warnung) html += `<div class="hinweis rot-hinweis dr-druck-warnung" role="alert"><strong>⚠️ Filament reicht nicht</strong><span>${esc(warnung.text)}</span></div>`;
 
     if (zustand === "aus" || zustand === "startet" || zustand === "offline") {
