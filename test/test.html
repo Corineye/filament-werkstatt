@@ -101,6 +101,86 @@ window.hass = { states, callService: async (domain, dienst, data) => {
   throw new Error("unbekannt " + m.type);
 }};
 window.speicher = speicher;
+// ---- Drucker v0.12 (Steuerung, Raumklima, Stromdiagramme) ------------------------------------
+// Knöpfe/Auswahl/Licht wie ha-bambulab, Raumsensoren, Leistungs-Verlauf und Energie-Statistik der Steckdose.
+// ?raum=kalt|feucht stellt das Raumklima für Screenshots um.
+(() => {
+  const B = "p1s_01p00c572701906_";
+  const raum = new URLSearchParams(location.search).get("raum");
+  setze("button." + B + "druck_pausieren", G + "Druck pausieren", druckt ? "unknown" : "unavailable");
+  setze("button." + B + "druck_fortsetzen", G + "Druck fortsetzen", "unavailable");
+  setze("button." + B + "druck_stoppen", G + "Druck stoppen", druckt ? "unknown" : "unavailable");
+  setze("select." + B + "druckgeschwindigkeit", G + "Druckgeschwindigkeit", druckt ? "standard" : "unavailable", { options: ["silent", "standard", "sport", "ludicrous"] });
+  setze(P + "geschwindigkeitsprofil", G + "Geschwindigkeitsprofil", druckt ? "standard" : "unknown");
+  setze("light." + B + "druckraumbeleuchtung", G + "Druckraumbeleuchtung", aus ? "unavailable" : "on");
+  setze("sensor.luft_sensor_arbeitszimmer_temperatur", "Luft-Sensor Arbeitszimmer Temperatur", raum === "kalt" ? 16.2 : 21.4, { unit_of_measurement: "°C" });
+  setze("sensor.luft_sensor_arbeitszimmer_luftfeuchtigkeit", "Luft-Sensor Arbeitszimmer Luftfeuchtigkeit", raum === "feucht" ? 68 : 48, { unit_of_measurement: "%" });
+
+  // Leistung der Steckdose der letzten 31 Tage als Stufenfunktion [ms, W]
+  const h = 3600e3, tag = 24 * h;
+  const heute0 = new Date(jetzt); heute0.setHours(0, 0, 0, 0);
+  const wechsel = [];
+  for (let d = 31; d >= 1; d--) {
+    const t0 = heute0.getTime() - d * tag;
+    wechsel.push([t0, 0]);
+    if (d % 4 === 3) continue;                       // an manchen Tagen nicht gedruckt
+    const an = t0 + (8 + (d % 5)) * h, dauer = (1 + (d % 4) * 0.75) * h;
+    wechsel.push([an, 5.5], [an + 0.1 * h, 310], [an + 0.2 * h, 135 + (d % 3) * 12], [an + 0.2 * h + dauer, 6], [an + 0.5 * h + dauer, 0]);
+    if (d % 3 === 0) { const a2 = an + dauer + 3 * h; wechsel.push([a2, 5.5], [a2 + 0.08 * h, 300], [a2 + 0.15 * h, 128], [a2 + 2.4 * h, 6], [a2 + 2.6 * h, 0]); }
+  }
+  wechsel.push([heute0.getTime(), 0]);
+  if (!aus) {
+    const s = jetzt - 75 * 60000;
+    wechsel.push([s - 20 * 60000, 5.5]);
+    if (druckt) wechsel.push([s, 315], [s + 7 * 60000, 150], [s + 30 * 60000, 138], [s + 50 * 60000, 146], [jetzt - 60000, 142]);
+  }
+  const punkte = wechsel.filter(([t]) => t <= jetzt).sort((a, b) => a[0] - b[0]);
+  const wertBei = (t) => { let w = 0; for (const [z, v] of punkte) { if (z > t) break; w = v; } return w; };
+  const wh = (a, b) => {
+    let s = 0;
+    punkte.forEach(([t, w], i) => { const von = Math.max(t, a), bis = Math.min(i + 1 < punkte.length ? punkte[i + 1][0] : jetzt, b); if (bis > von) s += w * (bis - von); });
+    return s / h;
+  };
+  const altWS = window.hass.callWS;
+  window.hass.callWS = async (m) => {
+    if (m.type === "history/history_during_period" && m.entity_ids.length === 1 && m.entity_ids[0] === "sensor.3d_drucker_derzeitiger_verbrauch") {
+      wsLog.push(m.type + ":watt");
+      const start = Date.parse(m.start_time);
+      const liste = [{ s: String(wertBei(start)), lu: start / 1000 }, ...punkte.filter(([t]) => t > start).map(([t, w]) => ({ s: String(w), lu: t / 1000 }))];
+      return { [m.entity_ids[0]]: liste };
+    }
+    if (m.type === "recorder/statistics_during_period") {
+      wsLog.push(m.type + ":" + m.period);
+      // Wie Home Assistant: nur abgeschlossene Stunden, die laufende fehlt noch
+      const r = []; const t = new Date(Date.parse(m.start_time)); const grenze = new Date(jetzt); grenze.setMinutes(0, 0, 0);
+      while (t.getTime() < grenze.getTime()) {
+        const a = t.getTime();
+        if (m.period === "hour") t.setTime(a + h); else t.setDate(t.getDate() + 1);
+        const b = Math.min(t.getTime(), grenze.getTime());
+        r.push({ start: a, end: b, change: Math.round(wh(a, b)) / 1000 });
+      }
+      return { [m.statistic_ids[0]]: r };
+    }
+    return altWS(m);
+  };
+  // Knöpfe, Auswahl und Licht reagieren wie der Drucker
+  const altDienst = window.hass.callService;
+  window.hass.callService = async (domain, dienst, data) => {
+    if (!(domain === "button" || domain === "select")) return altDienst(domain, dienst, data);
+    dienste.push(`${domain}.${dienst}:${data.entity_id}`);
+    dienstDaten.push({ domain, dienst, ...data });
+    setTimeout(() => {
+      const neu = { ...window.hass.states };
+      const setz = (id, state) => { neu[id] = { ...neu[id], state }; };
+      if (domain === "select") { setz(data.entity_id, data.option); setz(P + "geschwindigkeitsprofil", data.option); }
+      else if (data.entity_id.endsWith("pausieren")) { setz(P + "druckstatus", "pause"); setz(P + "aktueller_arbeitsschritt", "paused_user"); setz("button." + B + "druck_pausieren", "unavailable"); setz("button." + B + "druck_fortsetzen", "unknown"); }
+      else if (data.entity_id.endsWith("fortsetzen")) { setz(P + "druckstatus", "running"); setz(P + "aktueller_arbeitsschritt", "printing"); setz("button." + B + "druck_pausieren", "unknown"); setz("button." + B + "druck_fortsetzen", "unavailable"); }
+      else if (data.entity_id.endsWith("stoppen")) { setz(P + "druckstatus", "failed"); setz(P + "aktueller_arbeitsschritt", "idle"); for (const k of ["pausieren", "fortsetzen", "stoppen"]) setz("button." + B + "druck_" + k, "unavailable"); setz("select." + B + "druckgeschwindigkeit", "unavailable"); }
+      window.hass = { ...window.hass, states: neu };
+      window.el.hass = window.hass;
+    }, 600);
+  };
+})();
 </script>
 <script type="module">
 await import("../custom_components/filament_werkstatt/frontend/filament-werkstatt.js");

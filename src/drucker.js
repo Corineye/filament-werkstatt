@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
 // Drucker: Live-Ansicht des Bambu Lab P1S und der Steckdose aus Home Assistant,
-// Kamera und Druckverlauf (Liste „3D-Drucke“, von der Automation befüllt)
+// Titelbild des Drucks, Steuerung, Raumklima, Stromdiagramme und Druckverlauf
+// (Liste „3D-Drucke“, von der Automation befüllt)
 // ---------------------------------------------------------------------------
 
 const DR_GERAET = "3D-Drucker P1S";
@@ -49,6 +50,11 @@ const DR_ENTITAETEN = {
   f_kopf: ["Druckkopflüfter", "fan.p1s_01p00c572701906_druckkopflufter"],
   f_bauteil: ["Bauteillüfter", "fan.p1s_01p00c572701906_bauteillufter"],
   f_raum: ["Druckraumlüfter", "fan.p1s_01p00c572701906_druckraumlufter"],
+  // Steuerung (ha-bambulab: button.pause/resume/stop, select.printing_speed)
+  pause: [["Druck pausieren", "Pause"], "button.p1s_01p00c572701906_druck_pausieren", "button.p1s_01p00c572701906_pause"],
+  fortsetzen: [["Druck fortsetzen", "Fortsetzen"], "button.p1s_01p00c572701906_druck_fortsetzen", "button.p1s_01p00c572701906_fortsetzen"],
+  stopp: [["Druck stoppen", "Stopp", "Stop"], "button.p1s_01p00c572701906_druck_stoppen", "button.p1s_01p00c572701906_stopp"],
+  tempo_wahl: [["Druckgeschwindigkeit", "Geschwindigkeit"], "select.p1s_01p00c572701906_druckgeschwindigkeit"],
 };
 const DR_STECKDOSE_ENTITAETEN = {
   schalter: ["", "switch.3d_drucker"],
@@ -89,6 +95,29 @@ const DR_LUEFTER = {
   l_raum: { f: "f_raum", name: "Druckraumlüfter", info: "Zieht warme Luft aus dem Druckraum. Bei ASA/ABS lieber aus lassen." },
 };
 const DR_LUEFTER_STUFEN = [0, 10, 30, 50, 80, 100];
+// Zustände, in denen ein Druck läuft (auch pausiert oder in Vorbereitung)
+const DR_DRUCKT = ["running", "pause", "prepare", "slicing"];
+// Geschwindigkeitsstufen des P1S (select.printing_speed)
+const DR_TEMPO = [["silent", "Leise", "50 %"], ["standard", "Standard", "100 %"], ["sport", "Sport", "124 %"], ["ludicrous", "Ludicrous", "166 %"]];
+// Symbole der Steuerknöpfe (SVG, weil ⏸/▶ je nach Schrift unterschiedlich aussehen)
+const DR_ICONS = {
+  pause: `<svg viewBox="0 0 16 16" width="14" height="14"><rect x="3" y="2" width="3.5" height="12" rx="1" fill="currentColor"/><rect x="9.5" y="2" width="3.5" height="12" rx="1" fill="currentColor"/></svg>`,
+  fortsetzen: `<svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 2.2v11.6c0 .6.7 1 1.2.6l8.6-5.8c.5-.3.5-1 0-1.3L5.2 1.6C4.7 1.2 4 1.6 4 2.2z" fill="currentColor"/></svg>`,
+  stopp: `<svg viewBox="0 0 16 16" width="14" height="14"><rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="currentColor"/></svg>`,
+};
+// Raumklima: Sensoren aus der Einrichtung, sonst diese
+const DR_RAUM_TEMP = "sensor.luft_sensor_arbeitszimmer_temperatur";
+const DR_RAUM_FEUCHTE = "sensor.luft_sensor_arbeitszimmer_luftfeuchtigkeit";
+// Materialien: verziehen sich bei Kälte/Zugluft bzw. ziehen Wasser
+const DR_WARP = /^(ASA|ABS|PC|PA)\b/i;
+const DR_DAEMPFE = /^(ASA|ABS)\b/i;
+const DR_HYGRO = /^(PETG|TPU|PA|PVA)\b/i;
+// Stromdiagramme: Zeitraum → Dauer, Anzahl Abschnitte der Leistungskurve, Zeitraster der Energie
+const DR_STROM_BEREICHE = {
+  "24h": { name: "24 h", ms: 24 * 3600e3, stuecke: 144, periode: "hour" },
+  "7d": { name: "7 Tage", ms: 7 * 86400e3, stuecke: 168, periode: "day" },
+  "30d": { name: "30 Tage", ms: 30 * 86400e3, stuecke: 180, periode: "day" },
+};
 
 // Beschreibung eines Druckeintrags „schluessel=wert; …“ lesen
 function druckDaten(eintrag) {
@@ -113,6 +142,14 @@ function fotoName(druck) {
   if (!t || isNaN(t)) return null;
   const p = (n) => String(n).padStart(2, "0");
   return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}_${p(t.getHours())}-${p(t.getMinutes())}`;
+}
+
+// Schöne obere Grenze für eine Diagrammachse (1, 2, 2,5, 5 × 10^n)
+function drGrenze(v) {
+  if (!(v > 0)) return 1;
+  const e = Math.pow(10, Math.floor(Math.log10(v)));
+  const f = v / e;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
 }
 
 function ringSvg(prozent, farbe = "var(--mint)") {
@@ -191,14 +228,19 @@ const DruckerAnsicht = {
     if (zustand !== this._drLetzterZustand) { this._zeichnen(); return; }   // z. B. eingeschaltet: alles neu
     kopf.innerHTML = this._drLiveHtml("kopf");
     live.innerHTML = this._drLiveHtml("rest");
-    this._drKameraPruefen();
+    // Rechte Spalte nur tauschen, wenn sich etwas geändert hat (Bild soll nicht neu laden)
+    for (const [id, html] of [["dr-bild-karte", this._drBildHtml(zustand)], ["dr-raum", this._drRaumHtml()]]) {
+      const x = this.shadowRoot.getElementById(id);
+      if (x && this._drRechts[id] !== html) { x.innerHTML = html; this._drRechts[id] = html; }
+    }
   },
 
   _drHtml() {
     if (!this._drVerlauf && !this._drVerlaufLaedt) this._drVerlaufLaden();
     const zustand = this._drZustand();
     this._drLetzterZustand = zustand;
-    setTimeout(() => this._drKameraPruefen(), 0);
+    const bild = this._drBildHtml(zustand), raum = this._drRaumHtml();
+    this._drRechts = { "dr-bild-karte": bild, "dr-raum": raum };
     return `<div class="dr-raster">
         <div class="dr-spalte">
           <section id="dr-live-kopf" class="dr-live">${this._drLiveHtml("kopf")}</section>
@@ -206,7 +248,8 @@ const DruckerAnsicht = {
           <section id="dr-live" class="dr-live">${this._drLiveHtml("rest")}</section>
         </div>
         <div class="dr-spalte">
-          ${this._drKameraHtml(zustand)}
+          <section id="dr-bild-karte">${bild}</section>
+          <section id="dr-raum">${raum}</section>
           ${this._drVerlaufHtml()}
         </div>
       </div>`;
@@ -219,9 +262,11 @@ const DruckerAnsicht = {
     return this._drWerteHtml(zustand);
   },
 
-  // Statuskarte oben (Ring, Name, Restzeit) bzw. „Drucker ist aus“
+  // Statuskarte oben (Ring, Name, Zeitleiste) bzw. „Drucker ist aus“, darunter die Steuerung
   _drKopfHtml(zustand, z) {
     let html = "";
+    const warnung = this._druckWarnung();
+    if (warnung) html += `<div class="hinweis rot-hinweis dr-druck-warnung" role="alert"><strong>⚠️ Filament reicht nicht</strong><span>${esc(warnung.text)}</span></div>`;
 
     if (zustand === "aus" || zustand === "startet" || zustand === "offline") {
       const text = zustand === "aus" ? ["Drucker ist aus", "Die Steckdose ist ausgeschaltet. Schalte sie ein, dann erscheinen hier nach etwa 15–30 Sekunden die Werte."]
@@ -233,15 +278,11 @@ const DruckerAnsicht = {
     } else {
       const [statusText, statusFarbe] = DR_STATUS[zustand] || [zustand, "leise"];
       const schritt = this._drW("schritt");
-      const druckt = ["running", "pause", "prepare", "slicing"].includes(zustand);
+      const druckt = DR_DRUCKT.includes(zustand);
       const fortschritt = this._drZ("fortschritt") || 0;
-      const restH = this._drZ("rest_h");
-      const ende = this._drW("ende");
-      const bild = this._drS("titelbild");
-      const bildUrl = druckt && bild && bild.attributes.entity_picture;
       const name = this._drW("name");
-      const restText = restH == null ? "–" : restH >= 1 ? `${Math.floor(restH)} h ${Math.round((restH % 1) * 60)} min` : `${Math.round(restH * 60)} min`;
-      const endeText = ende && !isNaN(new Date(ende)) ? new Date(ende).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "–";
+      const tempo = DR_TEMPO.find(([k]) => k === (this._drW("tempo_wahl") || this._drW("tempo")));
+      const laenge = this._drZ("laenge");
       html += `<div class="dr-karte dr-status">
         <div class="dr-ring">${ringSvg(druckt || zustand === "finish" ? fortschritt : 0, statusFarbe === "rot" ? "var(--rot)" : statusFarbe === "amber" ? "var(--amber)" : "var(--mint)")}
           <div class="dr-ring-text"><strong>${druckt || zustand === "finish" ? `${zahl(fortschritt)} %` : "–"}</strong><span>${druckt ? `Schicht ${z("schicht")}/${z("schichten")}` : ""}</span></div></div>
@@ -249,16 +290,50 @@ const DruckerAnsicht = {
           <span class="pille ${statusFarbe}">${statusText}</span>
           <h2>${druckt || zustand === "finish" || zustand === "failed" ? esc(name || "Druck") : "Bereit zum Drucken"}</h2>
           ${schritt && schritt !== "idle" && schritt !== "printing" ? `<p class="leise">${esc(DR_SCHRITTE[schritt] || schritt.replace(/_/g, " "))}</p>` : ""}
-          ${druckt ? `<div class="dr-werte"><div><span>Restzeit</span><strong>${restText}</strong></div><div><span>Fertig um</span><strong>${endeText}</strong></div>
-            <div><span>Gewicht</span><strong>${z("gewicht", 1)} g</strong></div></div>` : ""}
+          ${druckt ? `<div class="dr-werte"><div><span>Gewicht</span><strong>${z("gewicht", 1)} g</strong></div>
+            <div><span>Länge</span><strong>${laenge == null ? "–" : `${zahl(laenge, 1)} m`}</strong></div>
+            <div><span>Tempo</span><strong>${tempo ? tempo[1] : "–"}</strong></div></div>` : ""}
         </div>
-        ${bildUrl ? `<img class="dr-titelbild" src="${esc(bildUrl)}" alt="">` : ""}
+        ${druckt ? this._drZeitleisteHtml(zustand, fortschritt) : ""}
       </div>`;
       if (this._drW("hms") === "on" || this._drW("fehler") === "on") {
         html += `<div class="hinweis rot-hinweis">⚠️ Der Drucker meldet einen Fehler. Details stehen in der Bambu-App bzw. am Drucker.</div>`;
       }
+      html += this._drSteuerHtml(zustand);
     }
     return html;
+  },
+
+  // Restzeit in Stunden (ha-bambulab liefert Stunden oder Minuten, je nach Einheit)
+  _drRestH() {
+    const v = this._drZ("rest_h");
+    if (v == null) return null;
+    const s = this._drS("rest_h");
+    const e = ((s && s.attributes && s.attributes.unit_of_measurement) || "h").toLowerCase();
+    return e.startsWith("min") ? v / 60 : e === "s" ? v / 3600 : e === "d" ? v * 24 : v;
+  },
+
+  // Zeitleiste: Schicht x von y, Fortschritt, Restzeit, „fertig um“
+  _drZeitleisteHtml(zustand, fortschritt) {
+    const uhr = (t) => t.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    const restH = this._drRestH();
+    const endeW = this._drW("ende"), startW = this._drW("start");
+    let ende = endeW && !isNaN(new Date(endeW)) ? new Date(endeW) : null;
+    if (!ende && restH != null) ende = new Date(Date.now() + restH * 3600e3);
+    const start = startW && !isNaN(new Date(startW)) ? new Date(startW) : null;
+    const tagText = (t) => { const h = new Date(); h.setHours(0, 0, 0, 0); const d = Math.round((new Date(t).setHours(0, 0, 0, 0) - h) / 86400e3); return d === 0 ? "" : d === 1 ? "morgen " : `${t.toLocaleDateString("de-DE", { weekday: "short" })} `; };
+    const restText = restH == null ? "–" : restH >= 1 ? `${Math.floor(restH)} h ${Math.round((restH % 1) * 60)} min` : `${Math.max(0, Math.round(restH * 60))} min`;
+    const schicht = this._drZ("schicht"), schichten = this._drZ("schichten");
+    const p = Math.max(0, Math.min(100, fortschritt));
+    const pause = zustand === "pause";
+    return `<div class="dr-zeitleiste ${pause ? "pausiert" : ""}">
+      <div class="dr-zl-kopf"><span>${schicht != null && schichten ? `Schicht <strong>${zahl(schicht)}</strong> von ${zahl(schichten)}` : "Schicht –"}</span>
+        <span>${pause ? `<span class="amber">⏸ pausiert</span>` : `noch <strong>${restText}</strong>`}</span></div>
+      <div class="dr-zl-balken" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${zahl(p)}" aria-label="Druckfortschritt">
+        <i style="width:${p}%"></i>${schichten ? `<b style="width:${Math.max(0, Math.min(100, ((schicht || 0) / schichten) * 100))}%"></b>` : ""}</div>
+      <div class="dr-zl-fuss"><span>${start ? `Start ${tagText(start)}${uhr(start)}` : ""}</span>
+        <span class="dr-zl-ende">fertig um <strong>${ende ? `${tagText(ende)}${uhr(ende)}` : "–"}</strong></span></div>
+    </div>`;
   },
 
   // Temperaturen, Lüfter, Strom, Infos
@@ -296,11 +371,13 @@ const DruckerAnsicht = {
 
     // Strom aus der Steckdose
     const w = this._drZ("watt", true);
-    html += `<div class="dr-karte"><h3 class="dr-titel">⚡ Strom</h3><div class="dr-werte dr-werte-3">
+    const diagramme = this._drId("watt", true) || this._drId("heute", true) || this._drId("monat", true);
+    html += `<div class="dr-karte"><h3 class="dr-titel">⚡ Strom${diagramme ? `<span class="leise klein dr-titel-zusatz">für Diagramme antippen</span>` : ""}</h3>
+      <${diagramme ? `button class="dr-werte dr-werte-3 dr-strom-knopf" data-aktion="dr-strom" aria-label="Stromverbrauch als Diagramm zeigen"` : `div class="dr-werte dr-werte-3"`}>
       <div><span>Jetzt</span><strong>${w == null ? "–" : `${zahl(w, w < 10 ? 1 : 0)} W`}</strong></div>
       <div><span>Heute</span><strong>${this._drZ("heute", true) == null ? "–" : `${zahl(this._drZ("heute", true), 2)} kWh`}</strong></div>
       <div><span>Diesen Monat</span><strong>${this._drZ("monat", true) == null ? "–" : `${zahl(this._drZ("monat", true), 2)} kWh`}</strong></div>
-    </div><div class="dr-steckdose"><span class="leise klein">Steckdose: ${this._drW("schalter", true) === "on" ? "an" : this._drW("schalter", true) === "off" ? "aus" : "nicht gefunden"}</span>
+    </${diagramme ? "button" : "div"}><div class="dr-steckdose"><span class="leise klein">Steckdose: ${this._drW("schalter", true) === "on" ? "an" : this._drW("schalter", true) === "off" ? "aus" : "nicht gefunden"}</span>
       ${this._drId("schalter", true) ? this._drSchaltKnopf(this._drW("schalter", true) === "on" ? "aus" : "an") : ""}</div></div>`;
 
     // Drucker-Infos
@@ -319,33 +396,25 @@ const DruckerAnsicht = {
     return html;
   },
 
-  // ---- Kamera: Standbild alle 10 s, auf Wunsch live -----------------------
-  _drKameraHtml(zustand) {
-    const an = !["aus", "startet", "offline"].includes(zustand) && this._drS("kamera");
-    return `<div class="dr-karte dr-kamera-karte">
-      <div class="dr-kamera-kopf"><h3 class="dr-titel">📷 Kamera</h3>
-        ${an ? `<button class="chip ${this._drLive ? "an" : ""}" data-aktion="dr-live">${this._drLive ? "● Live" : "Live ansehen"}</button>` : ""}</div>
-      <div class="dr-kamera">${an ? `<img id="dr-kamera-bild" alt="Kamerabild">` : `<div class="dr-kamera-leer">${zustand === "aus" ? "Drucker ist aus" : "Kein Bild"}</div>`}</div>
-      ${an && !this._drLive ? `<p class="leise klein">Standbild, wird alle 10 Sekunden erneuert.</p>` : ""}
+  // ---- Titelbild des Drucks (statt Kamera) ------------------------------
+  // Während eines Drucks das aktuelle Titelbild, sonst das letzte, sonst „Kein Druck“
+  _drBildHtml(zustand) {
+    const s = this._drS("titelbild");
+    const url = s && !["unavailable", "unknown"].includes(s.state) && s.attributes && s.attributes.entity_picture;
+    if (url) this._drLetztesBild = url;
+    const zeige = url || this._drLetztesBild;
+    const druckt = DR_DRUCKT.includes(zustand);
+    const letzter = this._drVerlauf && this._buAlle()[0];
+    const name = druckt ? this._drW("name") : (["finish", "failed"].includes(zustand) && this._drW("name")) || (letzter && letzter.name);
+    const fortschritt = this._drZ("fortschritt");
+    return `<div class="dr-karte dr-bild-karte ${druckt ? "aktiv" : ""}">
+      <div class="dr-kamera-kopf"><h3 class="dr-titel">🖼️ ${druckt ? "Aktueller Druck" : "Letzter Druck"}</h3>
+        ${druckt && fortschritt != null ? `<span class="pille mint">${zahl(fortschritt)} %</span>` : ""}</div>
+      <div class="dr-bild">${zeige
+        ? `<img id="dr-titelbild-gross" src="${esc(zeige)}" alt="Titelbild${name ? ` von ${esc(name)}` : ""}">`
+        : `<div class="dr-kamera-leer"><span class="dr-bild-leer-icon" aria-hidden="true">◇</span>Kein Druck</div>`}</div>
+      ${zeige && name ? `<p class="dr-bild-name">${esc(name)}</p>` : ""}
     </div>`;
-  },
-  _drKameraPruefen() {
-    const img = this.shadowRoot.getElementById("dr-kamera-bild");
-    const s = this._drS("kamera");
-    clearTimeout(this._drKameraTimer);
-    if (!img || !s) return;
-    const token = s.attributes.access_token;
-    const id = s.entity_id || this._drId("kamera");
-    const url = this._drLive
-      ? (token ? `/api/camera_proxy_stream/${id}?token=${token}` : s.attributes.entity_picture)
-      : `${token ? `/api/camera_proxy/${id}?token=${token}` : s.attributes.entity_picture}${(token ? "&" : (s.attributes.entity_picture || "").includes("?") ? "&" : "?")}t=${Date.now()}`;
-    if (this._drLive) { if (img.dataset.url !== url) { img.src = url; img.dataset.url = url; } return; }
-    // Neues Bild erst laden, dann tauschen (kein Flackern)
-    const neu = new Image();
-    neu.onload = () => { if (img.isConnected) img.src = neu.src; };
-    neu.src = url;
-    if (!img.src) img.src = url;
-    this._drKameraTimer = setTimeout(() => this._drKameraPruefen(), 10000);
   },
 
   // ---- Druckverlauf ------------------------------------------------------
@@ -453,7 +522,14 @@ const DruckerAnsicht = {
     </div><button class="mini" data-aktion="bu-rueckgaengig" data-uid="${esc(d.uid)}">Buchung rückgängig machen</button>`;
   },
 
-  // ---- Steckdose schalten (immer mit Nachfrage) --------------------------
+  // ---- Steckdose schalten ------------------------------------------------
+  // Einschalten immer mit Nachfrage, Ausschalten nur ohne, wenn der Drucker in Ruhe und kalt ist
+  _drRuhig() {
+    const st = this._drW("status");
+    const duese = this._drZ("duese"), bett = this._drZ("bett");
+    const ruhe = !st || ["idle", "finish", "failed", "offline", "unknown"].includes(st);
+    return ruhe && (duese == null || duese < 60) && (bett == null || bett < 45);
+  },
   _drSchaltKnopf(ziel) {
     if (this._drSchaltet) return `<button class="knopf leise klein-knopf" disabled><span class="dreher klein"></span> Schaltet …</button>`;
     return ziel === "an"
@@ -469,14 +545,18 @@ const DruckerAnsicht = {
         <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
           <button class="knopf" data-aktion="dr-schalten-ok">Einschalten</button></div>`;
     }
-    const status = this._drZustand();
-    const druckt = ["running", "pause", "prepare", "slicing"].includes(status);
-    const duese = this._drZ("duese");
-    const heiss = duese != null && duese > 50;
-    return `<h2>Drucker ausschalten?</h2>
+    const st = this._drW("status");
+    const druckt = DR_DRUCKT.includes(st);
+    const duese = this._drZ("duese"), bett = this._drZ("bett");
+    const heiss = duese != null && duese >= 60;
+    const bettWarm = bett != null && bett >= 45;
+    const beschaeftigt = !druckt && st && !["idle", "finish", "failed", "offline", "unknown"].includes(st);
+    return `<h2>${druckt ? "Drucker druckt gerade." : heiss || bettWarm ? "Drucker ist noch heiß." : "Drucker ist beschäftigt."} Wirklich ausschalten?</h2>
       ${druckt ? `<div class="hinweis rot-hinweis"><strong>Achtung, es läuft ein Druck.</strong> Ausschalten bricht ihn sofort ab und er ist verloren.</div>` : ""}
-      ${heiss ? `<div class="hinweis amber">Die Düse ist noch ${zahl(duese)} °C heiß. Der Hotend-Lüfter braucht Strom, um sie abzukühlen. Besser warten, bis sie unter 50 °C ist, sonst kann das Filament im Hotend verstopfen.</div>` : ""}
-      ${!druckt && !heiss ? `<p class="leise">Die Steckdose „${esc(this._drSteckdoseName())}“ wird ausgeschaltet. Es läuft kein Druck und die Düse ist kalt.</p>` : ""}
+      ${beschaeftigt ? `<div class="hinweis amber">Der Drucker meldet „${esc((DR_STATUS[st] || [st])[0])}“.</div>` : ""}
+      ${heiss ? `<div class="hinweis amber">Die Düse ist noch ${zahl(duese)} °C heiß. Der Hotend-Lüfter braucht Strom, um sie abzukühlen. Besser warten, bis sie unter 60 °C ist, sonst kann das Filament im Hotend verstopfen.</div>` : ""}
+      ${bettWarm ? `<div class="hinweis amber">Das Druckbett ist noch ${zahl(bett)} °C warm. Ohne Strom kühlt es ungleichmäßig ab, besser unter 45 °C warten.</div>` : ""}
+      <p class="leise klein">Ohne Nachfrage geht das Ausschalten nur im Ruhezustand: kein Druck, Düse unter 60 °C und Bett unter 45 °C.</p>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
         <button class="knopf rot-knopf" data-aktion="dr-schalten-ok">${druckt ? "Trotzdem ausschalten" : "Ausschalten"}</button></div>`;
   },
@@ -692,6 +772,405 @@ const DruckerAnsicht = {
       : `${L.name}: ${p} % gesendet, der Drucker hat es noch nicht bestätigt.`);
   },
 
+  // ---- Steuerung: Pause / Fortsetzen / Stopp, Licht, Geschwindigkeit -----
+  _drVerfuegbar(k) {
+    const s = this._drS(k);
+    return !!s && s.state !== "unavailable";
+  },
+  _drSteuerHtml(zustand) {
+    const druckt = DR_DRUCKT.includes(zustand);
+    const sendet = this._drSteuerSendet;
+    const knoepfe = [];
+    if (["running", "prepare", "slicing"].includes(zustand) && this._drVerfuegbar("pause")) knoepfe.push(["pause", DR_ICONS.pause, "Pause", ""]);
+    if (zustand === "pause" && this._drVerfuegbar("fortsetzen")) knoepfe.push(["fortsetzen", DR_ICONS.fortsetzen, "Fortsetzen", "mint"]);
+    if (druckt && this._drVerfuegbar("stopp")) knoepfe.push(["stopp", DR_ICONS.stopp, "Stopp", "rot"]);
+    const licht = this._drVerfuegbar("licht") ? this._drS("licht").state === "on" : null;
+    const tempoS = druckt && this._drVerfuegbar("tempo_wahl") ? this._drS("tempo_wahl") : null;
+    if (!knoepfe.length && licht == null && !tempoS) return "";
+    const knopf = ([art, icon, name, farbe]) => `<button class="dr-steuer-knopf ${farbe}" data-aktion="dr-steuer" data-art="${art}" ${sendet ? "disabled" : ""}>
+      <span class="dr-steuer-icon" aria-hidden="true">${sendet === art ? `<span class="dreher klein"></span>` : icon}</span>${name}</button>`;
+    const optionen = tempoS && Array.isArray(tempoS.attributes.options) ? tempoS.attributes.options : DR_TEMPO.map(([k]) => k);
+    const stufen = DR_TEMPO.filter(([k]) => optionen.includes(k));
+    return `<div class="dr-karte dr-steuer"><h3 class="dr-titel">🎛️ Steuerung</h3>
+      <div class="dr-steuer-reihe">${knoepfe.map(knopf).join("")}
+        ${licht == null ? "" : `<button class="dr-steuer-knopf dr-licht ${licht ? "an" : ""}" data-aktion="dr-licht" aria-pressed="${licht}" ${sendet ? "disabled" : ""}>
+          <span class="dr-steuer-icon" aria-hidden="true">${sendet === "licht" ? `<span class="dreher klein"></span>` : "💡"}</span>Licht ${licht ? "an" : "aus"}</button>`}</div>
+      ${tempoS && stufen.length ? `<div class="dr-tempo"><span class="leise klein">Geschwindigkeit</span>
+        <div class="chips">${stufen.map(([k, name, p]) => `<button class="chip ${tempoS.state === k ? "an" : ""} ${k === "ludicrous" ? "dr-tempo-wild" : ""}" data-aktion="dr-tempo" data-wert="${k}" title="${p}" ${sendet || tempoS.state === k ? "disabled" : ""}>${sendet === `tempo-${k}` ? `<span class="dreher klein"></span> ` : ""}${name}</button>`).join("")}</div></div>` : ""}
+    </div>`;
+  },
+  _drSteuerDialogHtml() {
+    const art = this._drSteuerArt;
+    const name = esc(this._drW("name") || "Druck");
+    const f = this._drZ("fortschritt"), s = this._drZ("schicht"), n = this._drZ("schichten");
+    const stand = `${f == null ? "" : `${zahl(f)} %`}${s != null && n ? `, Schicht ${zahl(s)}/${zahl(n)}` : ""}`;
+    if (art === "stopp") {
+      return `<h2>Druck abbrechen?</h2>
+        <div class="hinweis rot-hinweis">„${name}“ wird endgültig abgebrochen${stand ? ` (${stand})` : ""}. Das lässt sich nicht rückgängig machen.</div>
+        <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Weiterdrucken</button>
+          <button class="knopf rot-knopf" data-aktion="dr-steuer-ok">Stopp</button></div>`;
+    }
+    return `<h2>Druck pausieren?</h2>
+      <p class="leise">„${name}“ hält an${stand ? ` (${stand})` : ""}, der Druckkopf fährt zur Seite. Mit „Fortsetzen“ geht es weiter.</p>
+      <div class="hinweis amber">Lange Pausen können eine sichtbare Linie im Bauteil hinterlassen, weil die letzte Schicht abkühlt.</div>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button>
+        <button class="knopf amber" data-aktion="dr-steuer-ok">Pausieren</button></div>`;
+  },
+  // Gemeinsamer Ablauf: Dienst aufrufen, auf Bestätigung warten, Rückmeldung
+  async _drSteuerAufruf(marke, aufruf, pruef, texte) {
+    if (this._drSteuerSendet) return;
+    this._dialog = null;
+    this._drSteuerSendet = marke;
+    this._zeichnen();
+    try {
+      await aufruf();
+    } catch (e) {
+      this._drSteuerSendet = null;
+      this._toast(`${texte[1]}: Senden hat nicht geklappt (${e.message || e}).`);
+      return;
+    }
+    const ok = await this._drWarten(pruef, 15000);
+    this._drSteuerSendet = null;
+    this._toast(ok ? texte[0] : `${texte[1]} gesendet, der Drucker hat es noch nicht bestätigt.`);
+  },
+  _drSteuerSenden(art) {
+    const id = this._drId(art);
+    if (!id) return;
+    const ziel = { pause: (s) => s === "pause", fortsetzen: (s) => s === "running", stopp: (s) => !DR_DRUCKT.includes(s) }[art];
+    const texte = { pause: ["Druck ist pausiert.", "Pause"], fortsetzen: ["Druck läuft weiter.", "Fortsetzen"], stopp: ["Druck wurde abgebrochen.", "Stopp"] }[art];
+    this._drSteuerAufruf(art, () => this._hass.callService("button", "press", { entity_id: id }), () => ziel(this._drW("status")), texte);
+  },
+  _drLichtSchalten() {
+    const id = this._drId("licht");
+    if (!id) return;
+    const an = this._drW("licht") !== "on";
+    this._drSteuerAufruf("licht", () => this._hass.callService("light", an ? "turn_on" : "turn_off", { entity_id: id }),
+      () => this._drW("licht") === (an ? "on" : "off"), [an ? "Licht im Druckraum ist an." : "Licht im Druckraum ist aus.", "Licht"]);
+  },
+  _drTempoSetzen(wert) {
+    const id = this._drId("tempo_wahl");
+    const stufe = DR_TEMPO.find(([k]) => k === wert);
+    if (!id || !stufe) return;
+    this._drSteuerAufruf(`tempo-${wert}`, () => this._hass.callService("select", "select_option", { entity_id: id, option: wert }),
+      () => this._drW("tempo_wahl") === wert, [`Geschwindigkeit: ${stufe[1]} (${stufe[2]}).`, "Geschwindigkeit"]);
+  },
+
+  // ---- Raumklima (wird auch von der Startseite benutzt) ------------------
+  // { temp, feuchte, warnungen: [{ stufe: "rot"|"amber", text }] }
+  _raumklima() {
+    const k = this._konfig || {};
+    const lies = (id) => {
+      const s = id && this._hass && this._hass.states[id];
+      const v = s && s.state !== "" ? Number(s.state) : NaN;
+      return Number.isFinite(v) ? v : null;
+    };
+    const temp = lies(k.raum_temp) ?? lies(DR_RAUM_TEMP);
+    const feuchte = lies(k.raum_feuchte) ?? lies(DR_RAUM_FEUCHTE);
+    const r = this._drGeladen();
+    const mat = (r && r.material) || "";
+    const warnungen = [];
+    if (temp != null && temp < 18 && DR_WARP.test(mat)) {
+      warnungen.push({ stufe: "amber", text: `Nur ${zahl(temp, 1)} °C im Raum: ${mat} verzieht sich bei Kälte und Zugluft (Warping). Tür und Fenster zu, Drucker aus dem Luftzug, Raum möglichst heizen.` });
+    }
+    const daempfe = this._drLetzteDaempfe();
+    if (daempfe) {
+      const min = Math.max(1, Math.round((Date.now() - daempfe.ende) / 60000));
+      warnungen.push({ stufe: "amber", text: `${daempfe.mat}-Druck vor ${min} min beendet: jetzt gut lüften, die Dämpfe (Styrol) hängen noch im Raum.` });
+    }
+    if (feuchte != null && feuchte > 60) {
+      warnungen.push(DR_HYGRO.test(mat)
+        ? { stufe: "rot", text: `${zahl(feuchte)} % Luftfeuchte: ${mat} zieht schnell Wasser. Rolle nach dem Druck sofort luftdicht mit Trockenmittel verpacken, besser aus dem Trockner drucken.` }
+        : { stufe: "amber", text: `${zahl(feuchte)} % Luftfeuchte: Filament trocken lagern (Box mit Trockenmittel), offene Rollen nicht herumliegen lassen.` });
+    }
+    return { temp, feuchte, warnungen };
+  },
+  // Letzter ABS/ASA-Druck, der vor weniger als einer Stunde zu Ende ging
+  _drLetzteDaempfe() {
+    if (!this._daten) return null;
+    const jetzt = Date.now();
+    const geladen = this._drGeladen();
+    const kand = [];
+    const st = this._drW("status"), ende = this._drW("ende");
+    if (["finish", "failed"].includes(st) && ende) kand.push({ ende: new Date(ende).getTime(), mat: geladen && geladen.material });
+    for (const d of this._drVerlauf ? this._buAlle().slice(0, 5) : []) {
+      if (!["finish", "failed"].includes(d.status) || !d.ende) continue;
+      const g = ((this._daten.drucke || {})[d.uid] || {}).gebucht;
+      const rolle = (g && this._daten.rollen.find((x) => x.id === g.rolle)) || geladen;
+      kand.push({ ende: new Date(d.ende).getTime(), mat: rolle && rolle.material });
+    }
+    return kand.find((x) => x.mat && DR_DAEMPFE.test(x.mat) && jetzt - x.ende >= 0 && jetzt - x.ende < 3600e3) || null;
+  },
+  _drRaumHtml() {
+    const k = this._raumklima();
+    if (k.temp == null && k.feuchte == null) return "";
+    const skala = (v, min, max) => Math.max(0, Math.min(100, ((v - min) / (max - min)) * 100));
+    const wert = (icon, text, name, v, min, max, gut, klasse) => `<div class="dr-raum-wert ${klasse}">
+      <span class="dr-raum-icon" aria-hidden="true">${icon}</span><strong>${text}</strong><small>${name}</small>
+      ${v == null ? "" : `<span class="dr-raum-skala" style="--gut-a:${skala(gut[0], min, max)}%;--gut-b:${skala(gut[1], min, max)}%"><i style="left:${skala(v, min, max)}%"></i></span>`}</div>`;
+    return `<div class="dr-karte dr-raum-karte"><h3 class="dr-titel">🏠 Raumklima</h3>
+      <div class="dr-raum-werte">
+        ${wert("🌡️", k.temp == null ? "–" : `${zahl(k.temp, 1)} °C`, "Temperatur", k.temp, 10, 32, [18, 28], k.temp != null && k.temp < 18 ? "kalt" : "")}
+        ${wert("💧", k.feuchte == null ? "–" : `${zahl(k.feuchte)} %`, "Luftfeuchte", k.feuchte, 0, 100, [30, 60], k.feuchte != null && k.feuchte > 60 ? "feucht" : "")}
+      </div>
+      ${k.warnungen.map((w) => `<div class="hinweis ${w.stufe === "rot" ? "rot-hinweis" : "amber"} dr-raum-warnung">${esc(w.text)}</div>`).join("")}
+      ${k.warnungen.length ? "" : `<p class="leise klein dr-raum-ok">✓ Passt zum Drucken.</p>`}
+    </div>`;
+  },
+
+  // ---- Warnung: Druck braucht mehr Filament, als auf der Rolle ist -------
+  // { text, rolleId, stufe } oder null (wird auch von der Startseite benutzt)
+  _druckWarnung() {
+    if (!this._hass || !this._daten) return null;
+    if (!DR_DRUCKT.includes(this._drZustand())) return null;
+    const r = this._drGeladen();
+    const g = this._drZ("gewicht");
+    if (!r || r.rest_g == null || g == null || g <= r.rest_g) return null;
+    return { stufe: "rot", rolleId: r.id,
+      text: `Dieser Druck braucht ${zahl(g, 1)} g, auf „${r.name}“ sind nur noch ${zahl(r.rest_g)} g. Rolle rechtzeitig wechseln oder den Druck stoppen.` };
+  },
+
+  // ---- Stromdiagramme (Sheet) --------------------------------------------
+  _drStromPreis() {
+    const d = this._daten || {};
+    const shop = d.shop && d.shop.einstellungen && Number(d.shop.einstellungen.kwh_preis);
+    if (shop > 0) return { preis: shop, quelle: "Shop" };
+    const werk = d.einstellungen && Number(d.einstellungen.strompreis);
+    return werk > 0 ? { preis: werk, quelle: "Werkstatt" } : { preis: 0.35, quelle: "Standard" };
+  },
+  async _drStromLaden(bereich) {
+    bereich = DR_STROM_BEREICHE[bereich] ? bereich : (this._drStrom && this._drStrom.bereich) || "24h";
+    const B = DR_STROM_BEREICHE[bereich];
+    const cache = (this._drStromCache = this._drStromCache || {});
+    if (cache[bereich] && Date.now() - cache[bereich].geladen < 60000) { this._drStrom = cache[bereich]; return; }
+    this._drStrom = { bereich, laedt: true };
+    const ende = Date.now(), start = ende - B.ms;
+    const wattId = this._drId("watt", true), kwhId = this._drId("heute", true) || this._drId("monat", true);
+    // Raster für die Energie: ganze Stunden bzw. ganze Tage (Ortszeit)
+    const slots = [];
+    if (B.periode === "hour") {
+      const t = new Date(ende); t.setMinutes(0, 0, 0);
+      for (let i = 23; i >= 0; i--) slots.push(t.getTime() - i * 3600e3);
+    } else {
+      const t = new Date(ende); t.setHours(0, 0, 0, 0);
+      for (let i = Math.round(B.ms / 86400e3) - 1; i >= 0; i--) { const d = new Date(t); d.setDate(d.getDate() - i); slots.push(d.getTime()); }
+    }
+    const fehler = (e) => ({ fehler: e.message || String(e) });
+    const [hist, stat] = await Promise.all([
+      wattId ? this._hass.callWS({ type: "history/history_during_period", start_time: new Date(start).toISOString(), end_time: new Date(ende).toISOString(),
+        entity_ids: [wattId], minimal_response: true, no_attributes: true, significant_changes_only: false }).catch(fehler) : null,
+      kwhId ? this._hass.callWS({ type: "recorder/statistics_during_period", start_time: new Date(slots[0]).toISOString(), end_time: new Date(ende).toISOString(),
+        statistic_ids: [kwhId], period: B.periode, types: ["change"], units: { energy: "kWh" } }).catch(fehler) : null,
+    ]);
+    // Leistung: Stufenfunktion aus den Zustandswechseln
+    const roh = hist && !hist.fehler && Array.isArray(hist[wattId]) ? hist[wattId] : [];
+    const punkte = roh.map((x) => {
+      const s = x.s != null ? x.s : x.state;
+      const t = x.lu != null ? x.lu * 1000 : Date.parse(x.last_updated || x.last_changed);
+      return { t: Math.max(start, t), w: s !== "" && s != null && Number.isFinite(Number(s)) ? Number(s) : null };
+    }).filter((p) => Number.isFinite(p.t)).sort((a, b) => a.t - b.t);
+    // Mittelwert (zeitgewichtet) und Wh der Stufenfunktion zwischen a und b
+    const abschnitt = (a, b) => {
+      let summe = 0, gedeckt = 0, max = null;
+      for (let j = 0; j < punkte.length; j++) {
+        const von = Math.max(punkte[j].t, a), bis = Math.min(j + 1 < punkte.length ? punkte[j + 1].t : ende, b);
+        if (bis > von && punkte[j].w != null) { summe += punkte[j].w * (bis - von); gedeckt += bis - von; max = Math.max(max == null ? 0 : max, punkte[j].w); }
+      }
+      return { mittel: gedeckt ? summe / gedeckt : null, wh: gedeckt ? summe / 3600e3 : null, gedeckt, max };
+    };
+    const dt = B.ms / B.stuecke;
+    const kurve = [];
+    for (let b = 0; b < B.stuecke; b++) {
+      const a = abschnitt(start + b * dt, start + (b + 1) * dt);
+      kurve.push({ t: start + b * dt, w: a.gedeckt > dt * 0.05 ? a.mittel : null, max: a.max });
+    }
+    // Energie: Zählerstatistik, für fehlende Abschnitte aus der Leistung gerechnet
+    const statRoh = stat && !stat.fehler && Array.isArray(stat[kwhId]) ? stat[kwhId] : null;
+    const zeit = (v) => (typeof v === "number" ? (v < 1e12 ? v * 1000 : v) : Date.parse(v));
+    let ausZaehler = 0;
+    const balken = slots.map((t, k) => {
+      let t1 = k + 1 < slots.length ? slots[k + 1] : t + 3600e3;
+      if (k + 1 === slots.length && B.periode === "day") { const d = new Date(t); d.setDate(d.getDate() + 1); t1 = d.getTime(); }
+      const e = statRoh && statRoh.find((x) => Math.abs(zeit(x.start) - t) < 60000);
+      if (e && e.change != null && Number.isFinite(Number(e.change))) { ausZaehler++; return { t, t1, kwh: Math.max(0, Number(e.change)) }; }
+      const wh = abschnitt(t, Math.min(t1, ende)).wh;
+      return { t, t1, kwh: wh == null ? null : wh / 1000 };
+    });
+    const gueltig = kurve.filter((k) => k.w != null);
+    const S = {
+      bereich, start, ende, kurve, balken, geladen: Date.now(),
+      summe: balken.reduce((s, x) => s + (x.kwh || 0), 0),
+      schnitt: gueltig.length ? gueltig.reduce((s, k) => s + k.w, 0) / gueltig.length : null,
+      spitze: punkte.filter((p) => p.w != null).reduce((m, p) => Math.max(m, p.w), 0) || null,
+      quelle: ausZaehler ? (ausZaehler === balken.length ? "Zähler der Steckdose" : "Zähler, Rest aus der Leistung berechnet") : "aus der Leistung berechnet",
+      fehler: (!wattId || (hist && hist.fehler)) && (!kwhId || (stat && stat.fehler)) ? (hist && hist.fehler) || (stat && stat.fehler) || "Keine Strom-Sensoren gefunden." : null,
+    };
+    if (!S.fehler) cache[bereich] = S;
+    if (this._drStrom && this._drStrom.bereich === bereich) {
+      this._drStrom = S;
+      if (this._dialog === "dr-strom") this._zeichnen();
+    }
+  },
+
+  // Zeitpunkt für Achsen (kurz) und Anzeige (lang)
+  _drStromZeit(t, art, lang) {
+    const d = new Date(t);
+    const B = DR_STROM_BEREICHE[this._drStrom.bereich];
+    const hm = (x) => new Date(x).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    const tag = d.toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" });
+    const kurzTag = B.ms > 8 * 86400e3 ? `${d.getDate()}.${d.getMonth() + 1}.` : d.toLocaleDateString("de-DE", { weekday: "short" });
+    if (art === "kwh") return B.periode === "hour" ? (lang ? `${tag}, ${hm(t)}–${hm(t + 3600e3)}` : `${d.getHours()}`) : lang ? tag : kurzTag;
+    return B.periode === "hour" ? (lang ? `${tag}, ${hm(t)}` : `${d.getHours()}:00`) : lang ? `${tag}, ${hm(t)}` : kurzTag;
+  },
+  // Selbst gezeichnetes Diagramm: art = "watt" (Fläche) oder "kwh" (Säulen)
+  _drDiagrammSvg(art) {
+    const S = this._drStrom;
+    const B = DR_STROM_BEREICHE[S.bereich];
+    const W = this._mobil ? 340 : 520, H = art === "watt" ? 190 : 160, L = 42, R = 8, O = 24, U = 22;
+    const pw = W - L - R, ph = H - O - U;
+    const werte = art === "watt" ? S.kurve.map((k) => k.w) : S.balken.map((b) => b.kwh);
+    const oben = drGrenze(Math.max(0, ...werte.filter((v) => v != null)) * (art === "kwh" && werte.length <= 7 ? 1.18 : 1.05));
+    const y = (v) => O + ph - (v / oben) * ph;
+    const n = werte.length;
+    let svg = "";
+    for (let i = 0; i <= 4; i++) {
+      const v = (oben / 4) * i, yy = y(v).toFixed(1);
+      svg += `<line class="dr-dg-gitter" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}"/><text class="dr-dg-achse" x="${L - 6}" y="${(+yy + 3.5).toFixed(1)}" text-anchor="end">${zahl(v, art === "watt" ? 0 : oben <= 2 ? 2 : oben <= 20 ? 1 : 0)}</text>`;
+    }
+    svg += `<text class="dr-dg-achse dr-dg-einheit" x="${L - 6}" y="${O - 12}" text-anchor="end">${art === "watt" ? "W" : "kWh"}</text>`;
+    if (art === "watt") {
+      // Marken der x-Achse: alle 6 Stunden, jeden Tag bzw. jeden 5. Tag
+      const x = (t) => L + ((t - S.start) / (S.ende - S.start)) * pw;
+      const marken = [];
+      const t = new Date(S.start); t.setMinutes(0, 0, 0);
+      if (B.periode === "hour") { t.setHours(Math.ceil(t.getHours() / 6) * 6); for (let m = t.getTime(); m < S.ende; m += 6 * 3600e3) marken.push(m); }
+      else {
+        t.setHours(0); t.setDate(t.getDate() + 1);
+        for (let k = 0; t.getTime() < S.ende; k++, t.setDate(t.getDate() + 1)) if (B.ms < 8 * 86400e3 || k % 5 === 0) marken.push(t.getTime());
+      }
+      marken.forEach((m) => {
+        const xx = x(m);
+        if (xx > L + 10 && xx < W - R - 10) svg += `<line class="dr-dg-strich" x1="${xx.toFixed(1)}" x2="${xx.toFixed(1)}" y1="${O + ph}" y2="${O + ph + 4}"/><text class="dr-dg-achse" x="${xx.toFixed(1)}" y="${H - 5}" text-anchor="middle">${this._drStromZeit(m, "watt")}</text>`;
+      });
+      // Fläche und Linie, Lücken ohne Messung bleiben offen
+      const bw = pw / n;
+      let linie = "", flaeche = "", offen = false;
+      werte.forEach((v, k) => {
+        const xx = (L + bw * (k + 0.5)).toFixed(1);
+        if (v == null) { if (offen) { flaeche += `L${(L + bw * (k - 0.5)).toFixed(1)},${O + ph}Z`; offen = false; } return; }
+        const yy = y(v).toFixed(1);
+        if (!offen) { linie += `M${xx},${yy}`; flaeche += `M${xx},${O + ph}L${xx},${yy}`; offen = true; }
+        else { linie += `L${xx},${yy}`; flaeche += `L${xx},${yy}`; }
+      });
+      if (offen) flaeche += `L${(L + bw * (n - 0.5)).toFixed(1)},${O + ph}Z`;
+      svg = `<defs><linearGradient id="dr-dg-verlauf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3ee6a8" stop-opacity=".45"/><stop offset="1" stop-color="#3ee6a8" stop-opacity="0"/></linearGradient></defs>${svg}
+        <path class="dr-dg-flaeche" d="${flaeche}" fill="url(#dr-dg-verlauf)"/><path class="dr-dg-linie" d="${linie}"/>`;
+    } else {
+      const bw = pw / n, luecke = Math.min(8, bw * 0.28);
+      const preis = this._drStromPreis().preis;
+      const jede = n <= 8 ? 1 : n <= 24 ? 6 : 5;
+      S.balken.forEach((b, k) => {
+        const xx = L + bw * k + luecke / 2, w = bw - luecke;
+        if (b.kwh != null && b.kwh > 0) {
+          const h = Math.max(1.5, O + ph - y(b.kwh));
+          svg += `<rect class="dr-dg-saeule" data-i="${k}" x="${xx.toFixed(1)}" y="${(O + ph - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="${Math.min(4, w / 3).toFixed(1)}" style="animation-delay:${k * 12}ms"/>`;
+          if (n <= 8) svg += `<text class="dr-dg-wert" x="${(xx + w / 2).toFixed(1)}" y="${(O + ph - h - 4).toFixed(1)}" text-anchor="middle">${zahl(b.kwh * preis, 2)} €</text>`;
+        }
+        if (k % jede === 0) svg += `<text class="dr-dg-achse" x="${(xx + w / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle">${this._drStromZeit(b.t, "kwh")}</text>`;
+      });
+    }
+    svg += `<line class="dr-dg-zeiger" x1="0" x2="0" y1="${O}" y2="${O + ph}" style="display:none"/>${art === "watt" ? `<circle class="dr-dg-punkt" r="4" cx="0" cy="0" style="display:none"/>` : ""}
+      <rect class="dr-dg-fang" x="${L}" y="${O}" width="${pw}" height="${ph}" fill="transparent"/>`;
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${art === "watt" ? "Leistung über die Zeit" : "Energie pro Abschnitt"}" data-w="${W}" data-l="${L}" data-pw="${pw}" data-o="${O}" data-ph="${ph}" data-oben="${oben}">${svg}</svg>`;
+  },
+  _drDiagrammInfo(art, k) {
+    const S = this._drStrom;
+    if (art === "watt") {
+      const p = S.kurve[k];
+      if (!p) return "";
+      return `<span>${esc(this._drStromZeit(p.t + (S.ende - S.start) / S.kurve.length / 2, "watt", true))}</span><strong>${p.w == null ? "keine Messung" : `${zahl(p.w, p.w < 10 ? 1 : 0)} W`}</strong>${p.max != null && p.w != null && p.max > p.w * 1.2 + 1 ? `<small>Spitze ${zahl(p.max)} W</small>` : ""}`;
+    }
+    const b = S.balken[k];
+    if (!b) return "";
+    const preis = this._drStromPreis().preis;
+    return `<span>${esc(this._drStromZeit(b.t, "kwh", true))}</span><strong>${b.kwh == null ? "keine Messung" : `${zahl(b.kwh, 2)} kWh`}</strong>${b.kwh != null ? `<small>${zahl(b.kwh * preis, 2)} €</small>` : ""}`;
+  },
+  // Antippen/Darüberfahren zeigt den Wert an der Stelle (ohne neu zu zeichnen)
+  _drDiagrammeVerbinden() {
+    this.shadowRoot.querySelectorAll(".dr-diagramm[data-art]").forEach((box) => {
+      const svg = box.querySelector("svg"), info = box.querySelector(".dr-dg-info");
+      if (!svg || !info || svg.dataset.verbunden) return;
+      svg.dataset.verbunden = "1";
+      const art = box.dataset.art, S = this._drStrom;
+      const n = art === "watt" ? S.kurve.length : S.balken.length;
+      const d = (k) => Number(svg.dataset[k]);
+      const zeiger = svg.querySelector(".dr-dg-zeiger"), punkt = svg.querySelector(".dr-dg-punkt");
+      const standard = info.innerHTML;
+      const zeigen = (e) => {
+        const r = svg.getBoundingClientRect();
+        const vx = ((e.clientX - r.left) / r.width) * d("w");
+        const k = Math.max(0, Math.min(n - 1, Math.floor(((vx - d("l")) / d("pw")) * n)));
+        const x = d("l") + (d("pw") / n) * (k + 0.5);
+        zeiger.setAttribute("x1", x); zeiger.setAttribute("x2", x); zeiger.style.display = "";
+        svg.querySelectorAll(".dr-dg-saeule.an").forEach((s) => s.classList.remove("an"));
+        const saeule = svg.querySelector(`.dr-dg-saeule[data-i="${k}"]`);
+        if (saeule) saeule.classList.add("an");
+        if (punkt) {
+          const w = S.kurve[k] && S.kurve[k].w;
+          if (w == null) punkt.style.display = "none";
+          else { punkt.setAttribute("cx", x); punkt.setAttribute("cy", d("o") + d("ph") - (w / d("oben")) * d("ph")); punkt.style.display = ""; }
+        }
+        info.innerHTML = this._drDiagrammInfo(art, k);
+        info.classList.add("an");
+      };
+      svg.addEventListener("pointermove", zeigen);
+      svg.addEventListener("pointerdown", zeigen);
+      svg.addEventListener("pointerleave", (e) => {
+        if (e.pointerType === "touch") return;   // am Handy bleibt der angetippte Wert stehen
+        zeiger.style.display = "none"; if (punkt) punkt.style.display = "none";
+        svg.querySelectorAll(".dr-dg-saeule.an").forEach((s) => s.classList.remove("an"));
+        info.innerHTML = standard; info.classList.remove("an");
+      });
+    });
+  },
+  _drStromSheetHtml() {
+    const S = this._drStrom || { bereich: "24h", laedt: true };
+    const B = DR_STROM_BEREICHE[S.bereich];
+    const w = this._drZ("watt", true);
+    const { preis, quelle } = this._drStromPreis();
+    let inhalt;
+    if (S.laedt) inhalt = `<div class="dr-dg-laedt"><span class="dreher"></span><span class="leise klein">Lade Verlauf …</span></div>`;
+    else if (S.fehler) inhalt = `<div class="hinweis amber">Der Verlauf konnte nicht geladen werden: ${esc(S.fehler)}</div>`;
+    else {
+      const kachel = (wert, name) => `<div><span>${name}</span><strong>${wert}</strong></div>`;
+      inhalt = `<div class="dr-werte dr-strom-summen">
+          ${kachel(`${zahl(S.summe, S.summe < 10 ? 2 : 1)} kWh`, "Verbrauch")}${kachel(`${zahl(S.summe * preis, 2)} €`, "Kosten")}
+          ${kachel(S.schnitt == null ? "–" : `${zahl(S.schnitt, S.schnitt < 10 ? 1 : 0)} W`, "Ø Leistung")}${kachel(S.spitze == null ? "–" : `${zahl(S.spitze)} W`, "Spitze")}</div>
+        <div class="dr-diagramm" data-art="watt"><div class="dr-dg-kopf"><h3>Leistung</h3><div class="dr-dg-info"><span class="leise">Antippen für Werte</span></div></div>${this._drDiagrammSvg("watt")}</div>
+        <div class="dr-diagramm" data-art="kwh"><div class="dr-dg-kopf"><h3>${B.periode === "hour" ? "Energie pro Stunde" : "Energie pro Tag"}</h3><div class="dr-dg-info"><span class="leise">${B.periode === "hour" ? "Säule antippen" : "Tag antippen"}</span></div></div>${this._drDiagrammSvg("kwh")}</div>
+        <p class="leise klein dr-strom-fuss">Strompreis ${zahl(preis, 2)} €/kWh${quelle === "Standard" ? " (Standardwert)" : ` (aus den ${quelle}-Einstellungen)`} · Energie: ${esc(S.quelle)}</p>`;
+      setTimeout(() => this._drDiagrammeVerbinden(), 0);
+    }
+    return `<div class="schleier" data-aktion="dialog-zu" data-einmal="schleier-dr-strom"></div>
+      <section class="sheet dr-strom-sheet" data-einmal="sheet-dr-strom" role="dialog" aria-label="Stromverbrauch">
+        <div class="griff"></div>
+        <header class="sheet-kopf"><div class="sheet-titel"><h2>⚡ Stromverbrauch</h2>
+          <div class="sub">Steckdose „${esc(this._drSteckdoseName())}“${w != null ? ` · jetzt ${zahl(w, w < 10 ? 1 : 0)} W` : ""}</div></div>
+          <button class="icon-knopf" data-aktion="dialog-zu" aria-label="Schließen">✕</button></header>
+        <div class="sheet-inhalt">
+          <div class="chips dr-strom-bereiche" role="tablist">${Object.entries(DR_STROM_BEREICHE).map(([k, b]) =>
+            `<button class="chip ${k === S.bereich ? "an" : ""}" data-aktion="dr-strom-bereich" data-b="${k}" role="tab" aria-selected="${k === S.bereich}">${b.name}</button>`).join("")}</div>
+          <div class="dr-strom-inhalt" data-einmal="dr-strom-${S.bereich}-${S.laedt ? "l" : "f"}">${inhalt}</div>
+        </div>
+      </section>`;
+  },
+
+  // Zusätzliche Dialoge dieser Ansicht (von panel.js _dialogHtml aufgerufen)
+  _drDialogeHtml() {
+    if (this._dialog === "dr-strom") return this._drStromSheetHtml();
+    if (this._dialog === "dr-steuer") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-st"></div><div class="dialog" role="alertdialog" data-einmal="dialog-dr-st">${this._drSteuerDialogHtml()}</div>`;
+    return "";
+  },
+
   // ---- Eingaben, von panel.js weitergereicht -----------------------------
   _drEingabe(t) {
     if (t.dataset.drTemp != null) { (this._drTempEntwurf = this._drTempEntwurf || {})[t.dataset.drTemp] = t.value; t.classList.remove("fehler"); return true; }
@@ -731,10 +1210,22 @@ const DruckerAnsicht = {
         this._drLuefterSetzen(el.dataset.wert != null ? el.dataset.wert : i ? i.value : "");
         return;
       }
-      case "dr-schalten": this._drSchaltZiel = el.dataset.ziel; this._dialog = "dr-schalten"; break;
+      case "dr-schalten":
+        this._drSchaltZiel = el.dataset.ziel;
+        if (el.dataset.ziel === "aus" && this._drRuhig()) { this._drSchalten(); return; }   // Ruhezustand: direkt aus
+        this._dialog = "dr-schalten";
+        break;
       case "dr-schalten-ok": this._drSchalten(); return;
-      case "dr-live": this._drLive = !this._drLive; break;
       case "dr-alle": this._drAlle = !this._drAlle; break;
+      case "dr-strom": this._dialog = "dr-strom"; this._drStromLaden(); break;
+      case "dr-strom-bereich": this._drStromLaden(el.dataset.b); break;
+      case "dr-steuer":
+        if (el.dataset.art === "fortsetzen") { this._drSteuerSenden("fortsetzen"); return; }   // Weitermachen ohne Nachfrage
+        this._drSteuerArt = el.dataset.art; this._dialog = "dr-steuer";
+        break;
+      case "dr-steuer-ok": this._drSteuerSenden(this._drSteuerArt); return;
+      case "dr-licht": this._drLichtSchalten(); return;
+      case "dr-tempo": this._drTempoSetzen(el.dataset.wert); return;
       case "dr-neu-laden": this._drVerlauf = null; this._drVerlaufLaden(); break;
       case "dr-druck": this._drOffen = el.dataset.uid; this._dialog = "dr-druck"; break;
       case "dr-kommentar-speichern": {
