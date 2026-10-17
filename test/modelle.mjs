@@ -322,6 +322,148 @@ await p.waitForTimeout(400);
 pruefe((await el(p).locator(".mod-zuletzt").count()) === 2, "Zuletzt geöffnet: 2 Dateien");
 await p.screenshot({ path: `${out}/m7-zuletzt.png` });
 
+// ---- Werkzeuge (v0.12): Auf Fläche legen, Beste Lage, Messen, Wandstärke, Skalieren ----
+// Testmodell aus Quadern: Platte 40 × 30 × 4 mm mit einer 0,5 mm dünnen Rippe (12 mm hoch) obendrauf
+function stlAusQuadern(quader) {
+  const d = [];
+  for (const [x0, y0, z0, x1, y1, z1] of quader) {
+    const viereck = (a, b, c, e) => d.push([a, b, c], [a, c, e]);   // gegen den Uhrzeigersinn von außen
+    viereck([x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]);
+    viereck([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
+    viereck([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
+    viereck([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]);
+    viereck([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]);
+    viereck([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
+  }
+  const buf = Buffer.alloc(84 + d.length * 50);
+  buf.writeUInt32LE(d.length, 80);
+  d.forEach((t, i) => t.forEach((pt, k) => pt.forEach((x, j) => buf.writeFloatLE(x, 84 + i * 50 + 12 + k * 12 + j * 4))));
+  return buf;
+}
+const wandStl = { name: "wand.stl", mimeType: "model/stl", buffer: stlAusQuadern([[0, 0, 0, 40, 30, 4], [10, 0, 4, 10.5, 30, 16]]) };
+const modWert = (p, f) => p.evaluate(f);
+const tippeAuf = async (p, punkt, touch = false) => {
+  const s = await p.evaluate((pt) => { const x = document.querySelector("filament-werkstatt-panel"); const q = x._buehne.projizieren(pt); const r = x._buehne.canvas.getBoundingClientRect(); return [r.left + q[0], r.top + q[1]]; }, punkt);
+  if (touch) await p.touchscreen.tap(s[0], s[1]); else await p.mouse.click(s[0], s[1]);
+  await p.waitForTimeout(250);
+};
+p = await seite(1400, 900);
+await el(p).locator('.nav-oben [data-id="modelle"]').click();
+await el(p).locator('input[data-mod="datei"]').setInputFiles("test/modelle/halter.stl");
+await warte(p, async () => (await el(p).locator(".mod-pin").count()) === 5);
+await el(p).locator('.tab[data-aktion="mod-tab"][data-id="werkzeuge"]').click();
+await p.waitForTimeout(400);
+pruefe((await el(p).locator(".mod-wz-zeile").count()) === 5 && (await el(p).locator(".mod-pin").count()) === 0, "Werkzeuge: Liste mit 5 Werkzeugen, Loch-Markierungen ausgeblendet");
+await p.screenshot({ path: `${out}/wz-werkzeuge-liste.png` });
+
+// Beste Lage
+await el(p).locator('.mod-wz-zeile[data-id="lage"]').click();
+pruefe(await warte(p, async () => (await el(p).locator(".mod-vergleich").count()) === 1), "Beste Lage: Vergleich berechnet");
+const lage = await modWert(p, () => { const l = document.querySelector("filament-werkstatt-panel")._mod.lage; return { anzahl: l.anzahl, jetzt: l.aktuell.flaeche, best: l.liste[0].flaeche }; });
+pruefe(lage.anzahl >= 10 && lage.anzahl <= 20, `Beste Lage: ${lage.anzahl} Lagen verglichen (Achsen und große Flächen)`);
+pruefe(lage.best < lage.jetzt - 100, `Beste Lage: weniger Stützfläche (${(lage.jetzt / 100).toFixed(1)} → ${(lage.best / 100).toFixed(1)} cm²)`);
+const lageText = await el(p).locator(".mod-vergleich").textContent();
+pruefe(lageText.includes("Jetzt") && lageText.includes("Vorschlag") && /cm²/.test(lageText), "Beste Lage: Jetzt und Vorschlag in cm²");
+await el(p).locator('[data-aktion="mod-wz-lage-wahl"][data-i="1"]').click();
+await p.waitForTimeout(300);
+pruefe(await modWert(p, () => { const b = document.querySelector("filament-werkstatt-panel")._buehne; return Math.abs(b.objekte.get("modell").m[10] - 1) > 0.01 && !b.objekte.get("grundriss").sichtbar; }), "Beste Lage: andere Lage antippen zeigt die Vorschau");
+await el(p).locator('[data-aktion="mod-wz-lage-wahl"][data-i="0"]').click();
+await p.waitForTimeout(400);
+await p.screenshot({ path: `${out}/wz-beste-lage-vorschau.png` });
+await el(p).locator('[data-aktion="mod-wz-lage-anwenden"]').click();
+await warte(p, async () => modWert(p, () => { const m = document.querySelector("filament-werkstatt-panel")._mod; return !!m.rueck && !m.dreht; }));
+const nachLage = await modWert(p, () => { const m = document.querySelector("filament-werkstatt-panel")._mod; return { f: m.ueber.flaeche, z: m.grenzen.min[2], rueck: !!m.rueck }; });
+pruefe(Math.abs(nachLage.f - lage.best) < 1 && Math.abs(nachLage.z) < 0.01 && nachLage.rueck, `Beste Lage übernommen: ${(nachLage.f / 100).toFixed(1)} cm² Stützen, tiefster Punkt auf dem Bett`);
+pruefe(await warte(p, async () => (await el(p).locator(".mod-inhalt").textContent()).includes("schon am wenigsten Stützen")), "Danach: jetzige Lage ist die beste");
+await p.screenshot({ path: `${out}/wz-beste-lage-uebernommen.png` });
+await el(p).locator('[data-aktion="mod-wz-rueck"]').click();
+await p.waitForTimeout(400);
+pruefe(Math.abs(await modWert(p, () => document.querySelector("filament-werkstatt-panel")._mod.ueber.flaeche) - lage.jetzt) < 1, "Rückgängig: alte Lage wieder da");
+
+// Skalieren: Löcher vorher/nachher
+await el(p).locator('.mod-wz[data-id="skala"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator('input[type="range"][data-mod="skala"]').count()) === 1 && (await el(p).locator('[data-mod="skala"]').evaluate((r) => r.min === "10" && r.max === "400")), "Skalieren: Schieber 10–400 %");
+await el(p).locator('[data-mod="skala"]').evaluate((r) => { r.value = 120; r.dispatchEvent(new Event("input", { bubbles: true })); r.dispatchEvent(new Event("change", { bubbles: true })); });
+await p.waitForTimeout(250);
+let skInfo = (await el(p).locator("#mod-skala-info").textContent()).replace(/\s+/g, " ");
+pruefe(skInfo.includes("93,6 × 48,0 × 19,2") && /g → \d+ g/.test(skInfo), `Skalieren 120 %: neue Maße und Gewicht in der Vorschau (${skInfo.slice(0, 60)})`);
+pruefe(skInfo.includes("Ø 4,20 → 5,04 mm, passt nicht mehr zum M3-Einsatz"), "Skalieren: Hinweis „Ø 4,20 → 5,04 mm, passt nicht mehr zum M3-Einsatz“");
+pruefe(await modWert(p, () => Math.abs(document.querySelector("filament-werkstatt-panel")._buehne.objekte.get("modell").m[0] - 1.2) < 1e-6), "Skalieren: Vorschau im 3D-Bild");
+await el(p).locator('[data-mod="skala"]').click();   // gelbe Wertbox zeigen
+await p.screenshot({ path: `${out}/wz-skalieren-vorschau.png` });
+// Zielmaß: Z auf 8 mm → 50 %
+await el(p).locator("#mod-skala-2").fill("8");
+await p.waitForTimeout(200);
+pruefe(await modWert(p, () => Math.abs(document.querySelector("filament-werkstatt-panel")._mod.skala - 50) < 1e-6) && (await el(p).locator("#mod-skala-0").inputValue()) === "39", "Skalieren auf Maß: Z = 8 mm → 50 %, X geht mit (39 mm)");
+await el(p).locator('[data-aktion="mod-wz-skala-setzen"][data-p="120"]').click();
+await el(p).locator('[data-aktion="mod-wz-skala-anwenden"]').click();
+await p.waitForTimeout(600);
+mm = (await el(p).locator(".mod-inhalt").textContent()).replace(/\s+/g, " ");
+pruefe(mm.includes("Löcher nach dem Skalieren auf 120 %") && mm.includes("Loch 2: Ø 4,20 → 5,04 mm, passt nicht mehr zum M3-Einsatz"), "Nach dem Skalieren: Löcher vorher/nachher mit Hinweis");
+const nachSkala = await modWert(p, () => { const m = document.querySelector("filament-werkstatt-panel")._mod; return { g: m.grenzen.groesse, v: m.kenn.volumen, z: m.grenzen.min[2] }; });
+pruefe(Math.abs(nachSkala.g[0] - 93.6) < 0.01 && Math.abs(nachSkala.g[2] - 19.2) < 0.01 && Math.abs(nachSkala.z) < 1e-4, "Skaliert: Geometrie 93,6 × 48 × 19,2 mm, steht auf dem Bett");
+await p.screenshot({ path: `${out}/wz-skalieren-loecher.png` });
+await el(p).locator('.tab[data-aktion="mod-tab"][data-id="loecher"]').click();
+pruefe(await warte(p, async () => ((await el(p).locator(".mod-loecher").textContent()) || "").includes("Ø 5,04")), "Löcher neu erkannt: Ø 5,04 mm");
+await el(p).locator('.tab[data-aktion="mod-tab"][data-id="werkzeuge"]').click();
+await el(p).locator('[data-aktion="mod-wz-rueck"]').click();
+await p.waitForTimeout(400);
+pruefe(Math.abs((await modWert(p, () => document.querySelector("filament-werkstatt-panel")._mod.grenzen.groesse[0])) - 78) < 0.01, "Skalieren rückgängig: wieder 78 mm");
+
+// Wandstärke und Auf Fläche legen am Testmodell mit dünner Rippe
+await el(p).locator(".mod-plus").click();
+await el(p).locator('.dialog input[data-mod="datei"]').setInputFiles(wandStl);
+await warte(p, async () => (await el(p).locator(".mod-masse").count()) === 1);
+await el(p).locator('.tab[data-aktion="mod-tab"][data-id="werkzeuge"]').click();
+await el(p).locator('.mod-wz-zeile[data-id="waende"]').click();
+pruefe(await warte(p, async () => (await el(p).locator(".mod-duenn-hinweis").count()) === 1), "Wandstärke: dünne Rippe erkannt");
+const wand = await modWert(p, () => { const d = document.querySelector("filament-werkstatt-panel")._mod.duenn; return { n: d.markiert.reduce((s, x) => s + x, 0), f: d.flaeche, min: d.min }; });
+pruefe(wand.n === 4 && Math.abs(wand.f - 720) < 1 && Math.abs(wand.min - 0.5) < 0.01, `Wandstärke: 0,5 mm an beiden Seiten der Rippe (${wand.n} Dreiecke, ${(wand.f / 100).toFixed(1)} cm²)`);
+pruefe((await el(p).locator(".mod-duenn-hinweis").textContent()).includes("dünner als 0,90 mm"), "Wandstärke: Grenze 0,90 mm für die 0,4-mm-Düse");
+await el(p).locator('[data-aktion="mod-ansicht"][data-id="vorne"]').click();
+await p.waitForTimeout(700);
+await p.screenshot({ path: `${out}/wz-wandstaerke-rot.png` });
+await el(p).locator('[data-aktion="mod-duese"][data-id="0.2"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator("#mod-waende-status").textContent()).includes("✓ Alle gemessenen Wände") && await modWert(p, () => document.querySelector("filament-werkstatt-panel")._mod.duenn.anzahl === 0), "Mit 0,2-mm-Düse ist die Rippe dick genug");
+await el(p).locator('[data-aktion="mod-duese"][data-id="0.4"]').click();
+await p.waitForTimeout(200);
+
+// Messen: zwei Punkte auf der Platte
+await el(p).locator('.mod-wz[data-id="messen"]').click();
+await el(p).locator('.mod-w-zone.flaeche[data-d="0,0,1"]').evaluate((x) => x.click());
+await p.waitForTimeout(800);
+pruefe((await el(p).locator(".mod-wz-hinweis").count()) === 1, "Messen: Hinweis im 3D-Bild");
+const ver = await modWert(p, () => document.querySelector("filament-werkstatt-panel")._mod.grenzen.min);
+await tippeAuf(p, [ver[0] + 5, ver[1] + 5, 4]);
+await tippeAuf(p, [ver[0] + 35, ver[1] + 25, 4]);
+const mess = await modWert(p, () => { const q = document.querySelector("filament-werkstatt-panel")._mod.messPunkte; return q.length === 2 ? Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]) : 0; });
+pruefe(Math.abs(mess - Math.hypot(30, 20)) < 0.4, `Messen: Abstand ≈ 36,06 mm (${mess.toFixed(2)})`);
+const messText = (await el(p).locator(".mod-mess-ergebnis").textContent()).replace(/\s+/g, " ");
+pruefe(/ΔX ?\d/.test(messText) && /ΔY ?\d/.test(messText) && messText.includes("ΔZ0,00"), `Messen: ΔX, ΔY, ΔZ angezeigt (${messText.trim()})`);
+pruefe((await el(p).locator("#mod-mess-text").textContent()).includes("mm") && (await el(p).locator("#mod-mess-l").count()) === 1, "Messen: Linie mit Abstand im 3D-Bild");
+await el(p).locator('[data-aktion="mod-ansicht"][data-id="iso"]').click();
+await p.waitForTimeout(800);
+await p.screenshot({ path: `${out}/wz-messen.png` });
+await el(p).locator('.mod-wz-hinweis [data-aktion="mod-wz-mess-weg"]').click();
+await p.waitForTimeout(200);
+pruefe((await el(p).locator("#mod-mess-l").count()) === 0 && await modWert(p, () => document.querySelector("filament-werkstatt-panel")._mod.messPunkte.length === 0), "Messen: Löschen entfernt die Linie");
+
+// Auf Fläche legen: rechte Seite der Platte antippen → sie liegt danach unten, Z = 40 mm
+await el(p).locator('.mod-wz[data-id="flaeche"]').click();
+await el(p).locator('.mod-w-zone.flaeche[data-d="1,0,0"]').evaluate((x) => x.click());
+await p.waitForTimeout(800);
+await p.screenshot({ path: `${out}/wz-auf-flaeche-legen-vorher.png` });
+const gr = await modWert(p, () => document.querySelector("filament-werkstatt-panel")._mod.grenzen);
+await tippeAuf(p, [gr.max[0], (gr.min[1] + gr.max[1]) / 2, 2]);
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/wz-auf-flaeche-legen-animation.png` });
+await warte(p, async () => modWert(p, () => { const m = document.querySelector("filament-werkstatt-panel")._mod; return !!m.rueck && !m.dreht; }));
+const gelegt = await modWert(p, () => { const m = document.querySelector("filament-werkstatt-panel")._mod; return { g: m.grenzen.groesse, z: m.grenzen.min[2], rueck: m.rueck && m.rueck.text }; });
+pruefe(Math.abs(gelegt.g[2] - 40) < 0.01 && Math.abs(gelegt.z) < 1e-4 && gelegt.rueck === "Auf Fläche legen", `Auf Fläche legen: rechte Seite liegt unten, jetzt ${gelegt.g.map((x) => x.toFixed(1)).join(" × ")} mm`);
+await p.screenshot({ path: `${out}/wz-auf-flaeche-legen-nachher.png` });
+
 // ---- Handy ----
 p = await seite(390, 844, true);
 await el(p).locator('.nav-unten [data-id="modelle"]').click();
@@ -407,6 +549,65 @@ pruefe((await el(p).locator(".sheet").count()) === 1, "Kurzes Wischen: bleibt of
 await wisch(box.y + 20, box.y + 320, 10);
 await p.waitForTimeout(500);
 pruefe((await el(p).locator(".sheet").count()) === 0, "Weit nach unten wischen: geschlossen");
+
+// ---- Handy (v0.12): Warteschlange angedockt über der unteren Leiste, Werkzeuge ----
+p = await seite(390, 844, true);
+await el(p).locator('.nav-unten [data-id="modelle"]').click();
+await el(p).locator('input[data-mod="datei"]').setInputFiles("test/modelle/halter.stl");
+await warte(p, async () => (await el(p).locator(".mod-pin").count()) === 5);
+const dock = async () => p.evaluate(() => {
+  const r = document.querySelector("filament-werkstatt-panel").shadowRoot;
+  const f = r.querySelector(".mod-fuss").getBoundingClientRect(), n = r.querySelector(".nav-unten").getBoundingClientRect(), h = r.querySelector(".haupt");
+  h.scrollTop = h.scrollHeight;
+  const inhalt = r.querySelector(".mod-inhalt").lastElementChild || r.querySelector(".mod-inhalt");
+  return { fussUnten: f.bottom, fussOben: f.top, navOben: n.top, inhaltUnten: inhalt.getBoundingClientRect().bottom, links: f.left, breite: f.width, imBild: !r.querySelector(".haupt").contains(r.querySelector(".mod-fuss")) };
+});
+for (const tab of ["uebersicht", "loecher", "schichten", "werkzeuge"]) {
+  await el(p).locator(`.tab[data-aktion="mod-tab"][data-id="${tab}"]`).click();
+  await p.waitForTimeout(350);
+  const d = await dock();
+  pruefe(Math.abs(d.fussUnten - d.navOben) <= 1 && d.links === 0 && d.breite === 390 && d.imBild, `Handy (${tab}): Warteschlange als Leiste direkt über der Navigation`);
+  pruefe(d.inhaltUnten <= d.fussOben + 1, `Handy (${tab}): Inhalt endet über der Leiste (${Math.round(d.inhaltUnten)} ≤ ${Math.round(d.fussOben)})`);
+}
+await p.screenshot({ path: `${out}/wz-handy-warteschlange-angedockt.png` });
+const wsVor = await p.evaluate(() => document.querySelector("filament-werkstatt-panel")._daten.warteschlange.length);
+await el(p).locator('.mod-fuss [data-aktion="ws-aus-modell"]').click();
+await p.waitForTimeout(200);
+pruefe(await p.evaluate((n) => document.querySelector("filament-werkstatt-panel")._daten.warteschlange.length === n + 1, wsVor), "Handy: angedockter Knopf legt einen Auftrag an");
+await p.evaluate(() => { document.querySelector("filament-werkstatt-panel").shadowRoot.querySelector(".haupt").scrollTop = 0; });
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/wz-handy-werkzeuge.png` });
+await el(p).locator('.mod-wz-zeile[data-id="messen"]').click();
+await p.waitForTimeout(300);
+const vh = await modWert(p, () => document.querySelector("filament-werkstatt-panel")._mod.grenzen);
+await tippeAuf(p, [vh.min[0] + 6, vh.min[1] + 4, vh.max[2]], true);
+await tippeAuf(p, [vh.max[0] - 6, vh.max[1] - 4, vh.max[2]], true);
+pruefe(await modWert(p, () => document.querySelector("filament-werkstatt-panel")._mod.messPunkte.length === 2) && (await el(p).locator("#mod-mess-text").count()) === 1, "Handy: Messen mit zwei Fingertipps");
+await p.evaluate(() => { document.querySelector("filament-werkstatt-panel").shadowRoot.querySelector(".haupt").scrollTop = 0; });
+await p.waitForTimeout(300);
+await p.screenshot({ path: `${out}/wz-handy-messen.png` });
+await el(p).locator(".mod-mess-ergebnis").scrollIntoViewIfNeeded();
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/wz-handy-messen-ergebnis.png` });
+await el(p).locator('.mod-wz[data-id="lage"]').click();
+await warte(p, async () => (await el(p).locator(".mod-vergleich").count()) === 1);
+await el(p).locator(".mod-vergleich").scrollIntoViewIfNeeded();
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/wz-handy-beste-lage.png` });
+await el(p).locator('.mod-wz[data-id="skala"]').click();
+await el(p).locator('[data-aktion="mod-wz-skala-setzen"][data-p="120"]').click();
+await p.waitForTimeout(250);
+await el(p).locator("#mod-skala-info").scrollIntoViewIfNeeded();
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/wz-handy-skalieren.png` });
+await el(p).locator('.mod-wz[data-id="waende"]').click();
+await warte(p, async () => (await el(p).locator("#mod-waende-status .hinweis").count()) === 1);
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/wz-handy-wandstaerke.png` });
+await el(p).locator('.mod-wz[data-id="flaeche"]').click();
+await p.evaluate(() => { document.querySelector("filament-werkstatt-panel").shadowRoot.querySelector(".haupt").scrollTop = 0; });
+await p.waitForTimeout(300);
+await p.screenshot({ path: `${out}/wz-handy-auf-flaeche-legen.png` });
 
 await b.close();
 if (fehler.length) { console.log("\nFEHLER:\n" + fehler.join("\n")); process.exit(1); }

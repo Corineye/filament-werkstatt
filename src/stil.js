@@ -1046,4 +1046,91 @@ input[type=range]:active::-webkit-slider-thumb { background: var(--gelb); box-sh
 .dr-l-stift { position: absolute; top: 6px; right: 8px; font-style: normal; font-size: 11px; color: var(--leise); }
 .dr-stufen { margin: 12px 0 4px; }
 .dr-stufen .chip { min-width: 54px; }
+
+/* ==== 3D-Modelle: Werkzeuge (Auflegen, Beste Lage, Messen, Wandstärke, Skalieren), angedockte Warteschlange (v0.12) ==== */
+/* Handy: Warteschlange als feste Leiste direkt über der unteren Navigation, der Inhalt endet darüber */
+.mobil .mod-fuss.dock { position: absolute; left: 0; right: 0; bottom: var(--mod-nav-h, 64px); z-index: 2; margin: 0; padding: 8px 16px; border: none; border-top: 1px solid var(--rand); border-radius: 0;
+  background: rgba(8,12,11,.9); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 -10px 24px rgba(0,0,0,.35); }
+.mobil .mod-fuss.dock .knopf { min-height: 44px; }
+.mobil .mod-raster { padding-bottom: var(--mod-fuss-h, 0px); }
+/* Vier Reiter passen nebeneinander */
+.mod-tabs { gap: 0; padding: 4px 8px 0; overflow-x: auto; scrollbar-width: none; }
+.mod-tabs .tab { flex: 1 0 auto; padding: 10px 9px; font-size: 13.5px; white-space: nowrap; text-align: center; }
+.mobil .mod-tabs .tab { font-size: 13px; padding: 10px 6px; }
+/* Werkzeug-Liste (ohne Auswahl) und Leiste zum Wechseln */
+.mod-wz-einleitung { margin: 0 0 12px; font-size: 13px; }
+.mod-wz-liste { display: grid; gap: 8px; }
+.mod-wz-zeile { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 10px 12px 10px 10px; border-radius: 14px; background: rgba(0,0,0,.18); border: 1px solid var(--rand);
+  transition: border-color .15s, background .15s, transform .15s; animation: ansicht-rein .3s cubic-bezier(.2,.8,.2,1) both; }
+.mod-wz-zeile:nth-child(2) { animation-delay: .03s; } .mod-wz-zeile:nth-child(3) { animation-delay: .06s; } .mod-wz-zeile:nth-child(4) { animation-delay: .09s; } .mod-wz-zeile:nth-child(5) { animation-delay: .12s; }
+.mod-wz-zeile:hover, .mod-wz-zeile:focus-visible { border-color: rgba(62,230,168,.45); background: var(--mint-weich); outline: none; }
+.mod-wz-zeile:active { transform: scale(.985); }
+.mod-wz-zeile > .mod-ico { width: 22px; height: 22px; padding: 9px; border-radius: 12px; color: var(--mint); background: rgba(62,230,168,.1); border: 1px solid rgba(62,230,168,.22); }
+.mod-wz-zeile > span:not(.mod-wz-pfeil) { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.mod-wz-zeile strong { font-size: 14px; }
+.mod-wz-zeile small { font-size: 12px; color: var(--leise); }
+.mod-wz-pfeil { color: var(--leise); font-size: 22px; line-height: 1; }
+.mod-wz-leiste { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; padding: 4px; margin-bottom: 14px; border-radius: 16px; background: rgba(0,0,0,.28); border: 1px solid var(--rand); }
+.mod-wz { display: grid; justify-items: center; gap: 4px; padding: 8px 2px 6px; border-radius: 12px; color: var(--leise); font-size: 11px; font-weight: 600; transition: color .15s, background .15s, box-shadow .15s; }
+.mod-wz .mod-ico { width: 22px; height: 22px; }
+.mod-wz span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod-wz:hover { color: var(--text); background: var(--flaeche-hover); }
+.mod-wz.an { color: var(--mint); background: var(--mint-weich); box-shadow: inset 0 0 0 1px rgba(62,230,168,.45); }
+.mod-wz-karte { animation: ansicht-rein .22s ease; }
+.mod-wz-karte h3 { margin-top: 0; }
+.mod-wz-aktiv { display: flex; align-items: center; gap: 10px; }
+.mod-wz-puls { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--mint); animation: wz-puls 1.6s ease-out infinite; }
+@keyframes wz-puls { 0% { box-shadow: 0 0 0 0 rgba(62,230,168,.6); } 100% { box-shadow: 0 0 0 10px rgba(62,230,168,0); } }
+/* Hinweis im 3D-Bild, solange Antippen erwartet wird */
+.mod-wz-hinweis { background: rgba(10,30,24,.82); border-color: rgba(62,230,168,.5); color: #c6f6e3; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.mod-wz-hinweis .mod-ico { width: 18px; height: 18px; color: var(--mint); }
+.mobil .mod-wz-hinweis { top: auto; bottom: 34px; justify-content: center; flex-wrap: wrap; row-gap: 6px; }
+/* Beste Lage: Vergleich als Balken */
+.mod-vergleich { display: grid; gap: 8px; margin: 12px 0 6px; }
+.mod-v-zeile { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.mod-v-zeile > span { color: var(--leise); }
+.mod-v-zeile strong { min-width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+.mod-balken { height: 10px; border-radius: 5px; background: rgba(255,255,255,.06); overflow: hidden; }
+.mod-balken i { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg, #ffb547, #ff6b6b); transition: width .45s cubic-bezier(.2,.8,.2,1); }
+.mod-v-zeile.vorschlag .mod-balken i { background: linear-gradient(90deg, #22b884, var(--mint)); }
+.mod-v-zeile.vorschlag strong { color: var(--mint); }
+.mod-v-text { color: var(--leise); margin: 0 0 4px; }
+.mod-lage-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.mod-lage-chips .chip { display: grid; gap: 1px; padding: 6px 8px; border-radius: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.mod-lage-chips .chip strong { font-size: 13px; }
+.mod-lage-chips .chip small { font-size: 10.5px; color: var(--leise); }
+/* Messen */
+.mod-mess { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.mod-mess-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.mod-mess-linie { stroke: var(--gelb); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 7 5; filter: drop-shadow(0 0 4px rgba(255,213,74,.55)); animation: mess-laufen .9s linear infinite; }
+@keyframes mess-laufen { to { stroke-dashoffset: -12; } }
+.mod-mess-punkt { fill: var(--gelb); stroke: #1b1503; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(255,213,74,.8)); }
+.mod-mess-text { position: absolute; left: 0; top: 0; padding: 4px 10px; border-radius: 9px; background: var(--gelb); color: #1b1503; font-weight: 800; font-size: 14px;
+  white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 4px rgba(255,213,74,.16), 0 6px 18px rgba(0,0,0,.5); }
+.mod-mess-schritte { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 12px; }
+.mod-mess-schritte span { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; background: rgba(0,0,0,.2); border: 1px solid var(--rand); font-size: 13px; color: var(--leise); transition: color .2s, border-color .2s; }
+.mod-mess-schritte i { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 2px solid currentColor; font-style: normal; font-size: 12px; font-weight: 800; }
+.mod-mess-schritte .jetzt { color: var(--gelb); border-color: rgba(255,213,74,.5); }
+.mod-mess-schritte .fertig { color: var(--mint); border-color: rgba(62,230,168,.4); }
+.mod-mess-schritte .fertig i { background: var(--mint); border-color: var(--mint); color: #062018; }
+.mod-mess-ergebnis { display: grid; justify-items: center; gap: 6px; padding: 16px 12px; border-radius: 16px; border: 1px solid rgba(255,213,74,.35);
+  background: radial-gradient(260px 120px at 50% 0%, rgba(255,213,74,.12), transparent 70%), rgba(0,0,0,.22); animation: ansicht-rein .25s ease; }
+.mod-mess-ergebnis strong { font-size: 30px; color: var(--gelb); font-variant-numeric: tabular-nums; }
+.mod-mess-achsen { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.mod-mess-achsen span { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.05); font-size: 12px; font-weight: 800; }
+.mod-mess-achsen b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.mod-mess-achsen .a-x { color: #ff6b6b; }
+.mod-mess-achsen .a-y { color: #4fe08a; }
+.mod-mess-achsen .a-z { color: #5cc8ff; }
+/* Wandstärke und Skalieren */
+.mod-duenn-hinweis .mini { display: inline-block; margin: 6px 0 0; }
+.mod-skala-felder input { font-size: 15px; -moz-appearance: textfield; }
+.mod-skala-felder input::-webkit-inner-spin-button, .mod-skala-felder input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.mod-skala-schnell { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 2px 0 6px; }
+.mod-skala-schnell .chip { padding: 6px 0; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.mod-skala-loecher .hinweis { margin: 10px 0 4px; }
+.mod-skala-loch { display: flex; gap: 10px; align-items: center; margin: 6px 0; padding: 8px 10px; border-radius: 12px; font-size: 13px; background: rgba(0,0,0,.18); border: 1px solid var(--rand); }
+.mod-skala-loch.schlecht { border-color: rgba(255,181,71,.5); background: rgba(255,181,71,.08); color: #ffd59a; }
+.mod-skala-loch.gut .mod-nr { border-color: var(--mint); color: var(--mint); }
+.mod-skala-loecher .mini { margin: 4px 0 0; }
 `;

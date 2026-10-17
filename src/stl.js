@@ -79,18 +79,24 @@ function gewichtSchaetzen(kenn, dichte, { duese = 0.4, waende = 2, fuellung = 15
   return { gramm: (mm3 / 1000) * dichte, mm3, meter: mm3 / FILAMENT_QUERSCHNITT / 1000 };
 }
 
-// Flächen, die Stützen brauchen (Normale zeigt steiler als STUETZ_WINKEL nach unten, nicht auf dem Bett)
-function ueberhaenge(v) {
+// Flächen, die Stützen brauchen (Normale zeigt steiler als STUETZ_WINKEL nach unten, nicht auf dem Bett).
+// Mit „unten“ (Einheitsvektor) wird eine andere Lage bewertet, ohne das Modell zu drehen:
+// diese Richtung zeigt dann aufs Bett, die Höhe eines Punkts ist −(p·unten).
+function ueberhaenge(v, unten = null) {
   const grenze = -Math.cos((STUETZ_WINKEL * Math.PI) / 180);
   const markiert = new Uint8Array(v.length / 9);
+  const [ax, ay, az] = unten ? unten.map((x) => -x) : [0, 0, 1];   // „oben“ in Modellkoordinaten
+  let boden = 0;
+  if (unten) { boden = Infinity; for (let i = 0; i < v.length; i += 3) { const h = v[i] * ax + v[i + 1] * ay + v[i + 2] * az; if (h < boden) boden = h; } }
   let flaeche = 0;
   for (let t = 0, i = 0; i < v.length; i += 9, t++) {
     const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2];
     const wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
     const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
     const l = Math.hypot(nx, ny, nz) || 1;
-    const zMin = Math.min(v[i + 2], v[i + 5], v[i + 8]);
-    if (nz / l < grenze && zMin > 0.3) { markiert[t] = 1; flaeche += l / 2; }
+    if ((nx * ax + ny * ay + nz * az) / l >= grenze) continue;
+    const zMin = Math.min(v[i] * ax + v[i + 1] * ay + v[i + 2] * az, v[i + 3] * ax + v[i + 4] * ay + v[i + 5] * az, v[i + 6] * ax + v[i + 7] * ay + v[i + 8] * az) - boden;
+    if (zMin > 0.3) { markiert[t] = 1; flaeche += l / 2; }
   }
   return { markiert, flaeche };
 }
@@ -701,9 +707,10 @@ function drehMatrix(grad) {
     sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
     -sy, cy * sx, cy * cx];
 }
-function drehenGrad(v, grad) {
+function drehenGrad(v, grad) { return drehenMit(v, drehMatrix(grad)); }
+// Mit einer beliebigen Drehmatrix (3×3 zeilenweise) um die Modellmitte drehen, danach aufs Bett
+function drehenMit(v, R) {
   const g = meshGrenzen(v), c = [0, 1, 2].map((i) => (g.min[i] + g.max[i]) / 2);
-  const R = drehMatrix(grad);
   for (let i = 0; i < v.length; i += 3) {
     const x = v[i] - c[0], y = v[i + 1] - c[1], z = v[i + 2] - c[2];
     v[i] = R[0] * x + R[1] * y + R[2] * z + c[0];
@@ -711,6 +718,162 @@ function drehenGrad(v, grad) {
     v[i + 2] = R[6] * x + R[7] * y + R[8] * z + c[2];
   }
   return aufsBett(v);
+}
+
+// ---- Auf Fläche legen, beste Lage, Skalieren, Wandstärke (v0.12) -------------
+// Drehmatrix um die (normierte) Achse k mit Winkel w (Rodrigues), 3×3 zeilenweise
+function achsDrehung(k, w) {
+  const c = Math.cos(w), s = Math.sin(w), t = 1 - c, [x, y, z] = k;
+  return [t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+    t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+    t * x * z - s * y, t * y * z + s * x, t * z * z + c];
+}
+// Drehung, die den Vektor n genau nach unten (0, 0, −1) bringt: {achse, winkel}
+function drehungNachUnten(n) {
+  const l = Math.hypot(n[0], n[1], n[2]) || 1, x = n[0] / l, y = n[1] / l, z = n[2] / l;
+  const winkel = Math.acos(Math.max(-1, Math.min(1, -z)));
+  if (winkel < 1e-6) return { achse: [1, 0, 0], winkel: 0 };
+  if (Math.PI - winkel < 1e-6) return { achse: [1, 0, 0], winkel: Math.PI };   // zeigt nach oben: einmal um X wenden
+  const la = Math.hypot(x, y);   // Achse = n × (0, 0, −1)
+  return { achse: [-y / la, x / la, 0], winkel };
+}
+
+// Mögliche Lagen fürs Drucken: die sechs Achsrichtungen und die Normalen der größten ebenen Flächen.
+// Ergebnis: Richtungen (Einheitsvektoren), die beim Drucken nach unten aufs Bett zeigen würden.
+function lageKandidaten(v, anzahl = 20) {
+  const gruppen = new Map();
+  const Q = 24;   // Normalen auf etwa 2–3° runden, damit die Dreiecke einer ebenen Fläche zusammenfallen
+  for (let i = 0; i < v.length; i += 9) {
+    const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2];
+    const wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    const l = Math.hypot(nx, ny, nz);
+    if (l < 1e-12) continue;
+    const k = (Math.round((nx / l) * Q) + Q) * 4096 + (Math.round((ny / l) * Q) + Q) * 64 + (Math.round((nz / l) * Q) + Q);
+    let g = gruppen.get(k);
+    if (!g) gruppen.set(k, (g = [0, 0, 0, 0]));
+    g[0] += nx / 2; g[1] += ny / 2; g[2] += nz / 2; g[3] += l / 2;   // flächengewichtete Normale
+  }
+  const flaechen = [...gruppen.values()].sort((a, b) => b[3] - a[3]).slice(0, 40)
+    .map((g) => { const l = Math.hypot(g[0], g[1], g[2]) || 1; return [g[0] / l, g[1] / l, g[2] / l]; });
+  const liste = [];
+  const dazu = (n) => { if (liste.length < anzahl && !liste.some((x) => x[0] * n[0] + x[1] * n[1] + x[2] * n[2] > 0.9976)) liste.push(n); };   // mindestens 4° auseinander
+  [[0, 0, -1], [0, 0, 1], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]].forEach(dazu);
+  flaechen.forEach(dazu);
+  return liste;
+}
+
+// Gleichmäßig skalieren um die Mitte der Grundfläche, danach wieder aufs Bett
+function skalieren(v, f) {
+  const g = meshGrenzen(v), cx = (g.min[0] + g.max[0]) / 2, cy = (g.min[1] + g.max[1]) / 2, cz = g.min[2];
+  for (let i = 0; i < v.length; i += 3) { v[i] = cx + (v[i] - cx) * f; v[i + 1] = cy + (v[i + 1] - cy) * f; v[i + 2] = cz + (v[i + 2] - cz) * f; }
+  return aufsBett(v);
+}
+
+// Hüllkörper-Baum (BVH) für viele Strahlen: Dreiecke nach Mittelpunkten geteilt, Blätter mit höchstens 6 Dreiecken
+function bvhBauen(v) {
+  const n = v.length / 9;
+  const reihe = new Uint32Array(n), mitte = new Float32Array(n * 3), tb = new Float32Array(n * 6);
+  for (let t = 0; t < n; t++) {
+    reihe[t] = t;
+    const i = t * 9;
+    for (let k = 0; k < 3; k++) {
+      const a = v[i + k], b = v[i + 3 + k], c = v[i + 6 + k];
+      const lo = Math.min(a, b, c), hi = Math.max(a, b, c);
+      tb[t * 6 + k] = lo; tb[t * 6 + 3 + k] = hi; mitte[t * 3 + k] = (lo + hi) / 2;
+    }
+  }
+  const max = 2 * n + 1;   // ein Binärbaum mit n Blättern hat höchstens 2n − 1 Knoten
+  const box = new Float32Array(max * 6), start = new Uint32Array(max), anz = new Uint32Array(max), links = new Int32Array(max).fill(-1);
+  let knoten = 1;
+  const stapel = [0, 0, n];
+  while (stapel.length) {
+    const bis = stapel.pop(), von = stapel.pop(), k = stapel.pop();
+    let lx = Infinity, ly = Infinity, lz = Infinity, hx = -Infinity, hy = -Infinity, hz = -Infinity;
+    const mlo = [Infinity, Infinity, Infinity], mhi = [-Infinity, -Infinity, -Infinity];
+    for (let j = von; j < bis; j++) {
+      const t = reihe[j], b = t * 6;
+      if (tb[b] < lx) lx = tb[b]; if (tb[b + 1] < ly) ly = tb[b + 1]; if (tb[b + 2] < lz) lz = tb[b + 2];
+      if (tb[b + 3] > hx) hx = tb[b + 3]; if (tb[b + 4] > hy) hy = tb[b + 4]; if (tb[b + 5] > hz) hz = tb[b + 5];
+      for (let a = 0; a < 3; a++) { const c = mitte[t * 3 + a]; if (c < mlo[a]) mlo[a] = c; if (c > mhi[a]) mhi[a] = c; }
+    }
+    const o = k * 6;
+    box[o] = lx; box[o + 1] = ly; box[o + 2] = lz; box[o + 3] = hx; box[o + 4] = hy; box[o + 5] = hz;
+    start[k] = von; anz[k] = bis - von;
+    if (bis - von <= 6) continue;
+    const ex = mhi[0] - mlo[0], ey = mhi[1] - mlo[1], ez = mhi[2] - mlo[2];
+    const achse = ex >= ey && ex >= ez ? 0 : ey >= ez ? 1 : 2;
+    const schnitt = (mlo[achse] + mhi[achse]) / 2;
+    let i = von, j = bis - 1;
+    while (i <= j) {
+      if (mitte[reihe[i] * 3 + achse] < schnitt) i++;
+      else { const x = reihe[i]; reihe[i] = reihe[j]; reihe[j] = x; j--; }
+    }
+    if (i === von || i === bis) i = (von + bis) >> 1;   // alle Mittelpunkte gleich: einfach halbieren
+    links[k] = knoten;
+    stapel.push(knoten, von, i, knoten + 1, i, bis);
+    knoten += 2;
+  }
+  return { v, reihe, box, start, anz, links };
+}
+
+// Nächster Treffer entlang des Strahls (t > tMin, Dreieck „ohne“ wird übersprungen): {t, dreieck} oder null
+function bvhStrahl(bvh, o, d, tMin = 0, ohne = -1) {
+  const { v, reihe, box, start, anz, links } = bvh;
+  const ix = 1 / (d[0] || 1e-30), iy = 1 / (d[1] || 1e-30), iz = 1 / (d[2] || 1e-30);
+  let best = Infinity, dreieck = -1;
+  const stapel = [0];
+  while (stapel.length) {
+    const k = stapel.pop(), b = k * 6;
+    let t1 = (box[b] - o[0]) * ix, t2 = (box[b + 3] - o[0]) * ix;
+    let tn = Math.min(t1, t2), tf = Math.max(t1, t2);
+    t1 = (box[b + 1] - o[1]) * iy; t2 = (box[b + 4] - o[1]) * iy;
+    tn = Math.max(tn, Math.min(t1, t2)); tf = Math.min(tf, Math.max(t1, t2));
+    t1 = (box[b + 2] - o[2]) * iz; t2 = (box[b + 5] - o[2]) * iz;
+    tn = Math.max(tn, Math.min(t1, t2)); tf = Math.min(tf, Math.max(t1, t2));
+    if (tf < tn || tf < tMin || tn > best) continue;
+    if (links[k] >= 0) { stapel.push(links[k], links[k] + 1); continue; }
+    for (let j = start[k], e = start[k] + anz[k]; j < e; j++) {
+      const t = reihe[j];
+      if (t === ohne) continue;
+      const i = t * 9;
+      const e1x = v[i + 3] - v[i], e1y = v[i + 4] - v[i + 1], e1z = v[i + 5] - v[i + 2];
+      const e2x = v[i + 6] - v[i], e2y = v[i + 7] - v[i + 1], e2z = v[i + 8] - v[i + 2];
+      const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+      const det = e1x * px + e1y * py + e1z * pz;
+      if (Math.abs(det) < 1e-14) continue;
+      const inv = 1 / det, tx = o[0] - v[i], ty = o[1] - v[i + 1], tz = o[2] - v[i + 2];
+      const u = (tx * px + ty * py + tz * pz) * inv;
+      if (u < 0 || u > 1) continue;
+      const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+      const w = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
+      if (w < 0 || u + w > 1) continue;
+      const tt = (e2x * qx + e2y * qy + e2z * qz) * inv;
+      if (tt > tMin && tt < best) { best = tt; dreieck = t; }
+    }
+  }
+  return dreieck >= 0 ? { t: best, dreieck } : null;
+}
+
+// Wandstärke an einem Dreieck: vom Mittelpunkt gegen die Normale nach innen bis zur Rückseite der Wand.
+// richtung = +1 bei nach außen zeigenden Normalen, −1 bei „umgestülpten“ STL-Dateien. NaN = nicht messbar.
+function wandDicke(bvh, t, richtung = 1) {
+  const v = bvh.v, i = t * 9;
+  const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2];
+  const wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
+  const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+  const l = Math.hypot(nx, ny, nz);
+  if (l < 1e-12) return NaN;
+  const d = [(-nx * richtung) / l, (-ny * richtung) / l, (-nz * richtung) / l];
+  const o = [(v[i] + v[i + 3] + v[i + 6]) / 3, (v[i + 1] + v[i + 4] + v[i + 7]) / 3, (v[i + 2] + v[i + 5] + v[i + 8]) / 3];
+  const h = bvhStrahl(bvh, o, d, 1e-4, t);
+  if (!h) return NaN;
+  // Nur zählen, wenn der Strahl die Wand von innen verlässt (Rückseite getroffen)
+  const j = h.dreieck * 9;
+  const ax = v[j + 3] - v[j], ay = v[j + 4] - v[j + 1], az = v[j + 5] - v[j + 2];
+  const bx = v[j + 6] - v[j], by = v[j + 7] - v[j + 1], bz = v[j + 8] - v[j + 2];
+  const hn = ((ay * bz - az * by) * d[0] + (az * bx - ax * bz) * d[1] + (ax * by - ay * bx) * d[2]) * richtung;
+  return hn > 0 ? h.t : NaN;
 }
 
 // ---- G-Code ------------------------------------------------------------------
