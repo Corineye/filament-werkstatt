@@ -11,7 +11,19 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-from .const import BAMBU, CONF_DRUCKER, CONF_LISTE, CONF_PROTOKOLL, CONF_STECKDOSE, DOMAIN
+from .const import (
+    BAMBU,
+    CONF_DRUCKER,
+    CONF_LISTE,
+    CONF_PROTOKOLL,
+    CONF_RAUM_FEUCHTE,
+    CONF_RAUM_TEMP,
+    CONF_STECKDOSE,
+    DOMAIN,
+    RAUM_FEUCHTE_STANDARD,
+    RAUM_TEMP_STANDARD,
+    RAUM_WOERTER,
+)
 
 # Schlüssel der Seite → (Plattform, translation_key in ha-bambulab); mehrere Kandidaten möglich
 DRUCKER_SCHLUESSEL: dict[str, list[tuple[str, str]]] = {
@@ -122,6 +134,43 @@ def einstellungen(hass: HomeAssistant, konf: dict[str, Any], liste: str | None) 
         "steckdose": steckdose_entitaeten(hass, konf.get("steckdose")),
         "steckdose_name": _geraet_name(hass, konf.get("steckdose")),
         "liste": liste,
+        "raum_temp": konf.get(CONF_RAUM_TEMP) or None,
+        "raum_feuchte": konf.get(CONF_RAUM_FEUCHTE) or None,
+    }
+
+
+def raum_vorschlaege(hass: HomeAssistant) -> dict[str, str | None]:
+    """Temperatur- und Feuchtesensor im Raum des Druckers.
+
+    Zuerst die bekannten Sensoren im Arbeitszimmer, sonst ein Sensor mit passender
+    Geräteklasse, dessen Name „Arbeitszimmer“ oder „Werkstatt“ enthält.
+    Register und Zustände zusammen, damit es beim Start und für YAML-Sensoren klappt.
+    """
+    entitaeten = er.async_get(hass)
+    sensoren: dict[str, tuple[str | None, str]] = {}
+    for e in entitaeten.entities.values():
+        if e.domain == "sensor" and not e.disabled_by:
+            name = " ".join(filter(None, [e.entity_id, e.name, e.original_name])).lower()
+            sensoren[e.entity_id] = (e.device_class or e.original_device_class, name)
+    for s in hass.states.async_all("sensor"):
+        klasse, name = sensoren.get(s.entity_id, (None, s.entity_id))
+        sensoren[s.entity_id] = (
+            klasse or s.attributes.get("device_class"),
+            f"{name} {s.attributes.get('friendly_name') or ''}".lower(),
+        )
+
+    def finden(standard: str, klasse: str) -> str | None:
+        if standard in sensoren:
+            return standard
+        for wort in RAUM_WOERTER:
+            treffer = sorted(i for i, (k, n) in sensoren.items() if k == klasse and wort in n)
+            if treffer:
+                return treffer[0]
+        return None
+
+    return {
+        CONF_RAUM_TEMP: finden(RAUM_TEMP_STANDARD, "temperature"),
+        CONF_RAUM_FEUCHTE: finden(RAUM_FEUCHTE_STANDARD, "humidity"),
     }
 
 
@@ -130,6 +179,7 @@ def vorschlaege(hass: HomeAssistant) -> dict[str, Any]:
 
     Drucker: der einzige Bambu-Lab-Drucker. Steckdose: das einzige Gerät mit Schalter,
     dessen Name nach Drucker klingt. Liste: eine vorhandene Liste „3D-Drucke“.
+    Raumklima: siehe raum_vorschlaege().
     Gelesen wird aus den Registern, damit es auch beim Start klappt, bevor alles geladen ist.
     """
     geraete = dr.async_get(hass)
@@ -158,4 +208,6 @@ def vorschlaege(hass: HomeAssistant) -> dict[str, Any]:
         ):
             v[CONF_LISTE] = e.entity_id
             break
+
+    v.update({k: w for k, w in raum_vorschlaege(hass).items() if w})
     return v

@@ -1931,7 +1931,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       <p class="leise">Prüft, ob die Seite alles in Home Assistant erreicht. Version ${VERSION}.</p>
       <ul class="check">${liste}</ul>
       <button class="knopf" data-aktion="pruefen" ${c && c.laeuft ? "disabled" : ""}>${c && c.laeuft ? "Prüft …" : "Neu prüfen"}</button>
-    </div>${this._sicherungKarteHtml()}`;
+    </div>${this._updateKarteHtml()}${this._sicherungKarteHtml()}`;
   }
 }
 

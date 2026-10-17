@@ -1,6 +1,6 @@
 """Einrichtung über Einstellungen › Geräte & Dienste.
 
-Drucker, Steckdose und Druckliste werden vorgeschlagen, wenn sie eindeutig sind;
+Drucker, Steckdose, Druckliste und Raumklima-Sensoren werden vorgeschlagen, wenn sie eindeutig sind;
 man muss also meist nur auf Absenden drücken. Später änderbar über „Konfigurieren“.
 """
 
@@ -21,7 +21,16 @@ from homeassistant.helpers.selector import (
     EntitySelectorConfig,
 )
 
-from .const import BAMBU, CONF_DRUCKER, CONF_LISTE, CONF_PROTOKOLL, CONF_STECKDOSE, DOMAIN
+from .const import (
+    BAMBU,
+    CONF_DRUCKER,
+    CONF_LISTE,
+    CONF_PROTOKOLL,
+    CONF_RAUM_FEUCHTE,
+    CONF_RAUM_TEMP,
+    CONF_STECKDOSE,
+    DOMAIN,
+)
 from .geraete import vorschlaege
 
 
@@ -35,6 +44,8 @@ def _schema(werte: dict[str, Any]) -> vol.Schema:
             DeviceSelectorConfig(entity=EntityFilterSelectorConfig(domain="switch"))
         ),
         opt(CONF_LISTE): EntitySelector(EntitySelectorConfig(domain="todo")),
+        opt(CONF_RAUM_TEMP): EntitySelector(EntitySelectorConfig(domain="sensor", device_class="temperature")),
+        opt(CONF_RAUM_FEUCHTE): EntitySelector(EntitySelectorConfig(domain="sensor", device_class="humidity")),
         vol.Optional(CONF_PROTOKOLL, default=werte.get(CONF_PROTOKOLL, True)): BooleanSelector(),
     })
 
@@ -58,12 +69,12 @@ class FilamentWerkstattFlow(ConfigFlow, domain=DOMAIN):
 
 
 class FilamentWerkstattOptionen(OptionsFlow):
-    """Drucker, Steckdose und Liste später ändern."""
+    """Drucker, Steckdose, Liste und Raumklima später ändern."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             # Leere Felder ausdrücklich leeren, sonst gilt der alte Wert aus data weiter
-            werte = {k: user_input.get(k) for k in (CONF_DRUCKER, CONF_STECKDOSE, CONF_LISTE)}
+            werte = {k: user_input.get(k) for k in (CONF_DRUCKER, CONF_STECKDOSE, CONF_LISTE, CONF_RAUM_TEMP, CONF_RAUM_FEUCHTE)}
             werte[CONF_PROTOKOLL] = user_input.get(CONF_PROTOKOLL, True)
             return self.async_create_entry(data=werte)
         aktuell = {**self.config_entry.data, **self.config_entry.options}

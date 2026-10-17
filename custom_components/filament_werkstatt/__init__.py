@@ -22,10 +22,25 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
 
-from .const import ALTE_AUTOMATION, CONF_DRUCKER, CONF_LISTE, CONF_PROTOKOLL, DOMAIN, PANEL_PFAD, URL_BASIS
+from .const import (
+    ALTE_AUTOMATION,
+    CONF_DRUCKER,
+    CONF_LISTE,
+    CONF_PROTOKOLL,
+    CONF_RAUM_FEUCHTE,
+    CONF_RAUM_TEMP,
+    DOMAIN,
+    PANEL_PFAD,
+    REPO,
+    SICHERUNG_BEHALTEN,
+    SICHERUNG_ORDNER,
+    SICHERUNG_STUNDE,
+    URL_BASIS,
+)
 from .modelle import ModellDatei, ModelleListe
-from .geraete import drucker_entitaeten, einstellungen, vorschlaege
+from .geraete import drucker_entitaeten, einstellungen, raum_vorschlaege, vorschlaege
 from .protokoll import DruckProtokoll
+from .sicherung import Sicherung
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +71,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             [StaticPathConfig(URL_BASIS, str(ORDNER), False)]
         )
         websocket_api.async_register_command(hass, ws_einstellungen)
+        websocket_api.async_register_command(hass, ws_sicherungen)
+        websocket_api.async_register_command(hass, ws_sicherung_lesen)
+        websocket_api.async_register_command(hass, ws_sicherung_jetzt)
+        websocket_api.async_register_command(hass, ws_update)
+        daten["sicherung"] = Sicherung(hass)
         hass.http.register_view(ModelleListe())
         hass.http.register_view(ModellDatei())
         daten["dateien"] = True
@@ -64,6 +84,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # damit die bestehende Druckliste weiter benutzt wird
     if CONF_PROTOKOLL not in _konf(entry):
         hass.config_entries.async_update_entry(entry, data={**entry.data, **vorschlaege(hass)})
+    # Einrichtung vor 0.12 (ohne Raumklima): einmal die Raumsensoren vorschlagen
+    if CONF_RAUM_TEMP not in _konf(entry) or CONF_RAUM_FEUCHTE not in _konf(entry):
+        raum = {k: w for k, w in raum_vorschlaege(hass).items() if k not in _konf(entry)}
+        hass.config_entries.async_update_entry(entry, data={**entry.data, **raum})
 
     konf = _konf(entry)
 
@@ -106,6 +130,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     )
 
         entry.async_on_unload(async_at_started(hass, alte_automation_pruefen))
+
+    # Nächtliche Sicherung der Seiten-Daten in den Medienordner
+    entry.async_on_unload(daten["sicherung"].starten())
 
     version = await hass.async_add_executor_job(_version)
 
@@ -160,3 +187,92 @@ def ws_einstellungen(hass: HomeAssistant, connection: websocket_api.ActiveConnec
         connection.send_result(msg["id"], {})
         return
     connection.send_result(msg["id"], einstellungen(hass, daten["konf"], daten.get("liste")))
+
+
+# ---- Sicherungen im Medienordner -------------------------------------------
+
+def _sicherung(hass: HomeAssistant) -> Sicherung:
+    return hass.data[DOMAIN]["sicherung"]
+
+
+async def _sicherungen_antwort(hass: HomeAssistant, user: Any) -> dict[str, Any]:
+    s = _sicherung(hass)
+    return {
+        "automatisch": s.automatisch,
+        "uhrzeit": f"{SICHERUNG_STUNDE:02d}:00",
+        "behalten": SICHERUNG_BEHALTEN,
+        "ordner": SICHERUNG_ORDNER,
+        "liste": await hass.async_add_executor_job(s.liste, user),
+    }
+
+
+@websocket_api.websocket_command({vol.Required("type"): "filament_werkstatt/sicherungen"})
+@websocket_api.async_response
+async def ws_sicherungen(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Die automatischen Sicherungen des angemeldeten Benutzers, neueste zuerst."""
+    connection.send_result(msg["id"], await _sicherungen_antwort(hass, connection.user))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "filament_werkstatt/sicherung_lesen",
+    vol.Required("datei"): str,
+})
+@websocket_api.async_response
+async def ws_sicherung_lesen(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Inhalt einer Sicherung des angemeldeten Benutzers (zum Wiederherstellen)."""
+    try:
+        inhalt = await hass.async_add_executor_job(_sicherung(hass).lesen, connection.user, msg["datei"])
+    except FileNotFoundError:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Diese Sicherung gibt es nicht")
+        return
+    except (OSError, ValueError) as err:
+        connection.send_error(msg["id"], websocket_api.ERR_UNKNOWN_ERROR, f"Sicherung nicht lesbar: {err}")
+        return
+    connection.send_result(msg["id"], {"datei": msg["datei"], "daten": inhalt})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "filament_werkstatt/sicherung_jetzt"})
+@websocket_api.async_response
+async def ws_sicherung_jetzt(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Sofort sichern (nur der angemeldete Benutzer)."""
+    try:
+        neu = await _sicherung(hass).sichern(connection.user)
+    except OSError as err:
+        connection.send_error(msg["id"], websocket_api.ERR_UNKNOWN_ERROR, f"Schreiben fehlgeschlagen: {err}")
+        return
+    if neu is None:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Es gibt noch keine gespeicherten Daten")
+        return
+    connection.send_result(msg["id"], {**await _sicherungen_antwort(hass, connection.user), "neu": neu})
+
+
+# ---- Update-Prüfung ---------------------------------------------------------
+
+def _hacs_entitaet(hass: HomeAssistant) -> str | None:
+    """Update-Entität von HACS für dieses Repository (oder None)."""
+    repo = REPO.lower()
+
+    def passt(entity_id: str, *namen: str | None) -> bool:
+        st = hass.states.get(entity_id)
+        attr = st.attributes if st else {}
+        if repo in str(attr.get("release_url") or "").lower():
+            return True
+        texte = [*namen, attr.get("title"), attr.get("friendly_name")]
+        return any("filamentwerkstatt" in "".join(c for c in str(t or "").lower() if c.isalnum()) for t in texte)
+
+    kandidaten = [e for e in er.async_get(hass).entities.values() if e.domain == "update" and e.platform == "hacs"]
+    for e in kandidaten:
+        if passt(e.entity_id, e.name, e.original_name):
+            return e.entity_id
+    return None
+
+
+@websocket_api.websocket_command({vol.Required("type"): "filament_werkstatt/update"})
+@websocket_api.async_response
+async def ws_update(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Installierte Version, Repository und (falls vorhanden) die HACS-Update-Entität."""
+    connection.send_result(msg["id"], {
+        "version": await hass.async_add_executor_job(_version),
+        "repo": REPO,
+        "entity_id": _hacs_entitaet(hass),
+    })

@@ -2010,4 +2010,36 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
 .mobil .sh-filter { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 4px; }
 .mobil .sh-filter::-webkit-scrollbar { display: none; }
 .mobil .sh-auftrag-links .ws-kopfzeile { gap: 10px; align-items: stretch; }
+/* ---- Integration: automatische Sicherung und Update-Prüfung (System) ---- */
+.sich-auto { margin: 16px 0 6px; padding: 14px; border-radius: 14px; border: 1px solid rgba(62,230,168,.22); background: radial-gradient(420px 140px at 0% 0%, rgba(62,230,168,.08), transparent 70%), var(--flaeche); }
+.sich-auto-kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 14px; }
+.sich-auto-kopf .dot { margin-right: 2px; background: var(--leise); }
+.sich-auto-kopf .dot.mint { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
+.sich-auto-kopf .dot.amber { background: var(--amber); }
+.sich-auto-kopf .dot.aus { background: var(--rot); }
+.sich-auto > p { margin: 6px 0 10px; }
+.sich-liste { display: grid; gap: 6px; margin-bottom: 12px; }
+.sich-zeile { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border-radius: 12px; background: rgba(0,0,0,.22); border: 1px solid var(--rand); }
+.sich-zeile.kaputt { opacity: .6; }
+.sich-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.sich-text strong { font-size: 14px; font-weight: 600; }
+.sich-text small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sich-zeile .knopf { flex: none; }
+.sich-unter { margin: 18px 0 4px; font-size: 14px; color: var(--leise); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.upd-karte .knopf-reihe, .sich-auto .knopf-reihe { flex-wrap: wrap; }
+.upd-karte .knopf-reihe .knopf { min-width: 180px; }
+.upd-liste { margin: 14px 0 12px; }
+.upd-liste .pille { margin-left: 6px; vertical-align: 1px; }
+.upd-notizen { margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; background: rgba(0,0,0,.25); border: 1px solid var(--rand); max-height: 260px; overflow: auto; font-size: 13px; line-height: 1.5; }
+.upd-notizen p { margin: 0 0 6px; }
+.upd-md { white-space: pre-wrap; color: var(--leise); }
+.upd-md strong { color: var(--text); }
+.upd-link { color: var(--mint); text-decoration: none; }
+.upd-link:hover { text-decoration: underline; }
+.upd-liste .info-zeile strong { text-align: right; }
+.mobil .sich-zeile { padding: 8px 8px 8px 10px; gap: 8px; }
+.mobil .sich-text strong { font-size: 13px; }
+.mobil .sich-text small { white-space: normal; }
+.mobil .sich-zeile .klein-knopf { padding: 8px 10px; font-size: 12px; }
+.mobil .upd-karte .knopf-reihe .knopf { min-width: 0; flex-basis: 100%; }
 `;
