@@ -96,9 +96,10 @@ const BuchenAnsicht = {
   _buBedarf(d, rolle, fortschritt) {
     const e = this._daten.einstellungen;
     const anteil = Math.max(0, Math.min(100, fortschritt)) / 100;
-    const korr = (rolle && e.korrektur[rolle.material]) || 1;
-    const druck = (d.gewicht || 0) * anteil * korr;
-    return { druck, fix: e.linie_g + e.extruder_g, summe: druck + e.linie_g + e.extruder_g, korr };
+    const korr = this._korrektur(rolle).faktor;
+    const slicer = (d.gewicht || 0) * anteil;
+    const druck = slicer * korr;
+    return { druck, slicer, fix: e.linie_g + e.extruder_g, summe: druck + e.linie_g + e.extruder_g, korr };
   },
   _buVorschlaege(d) {
     const mats = this._buMaterialRaten(d);
@@ -142,10 +143,11 @@ const BuchenAnsicht = {
     const bu = this._bu, d = this._buAlle().find((x) => x.uid === bu.uid);
     const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
     const b = this._buBedarf(d, rolle, bu.fortschritt);
-    const fil = rolle && rolle.preis_kg ? (b.summe / 1000) * rolle.preis_kg : null;
+    const preis = rolle ? this._preisProGramm(rolle) : null;
+    const fil = preis ? b.summe * preis.wert : null;
     const strom = bu.strom === "laedt" ? "lädt …" : bu.strom ? `${zahl(bu.strom.kwh, 3)} kWh · ${zahl(bu.strom.eur, 2)} €` : "keine Messung";
     const gesamt = (fil || 0) + (bu.strom && bu.strom.eur ? bu.strom.eur : 0);
-    return `<div class="info-zeile"><span>Filament</span><strong>${fil != null ? `${zahl(fil, 2)} €` : `<span class="leise">Preis/kg fehlt</span>`}</strong></div>
+    return `<div class="info-zeile"><span>Filament${preis ? `<small class="norm">${zahl(preis.wert * 100, 1)} ct/g${preis.voreingestellt ? ` · ${zahl(PREIS_STANDARD_ROLLE, 2)} € je Rolle` : ""}</small>` : ""}</span><strong>${fil != null ? `${zahl(fil, 2)} €${this._voreingestelltHtml(preis)}` : `<span class="leise">keine Rolle gewählt</span>`}</strong></div>
       <div class="info-zeile"><span>Strom (Steckdose)</span><strong>${strom}</strong></div>
       <div class="info-zeile"><span>Dieser Druck</span><strong>${gesamt ? `${zahl(gesamt, 2)} €` : "–"}</strong></div>`;
   },
@@ -193,7 +195,7 @@ const BuchenAnsicht = {
 
   _buRechnungHtml(d, rolle, b, alt, rest) {
     const e = this._daten.einstellungen;
-    return `${d.gewicht == null ? `<div class="info-zeile"><span class="amber">Gewicht fehlt im Eintrag</span><strong>0 g</strong></div>` : `<div class="info-zeile"><span>Druck${this._bu.fortschritt < 100 ? ` (${zahl(this._bu.fortschritt)} %)` : ""}${b.korr !== 1 ? ` × ${zahl(b.korr, 2)} Abgleich` : ""}</span><strong>${zahl(b.druck, 1)} g</strong></div>`}
+    return `${d.gewicht == null ? `<div class="info-zeile"><span class="amber">Gewicht fehlt im Eintrag</span><strong>0 g</strong></div>` : `<div class="info-zeile"><span>Druck${this._bu.fortschritt < 100 ? ` (${zahl(this._bu.fortschritt)} %)` : ""}${b.korr !== 1 ? `<small class="norm">${zahl(b.slicer, 1)} g laut Slicer · ${esc(this._korrekturText(rolle))}</small>` : ""}</span><strong>${zahl(b.druck, 1)} g</strong></div>`}
       <div class="info-zeile"><span>Anfangslinie + 3× Extruder</span><strong>${zahl(e.linie_g + e.extruder_g, 2)} g</strong></div>
       <div class="info-zeile"><span><strong class="tx">Von ${esc(rolle ? rolle.name : "–")} ab</strong></span><strong>${zahl(b.summe, 1)} g</strong></div>
       ${alt ? `<div class="info-zeile"><span>🔁 Rollenwechsel: Reststück von ${esc(alt.name)}</span><strong>${zahl(e.wechsel_g, 2)} g</strong></div>` : ""}
@@ -226,12 +228,13 @@ const BuchenAnsicht = {
     }
     if (rolle.rest_g != null) rolle.rest_g = Math.max(0, rolle.rest_g - b.summe);
     rolle.verbraucht_g = (rolle.verbraucht_g || 0) + b.summe;
-    const fil = rolle.preis_kg ? (b.summe / 1000) * rolle.preis_kg : null;
+    const preis = this._preisProGramm(rolle);
+    const fil = b.summe * preis.wert;
     const strom = bu.strom && bu.strom !== "laedt" ? bu.strom : null;
     this._daten.drucke[d.uid] = {
       ...this._buExtra(d.uid),
-      gebucht: { am: new Date().toISOString(), rolle: rolle.id, g: b.summe, druck_g: b.druck, fix_g: b.fix, wechsel, ergebnis: bu.ergebnis, fortschritt: bu.fortschritt,
-        kosten: { filament: fil, kwh: strom ? strom.kwh : null, strom: strom ? strom.eur : null } },
+      gebucht: { am: new Date().toISOString(), rolle: rolle.id, g: b.summe, druck_g: b.druck, slicer_g: b.slicer, korr: b.korr, fix_g: b.fix, wechsel, ergebnis: bu.ergebnis, fortschritt: bu.fortschritt,
+        kosten: { filament: fil, voreingestellt: preis.voreingestellt || undefined, kwh: strom ? strom.kwh : null, strom: strom ? strom.eur : null } },
       name: d.name, start: d.start, ende: d.ende,
     };
     this._daten.letzte_rolle = rolle.id;
@@ -417,5 +420,70 @@ const BuchenAnsicht = {
     if (!best) return null;
     const d = this._buAlle().find((v) => v.uid === best.uid);
     return { uid: best.uid, name: (d && d.name) || best.x.name || "Druck", d, x: best.x };
+  },
+  // ---- Preis und Korrektur je Rolle (auch für andere Bereiche) ----
+  // Preis pro Gramm: eigener Preis oder voreingestellt 19,99 € je Rolle → { wert, voreingestellt }
+  _preisProGramm(rolle) { return preisProGramm(rolle); },
+  // Dezente Markierung hinter einem Preis, der auf dem voreingestellten Rollenpreis beruht
+  _voreingestelltHtml(preis) {
+    return preis && preis.voreingestellt ? ` <span class="voreingestellt" title="Kein eigener Preis: gerechnet mit ${zahl(PREIS_STANDARD_ROLLE, 2)} € je Rolle">voreingestellt</span>` : "";
+  },
+
+  // Korrekturfaktor für das Slicer-Gewicht: zuerst der dieser Rolle, sonst der des Materials
+  _korrektur(rolle) {
+    if (!rolle) return { faktor: 1, quelle: null, n: 0 };
+    const k = rolle.korrektur;
+    if (k && k.n >= 1 && k.f > 0) return { faktor: k.f, quelle: "rolle", n: k.n };
+    const e = this._daten.einstellungen;
+    const f = (e.korrektur || {})[rolle.material];
+    if (f > 0 && f !== 1) return { faktor: f, quelle: "material", n: (e.korrektur_n || {})[rolle.material] || 1 };
+    return { faktor: 1, quelle: null, n: 0 };
+  },
+  // z. B. „Korrektur +4 % (gelernt aus 3 Wiegungen)“
+  _korrekturText(rolle) {
+    const k = this._korrektur(rolle);
+    if (!k.quelle) return "Keine Korrektur";
+    const p = Math.round((k.faktor - 1) * 100);
+    return `Korrektur ${p > 0 ? "+" : p < 0 ? "−" : "±"}${Math.abs(p)} % (${k.quelle === "material" ? `${rolle.material}, ` : ""}gelernt aus ${k.n} ${k.n === 1 ? "Wiegung" : "Wiegungen"})`;
+  },
+
+  // Seit dem letzten Wiegen verbucht: gesamt, davon Slicer-Gewicht (ohne Korrektur) und feste Posten
+  _buSeitWiegen(r) {
+    const ab = r.gewogen_am || "";
+    let g = 0, slicer = 0, fix = 0, n = 0;
+    for (const x of Object.values(this._daten.drucke || {})) {
+      const b = x.gebucht;
+      if (b && b.rolle === r.id && b.am > ab) {
+        g += b.g; fix += b.fix_g || 0; n++;
+        slicer += b.slicer_g != null ? b.slicer_g : (b.druck_g || 0) / (b.korr || 1);
+      }
+      if (b && b.wechsel && b.wechsel.rolle === r.id && b.am > ab) { g += b.wechsel.g; fix += b.wechsel.g; }
+    }
+    return { g, slicer, fix, n };
+  },
+
+  // Wiegen: gewogenen Rest mit dem verbuchten vergleichen und daraus den Faktor lernen
+  // (je Rolle und je Material). Ändert rest_g nicht. Gibt einen Satz für die Meldung zurück.
+  _wiegungLernen(r, netto) {
+    if (!r || r.rest_g == null) return "";
+    const seit = this._buSeitWiegen(r);
+    if (!seit.n || seit.slicer < 5) return "";   // zu wenig verbucht, um etwas zu lernen
+    const echt = r.rest_g + seit.g - netto;     // tatsächlich verbraucht seit dem letzten Wiegen
+    const faktor = (echt - seit.fix) / seit.slicer;
+    const [min, max] = KORREKTUR_UNPLAUSIBEL;
+    if (!(faktor >= min && faktor <= max)) return ` Abweichung zu groß (× ${zahl(faktor, 2)}), Korrektur nicht gelernt. Stimmt das Spulengewicht?`;
+    const d = this._daten, e = d.einstellungen;
+    const k = r.korrektur || { f: 1, n: 0 };
+    r.korrektur = { f: korrekturMitteln(k.f, k.n, faktor), n: k.n + 1, am: new Date().toISOString() };
+    const mn = (e.korrektur_n || {})[r.material] || (e.korrektur[r.material] ? 1 : 0);
+    e.korrektur = { ...e.korrektur, [r.material]: korrekturMitteln(e.korrektur[r.material], mn, faktor) };
+    e.korrektur_n = { ...(e.korrektur_n || {}), [r.material]: mn + 1 };
+    d.abgleich = [...(d.abgleich || []), { am: new Date().toISOString(), rolle: r.id, name: r.name, material: r.material, gebucht: seit.g, echt, faktor }].slice(-60);
+    return ` ${this._korrekturText(r)}.`;
+  },
+  _korrekturZuruecksetzen(r) {
+    delete r.korrektur;
+    this._speichern();
+    this._toast(`Korrektur für ${r.name} zurückgesetzt.`);
   },
 };

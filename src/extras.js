@@ -25,7 +25,7 @@ function bambuProfil(r) {
     compatible_printers: ["Bambu Lab P1S 0.4 nozzle"],
   };
   if (w("k") != null) { p.pressure_advance = s(w("k")); p.enable_pressure_advance = ["1"]; }
-  if (r.preis_kg) p.filament_cost = s(r.preis_kg);
+  p.filament_cost = s(Math.round(preisProGramm(r).wert * 100000) / 100);   // €/kg, ohne eigenen Preis voreingestellt
   // Betttemperatur für die gewählte Platte (die anderen bleiben vom Basisprofil)
   const plattenKey = /textured|pei/i.test(platte) ? "textured_plate_temp" : /engineer/i.test(platte) ? "eng_plate_temp" : /cool/i.test(platte) ? "cool_plate_temp" : "hot_plate_temp";
   if (bett != null) { p[plattenKey] = s(bett); p[`${plattenKey}_initial_layer`] = s(bett); }

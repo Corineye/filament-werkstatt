@@ -1778,4 +1778,47 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
 .dr-dg-punkt { fill: var(--grund); stroke: var(--mint); stroke-width: 2.5; pointer-events: none; }
 .dr-dg-laedt { display: grid; justify-items: center; gap: 12px; padding: 60px 0; }
 .dr-strom-fuss { margin: 12px 0 0; }
+/* ==== Filament (v0.12): voreingestellter Preis, Kauflink, Sterne, Feuchte, Korrektur ==== */
+.voreingestellt { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: .3px; color: var(--leise); border: 1px dashed rgba(141,164,154,.45); border-radius: 6px; padding: 0 5px; vertical-align: 2px; text-transform: lowercase; }
+.r-kopf strong .voreingestellt { font-size: 10px; }
+.kauflink { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rand); flex-wrap: wrap; }
+.kauflink .mini { margin: 0 0 0 auto; }
+.kauflink.bearbeiten { display: block; }
+.kauflink.bearbeiten .feld { margin-top: 0; }
+.kauflink input.fehler { border-color: var(--rot); background: rgba(255,107,107,.1); }
+.kauf-knopf { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; text-decoration: none;
+  color: #062018; background: linear-gradient(135deg, var(--mint), #7ff0c6); box-shadow: 0 4px 18px rgba(62,230,168,.25); transition: transform .12s, filter .15s, box-shadow .15s; }
+.kauf-knopf:hover { filter: brightness(1.06); box-shadow: 0 6px 24px rgba(62,230,168,.35); }
+.kauf-knopf:active { transform: scale(.97); }
+.sterne-block { display: grid; gap: 4px; justify-items: start; padding: 14px 16px; border-radius: 16px; background: var(--flaeche); border: 1px solid var(--rand); margin-top: 12px; }
+.sterne-block > span { font-size: 14px; color: var(--leise); }
+.sterne { display: flex; gap: 2px; }
+.stern { font-size: 30px; line-height: 1; padding: 4px 3px; color: rgba(255,255,255,.16); transition: color .15s, transform .15s, text-shadow .2s; }
+.stern.an { color: var(--gelb, #ffd54a); text-shadow: 0 0 14px rgba(255,213,74,.35); }
+.stern:hover { transform: scale(1.12); }
+.stern:active { transform: scale(.92); }
+.sterne-block small { font-size: 12px; }
+.feuchte-daten { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mobil .feuchte-daten { grid-template-columns: 1fr; gap: 6px; }
+.datum-feld { display: grid; gap: 2px; font-size: 13px; color: var(--leise); margin-top: 6px; }
+.datum-feld .text { margin-top: 0; color-scheme: dark; min-height: 40px; }
+.feuchte-block .chips { margin-top: 4px; }
+.feuchte-hinweis { display: flex; align-items: center; gap: 10px; }
+.feuchte-hinweis > div { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.feuchte-hinweis small { opacity: .85; }
+.feuchte-hinweis .mini { margin: 0; flex: none; color: var(--mint); border-color: rgba(62,230,168,.4); }
+.feuchte-icon { font-size: 20px; }
+.mobil .feuchte-hinweis { flex-wrap: wrap; }
+.mobil .feuchte-hinweis > div { flex-basis: calc(100% - 40px); }
+.mobil .feuchte-hinweis .mini { margin-left: 30px; }
+.badge-trocknen { position: absolute; top: 12px; right: 12px; z-index: 1; font-size: 10px; font-weight: 600; color: #9fd8ff; background: rgba(92,200,255,.14); border: 1px solid rgba(92,200,255,.35); border-radius: 6px; padding: 1px 6px; animation: trocknen-puls 2.4s ease-in-out infinite; }
+.kachel.offen .badge-trocknen { top: 34px; }
+.mobil .badge-trocknen { font-size: 9px; padding: 1px 5px; }
+@keyframes trocknen-puls { 0%, 100% { box-shadow: 0 0 0 0 rgba(92,200,255,0); } 50% { box-shadow: 0 0 0 4px rgba(92,200,255,.12); } }
+.korrektur-block { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px dashed var(--rand); background: rgba(255,255,255,.02); }
+.korrektur-block.an { border-style: solid; border-color: rgba(62,230,168,.3); background: var(--mint-weich); }
+.korr-icon { font-size: 20px; }
+.korr-text { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: 14px; }
+.korr-text small { font-size: 12px; }
+.korrektur-block .mini { margin: 0; flex: none; }
 `;

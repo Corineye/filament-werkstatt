@@ -47,6 +47,13 @@ const zahl = (v, nk = 0) =>
   v == null || Number.isNaN(v) ? "–" : Number(v).toLocaleString("de-DE", { minimumFractionDigits: nk, maximumFractionDigits: nk });
 const feldNk = (f) => f.nk ?? 0;
 const gramm = (g) => (g >= 1000 && g % 1000 === 0 ? `${g / 1000} kg` : `${zahl(g)} g`);
+// Datum als JJJJ-MM-TT in Ortszeit, und zurück (Mitternacht Ortszeit)
+const heuteDatum = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const datumAusText = (t) => { const [j, m, d] = String(t).slice(0, 10).split("-").map(Number); return new Date(j, m - 1, d).getTime(); };
+// Kauflink: nur vollständige http/https-Adressen
+function kauflinkOk(v) {
+  try { const u = new URL(v); return (u.protocol === "https:" || u.protocol === "http:") && !!u.hostname; } catch (e) { return false; }
+}
 const sorteName = (r) => (r.art && r.art.startsWith(r.material) ? r.art : `${r.material} ${r.art || ""}`.trim());
 
 function wert(rolle, k) {
@@ -393,9 +400,12 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._spuleUebernehmen(r);
     let text = "Gespeichert.";
     if (mitGewicht || c.gewogen) {
-      r.rest_g = Math.max(0, c.brutto - c.spule_g);
+      const netto = Math.max(0, c.brutto - c.spule_g);
+      // Gewogen statt nur angeschaut: mit dem Verbuchten vergleichen und die Korrektur lernen
+      const gelernt = c.gewogen && this._modus === "detail" ? this._wiegungLernen(r, netto) : "";
+      r.rest_g = netto;
       r.gewogen_am = new Date().toISOString();
-      text = `Restgewicht ${zahl(r.rest_g)} g gespeichert.`;
+      text = `Restgewicht ${zahl(r.rest_g)} g gespeichert.${gelernt}`;
     }
     this._rechnerStarten(r);
     this._speichern();
@@ -426,6 +436,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("st-")) { this._stKlick(a, el); return; }
     if (a.startsWith("sh-")) { this._shKlick(a, el); return; }
     if (a.startsWith("nb-")) { this._nbKlick(a, el); return; }
+    if (a.startsWith("fi-")) { this._fiKlick(a, el); return; }
     if (this._exKlick(a, el)) return;
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
@@ -464,6 +475,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._offeneZeilen.clear();
         this._rechner = null;
         this._sheetScroll = 0;
+        this._linkBearbeiten = false;
         break;
       case "neu": this._ansicht === "modelle" ? (this._dialog = "mod-laden") : this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
@@ -642,6 +654,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       id: "neu", name: "", hersteller: "", material, art, farbe: "", farbcode: "", hex: "#3ee6a8",
       nenn_g: 1000, rest_g: null, spule: null, probiert: false, voll: true, eigen: {}, vorschlag: richtwerteFuer(material, art),
       preset: "", pa_profil: "", filament_setting: "", notiz: "", herstellerNeu: false,
+      geoeffnet: "heute", geoeffnet_datum: heuteDatum(),
     };
     this._modus = "neu";
     this._entwurf = this._neu.eigen;
@@ -674,6 +687,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       ...this._entwurfText, notiz: "", angelegt_am: new Date().toISOString(),
     };
     if (n.voll) rolle.gewogen_am = rolle.angelegt_am;
+    if (n.geoeffnet === "heute") rolle.geoeffnet_am = heuteDatum();
+    else if (n.geoeffnet === "datum" && n.geoeffnet_datum) rolle.geoeffnet_am = n.geoeffnet_datum;
     this._spuleUebernehmen(rolle);
     this._daten.rollen.push(rolle);
     this._speichern();
@@ -713,8 +728,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       const rolle = this._rolle();
       const v = Number(t.value);
       const anzeige = this.shadowRoot.getElementById(`info-${t.dataset.info}`);
-      if (anzeige) anzeige.textContent = v === 0 ? "nicht gesetzt" : `${zahl(v, 2)} €`;
       rolle[t.dataset.info] = v === 0 ? null : v;
+      if (anzeige) anzeige.innerHTML = this._preisAnzeigeHtml(rolle);
     }
   }
 
@@ -731,6 +746,17 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
     if (t.id === "notiz") { this._rolle().notiz = t.value; this._speichern(); }
+    if (t.dataset.fiDatum) {
+      // Datumsfelder Feuchte: leer = noch verschlossen bzw. nie getrocknet
+      const r = this._rolle();
+      const v = /^\d{4}-\d{2}-\d{2}$/.test(t.value) ? t.value : null;
+      if (v && v > heuteDatum()) { this._toast("Das Datum liegt in der Zukunft."); return; }
+      if (v) r[t.dataset.fiDatum] = v; else delete r[t.dataset.fiDatum];
+      this._speichern();
+      this._zeichnen();
+      return;
+    }
+    if (t.dataset.neu === "geoeffnet_datum") { this._neu.geoeffnet_datum = t.value; return; }
     if (t.dataset.platte != null) {
       this._entwurf.platte = t.value;
       const zeile = this.shadowRoot.querySelector('[data-zeile="platte"]');
@@ -1379,6 +1405,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       return `<button class="kachel ${r.probiert ? "" : "offen"} ${geladen ? "geladen" : ""}" data-aktion="oeffnen" data-id="${esc(r.id)}">
         ${geladen ? `<span class="badge-geladen">● geladen</span>` : ""}
         ${r.probiert ? "" : `<span class="badge-offen">noch nicht probiert</span>`}
+        ${this._feuchteHinweis(r)?.faellig ? `<span class="badge-trocknen" title="${esc(this._feuchteHinweis(r).text)}">💧 Trocknen?</span>` : ""}
         ${r.achtung ? `<span class="achtung-punkt kachel-achtung" title="Nach Fehldruck: testen und genau hinschauen">!</span>` : ""}
         <div class="kachel-spule">${spuleSvg(r)}</div>
         <div class="kachel-name">${esc(r.name)}</div>
@@ -1427,6 +1454,7 @@ class FilamentWerkstattPanel extends HTMLElement {
           ${r.achtung && this._tab === "einstellungen" ? `<div class="hinweis rot-hinweis achtung-hinweis"><span class="achtung-punkt">!</span><div><strong>Nach einem Fehldruck: testen und genau hinschauen.</strong>
             <small>${esc(r.achtung.grund || "")}${r.achtung.geaendert && r.achtung.geaendert.length ? ` · geändert: ${esc(r.achtung.geaendert.join(", "))}` : ""}</small></div>
             <button class="mini" data-aktion="bu-achtung-weg" data-id="${esc(r.id)}">Test hat geklappt</button></div>` : ""}
+          ${this._tab === "einstellungen" ? this._feuchteHinweisHtml(r) : ""}
           ${this._tab === "einstellungen" ? this._letzterDruckHtml(r) + this._einstellungenHtml(r) : this._tab === "rest" ? this._restHtml(r) : this._infosHtml(r)}
         </div>
         ${fuss ? `<footer class="sheet-fuss">${fuss}</footer>` : ""}
@@ -1556,7 +1584,22 @@ class FilamentWerkstattPanel extends HTMLElement {
         <button class="knopf rot-knopf" data-aktion="rest-verwerfen" ${this._rechnerGeaendert() ? "" : "disabled"}>Änderung verwerfen</button>
         <button class="knopf" data-aktion="rest-speichern">Als Restgewicht speichern</button>
       </div>
-      <p class="leise klein mitte">Schließt du mit ✕, wird automatisch gespeichert.</p>`;
+      <p class="leise klein mitte">Schließt du mit ✕, wird automatisch gespeichert.</p>
+      ${this._korrekturBlockHtml(r)}`;
+  }
+
+  // Gelernte Korrektur für das Slicer-Gewicht (aus dem Vergleich Waage ↔ Verbuchtes)
+  _korrekturBlockHtml(r) {
+    const k = this._korrektur(r);
+    const eigen = k.quelle === "rolle";
+    return `<div class="korrektur-block ${k.quelle ? "an" : ""}">
+      <span class="korr-icon">📐</span>
+      <div class="korr-text"><strong>${esc(this._korrekturText(r))}</strong>
+        <small class="leise">${k.quelle
+          ? `Beim Verbuchen wird das Slicer-Gewicht × ${zahl(k.faktor, 3)} gerechnet.${eigen ? "" : " Noch kein Wert für diese Rolle, darum der des Materials."}`
+          : "Wiegst du die Rolle, nachdem Drucke verbucht wurden, lerne ich, wie gut das Slicer-Gewicht stimmt."}</small></div>
+      ${eigen ? `<button class="mini" data-aktion="fi-korr-weg">Zurücksetzen</button>` : ""}
+    </div>`;
   }
 
   _spuleBlockHtml(r) {
@@ -1605,14 +1648,130 @@ class FilamentWerkstattPanel extends HTMLElement {
         ${zeile("Farbe", `${r.farbe} (${farbfamilie(r)})`)}${zeile("Farbcode", r.farbcode)}${zeile("Spulengröße", gramm(r.nenn_g || 1000))}
       </div>
       <div class="rechner-block">
-        <div class="r-kopf"><span>Preis pro kg</span><strong id="info-preis_kg">${r.preis_kg ? `${zahl(r.preis_kg, 2)} €` : "nicht gesetzt"}</strong></div>
+        <div class="r-kopf"><span>Preis pro kg</span><strong id="info-preis_kg">${this._preisAnzeigeHtml(r)}</strong></div>
         <input type="range" min="0" max="80" step="0.5" value="${r.preis_kg || 0}" data-info="preis_kg">
+        ${this._kauflinkHtml(r)}
       </div>
+      ${this._sterneHtml(r)}
+      ${this._feuchteBlockHtml(r)}
       <h3>Notizen</h3>
       <textarea id="notiz" rows="4" maxlength="2000" placeholder="z. B. Schichthöhe, Besonderheiten …">${esc(r.notiz)}</textarea>
       <h3>Bambu Studio</h3>
       <p class="leise klein">Filament-Profil mit deinen Werten (Temperaturen, Lüfter, Flow, K-Faktor, Volumenstrom) als Datei. In Bambu Studio über Datei › Importieren › Konfiguration importieren laden.</p>
       <button class="knopf leise breit" data-aktion="profil-export">⬇ Profil für Bambu Studio</button>`;
+  }
+
+  // ---- Preis, Kauflink, Sterne, Feuchte -----------------------------------
+  _preisAnzeigeHtml(r) {
+    if (r.preis_kg) return `${zahl(r.preis_kg, 2)} € <small class="leise">· ${zahl(r.preis_kg / 10, 1)} ct/g</small>`;
+    const p = this._preisProGramm(r);
+    return `${zahl(p.wert * 1000, 2)} €${this._voreingestelltHtml(p)}`;
+  }
+
+  _kauflinkHtml(r) {
+    if (this._linkBearbeiten) {
+      return `<div class="kauflink bearbeiten"><label class="feld"><span>Kauflink</span>
+          <input id="kauflink" class="text" type="url" inputmode="url" value="${esc(r.kauflink || "")}" placeholder="https://…" autocomplete="off"></label>
+        <div class="knopf-reihe">${r.kauflink ? `<button class="knopf leise" data-aktion="fi-link-weg">Entfernen</button>` : ""}
+          <button class="knopf leise" data-aktion="fi-link-abbrechen">Abbrechen</button>
+          <button class="knopf" data-aktion="fi-link-speichern">Speichern</button></div></div>`;
+    }
+    // Den Link selbst nie zeigen, nur einen Knopf
+    return `<div class="kauflink">${r.kauflink && kauflinkOk(r.kauflink)
+      ? `<a class="kauf-knopf" href="${esc(r.kauflink)}" target="_blank" rel="noopener noreferrer">🛒 Hier klicken zum Kaufen</a>`
+      : `<span class="leise klein">Kein Kauflink angegeben</span>`}
+      <button class="mini mint-rand" data-aktion="fi-link-bearbeiten">${r.kauflink ? "✎ Link ändern" : "＋ Kauflink"}</button></div>`;
+  }
+
+  _sterneHtml(r) {
+    const n = r.bewertung || 0;
+    return `<div class="sterne-block"><span>Wie zufrieden bin ich mit dem Filament?</span>
+      <div class="sterne" role="radiogroup" aria-label="Bewertung">${[1, 2, 3, 4, 5].map((i) =>
+        `<button class="stern ${i <= n ? "an" : ""}" data-aktion="fi-stern" data-n="${i}" role="radio" aria-checked="${i === n}" aria-label="${i} von 5 Sternen">★</button>`).join("")}</div>
+      <small class="leise">${n ? ["", "Gar nicht", "Eher nicht", "Geht so", "Zufrieden", "Begeistert"][n] : "Noch nicht bewertet"}</small></div>`;
+  }
+
+  // Wie lange ist die Rolle offen bzw. seit dem letzten Trocknen? null = verschlossen
+  _feuchteStand(r) {
+    if (!r) return null;
+    const offen = r.geoeffnet_am || null, trocken = r.getrocknet_am || null;
+    const basis = [offen, trocken].filter(Boolean).sort().pop();
+    if (!basis) return null;
+    const tage = Math.max(0, Math.round((datumAusText(heuteDatum()) - datumAusText(basis)) / 86400000));
+    const grenze = feuchteTage(r.material);
+    return { tage, grenze, rest: grenze - tage, getrocknet: !!trocken && trocken >= (offen || "") };
+  }
+  // Für Kachel, Detail und Startseite: { text, faellig, stufe } oder null (nichts zu tun)
+  _feuchteHinweis(r) {
+    const st = this._feuchteStand(r);
+    if (!st || (r.rest_g != null && r.rest_g <= 0)) return null;
+    const seit = st.getrocknet ? `Vor ${st.tage} Tagen getrocknet` : `Seit ${st.tage} Tagen offen`;
+    if (st.tage >= st.grenze) return { text: `${seit}, ${r.material} nach ca. ${st.grenze} Tagen trocknen`, faellig: true, stufe: "amber", tage: st.tage, grenze: st.grenze };
+    if (st.tage >= st.grenze * 0.8) return { text: `${seit}, in ${st.rest} ${st.rest === 1 ? "Tag" : "Tagen"} trocknen`, faellig: false, stufe: "", tage: st.tage, grenze: st.grenze };
+    return null;
+  }
+  _feuchteHinweisHtml(r) {
+    const h = this._feuchteHinweis(r);
+    if (!h) return "";
+    const t = wert(r, "tr_temp").v, d = wert(r, "tr_dauer").v;
+    return `<div class="hinweis feuchte-hinweis ${h.faellig ? "amber" : ""}"><span class="feuchte-icon">💧</span>
+      <div><strong>${h.faellig ? "Trocknen?" : "Bald trocknen"}</strong><small>${esc(h.text)}${t ? ` · ${zahl(t)} °C für ${zahl(d, 1)} h` : ""}</small></div>
+      <button class="mini" data-aktion="fi-getrocknet">Heute getrocknet</button></div>`;
+  }
+  _feuchteBlockHtml(r) {
+    const st = this._feuchteStand(r);
+    const datum = (k, name) => `<label class="datum-feld"><span>${name}</span>
+      <input type="date" class="text" data-fi-datum="${k}" value="${esc(r[k] || "")}" max="${heuteDatum()}"></label>`;
+    return `<h3>💧 Feuchte</h3>
+      ${this._feuchteHinweisHtml(r)}
+      <div class="rechner-block feuchte-block">
+        <div class="feuchte-daten">${datum("geoeffnet_am", "Geöffnet am")}${datum("getrocknet_am", "Zuletzt getrocknet am")}</div>
+        <p class="leise klein">${st
+          ? `${st.getrocknet ? `Vor ${st.tage} Tagen getrocknet` : `Seit ${st.tage} ${st.tage === 1 ? "Tag" : "Tagen"} offen`}. ${esc(r.material)} nach ca. ${st.grenze} Tagen offen trocknen${st.rest > 0 ? ` (noch ${st.rest} ${st.rest === 1 ? "Tag" : "Tage"})` : ""}.`
+          : `Noch verschlossen. ${esc(r.material)} sollte nach dem Öffnen nach ca. ${feuchteTage(r.material)} Tagen getrocknet werden.`}</p>
+        <div class="chips">${r.geoeffnet_am ? "" : `<button class="chip" data-aktion="fi-heute" data-k="geoeffnet_am">Heute geöffnet</button>`}
+          <button class="chip" data-aktion="fi-getrocknet">Heute getrocknet</button></div>
+      </div>`;
+  }
+
+  _fiKlick(a, el) {
+    const r = this._rolle();
+    switch (a) {
+      case "fi-stern": {
+        const n = Number(el.dataset.n);
+        if (r.bewertung === n) delete r.bewertung; else r.bewertung = n;   // gleicher Stern nochmal: löschen
+        this._speichern();
+        break;
+      }
+      case "fi-link-bearbeiten": this._linkBearbeiten = true; break;
+      case "fi-link-abbrechen": this._linkBearbeiten = false; break;
+      case "fi-link-weg": delete r.kauflink; this._linkBearbeiten = false; this._speichern(); break;
+      case "fi-link-speichern": {
+        const feld = this.shadowRoot.getElementById("kauflink");
+        const v = (feld.value || "").trim();
+        if (!v) delete r.kauflink;
+        else if (!kauflinkOk(v)) {
+          this._toast("Bitte einen vollständigen Link mit http:// oder https:// eingeben.");
+          const neu = this.shadowRoot.getElementById("kauflink");
+          if (neu) { neu.value = v; neu.classList.add("fehler"); neu.focus(); }
+          return;
+        } else r.kauflink = v;
+        this._linkBearbeiten = false;
+        this._speichern();
+        break;
+      }
+      case "fi-heute": r[el.dataset.k] = heuteDatum(); this._speichern(); break;
+      case "fi-getrocknet":
+        r.getrocknet_am = heuteDatum();
+        if (!r.geoeffnet_am) r.geoeffnet_am = r.getrocknet_am;
+        this._speichern();
+        this._toast(`${r.name}: heute getrocknet, die Erinnerung beginnt von vorn.`);
+        return;
+      case "fi-korr-weg": this._korrekturZuruecksetzen(r); return;
+      case "fi-neu-offen": this._neu.geoeffnet = el.dataset.id; break;
+      default: return;
+    }
+    this._zeichnen();
   }
 
   // ---- Filament hinzufügen ------------------------------------------------
@@ -1668,6 +1827,13 @@ class FilamentWerkstattPanel extends HTMLElement {
             <div class="r-kopf"><span>Rolle ist neu und voll</span></div>
             <div class="chips"><button class="chip ${n.voll ? "an" : ""}" data-aktion="neu-voll" data-id="ja">Ja, voll</button>
               <button class="chip ${n.voll ? "" : "an"}" data-aktion="neu-voll" data-id="nein">Nein, später wiegen</button></div>
+          </div>
+          <div class="rechner-block">
+            <div class="r-kopf"><span>Heute geöffnet?</span></div>
+            <div class="chips">${[["heute", "Heute"], ["datum", "Datum wählen"], ["zu", "Noch verschlossen"]].map(([id, t]) =>
+              `<button class="chip ${n.geoeffnet === id ? "an" : ""}" data-aktion="fi-neu-offen" data-id="${id}">${t}</button>`).join("")}</div>
+            ${n.geoeffnet === "datum" ? `<label class="datum-feld"><span>Geöffnet am</span><input type="date" class="text" data-neu="geoeffnet_datum" value="${esc(n.geoeffnet_datum || "")}" max="${heuteDatum()}"></label>` : ""}
+            <p class="leise klein">Ab dem Öffnen zieht das Filament Feuchtigkeit. ${esc(n.material)} sollte nach ca. ${feuchteTage(n.material)} Tagen getrocknet werden, ich erinnere dich daran.</p>
           </div>
           ${this._spuleBlockHtml(n)}
 

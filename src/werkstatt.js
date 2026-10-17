@@ -166,7 +166,7 @@ const WerkstattAnsicht = {
     const e = this._daten.einstellungen, rest = {};
     return liste.map((a) => {
       const r = this._daten.rollen.find((x) => x.id === a.rolleId);
-      const bedarf = (a.gewicht || 0) + e.linie_g + e.extruder_g;
+      const bedarf = (a.gewicht || 0) * this._korrektur(r).faktor + e.linie_g + e.extruder_g;
       if (!r) return { a, r: null, stufe: "ohne", bedarf };
       if (r.rest_g == null) return { a, r, stufe: "ungewogen", bedarf };
       const vorher = r.id in rest ? rest[r.id] : r.rest_g;
@@ -268,7 +268,7 @@ const WerkstattAnsicht = {
         return `${trenner}<div class="ws-auftrag dr-karte ${x.stufe === "fehlt" ? "fehlt" : ""}" data-einmal="ws-a-${esc(x.a.id)}">
           <div class="ws-nr">${i + 1}${x.stufe === "fehlt" ? `<i class="ws-rot-punkt" title="Rolle reicht nicht"></i>` : ""}</div>
           <div class="ws-text"><strong>${esc(x.a.name)}</strong>
-            <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${p.min != null ? ` · ${wsDauerText(p.min)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}</small>
+            <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${p.min != null ? ` · ${wsDauerText(p.min)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}${x.r && x.a.gewicht ? (() => { const pp = this._preisProGramm(x.r); return ` · ≈ ${zahl(x.bedarf * pp.wert, 2)} €${this._voreingestelltHtml(pp)}`; })() : ""}</small>
             <span class="ws-pillen"><span class="pille ${farbe}">${st}${x.vorher != null && x.a.gewicht ? (x.danach < 0 ? ` · es fehlen ${zahl(-x.danach)} g` : ` · danach ${zahl(x.danach)} g`) : ""}</span>
               ${p.ende != null ? `<span class="pille ws-uhr">fertig um ${wsUhr(p.ende)}${new Date(p.ende).toDateString() !== heute ? ` (${new Date(p.ende).toLocaleDateString("de-DE", { weekday: "short" })})` : ""}</span>` : `<span class="pille ws-ohne-dauer">Dauer fehlt</span>`}
               ${pj.map((pr) => `<span class="pille ws-pj-pille" style="--pj:${esc(pr.farbe)}">${esc(pr.icon)} ${esc(pr.name)}</span>`).join("")}</span>
@@ -840,11 +840,14 @@ const WerkstattAnsicht = {
       const k = g.kosten || {};
       const datum = x.start || g.am;
       const m = (datum || "").slice(0, 7);
-      const eintrag = { uid, name: x.name || (x.hand && x.hand.name) || "Druck", datum, g: g.g, fil: k.filament, strom: k.strom, kwh: k.kwh, ergebnis: g.ergebnis };
+      // Ältere Buchungen ohne Preis: mit dem heutigen (ggf. voreingestellten) Preis der Rolle nachrechnen
+      let fil = k.filament, vor = !!k.voreingestellt;
+      if (fil == null) { const p = this._preisProGramm(this._daten.rollen.find((r) => r.id === g.rolle)); fil = (g.g || 0) * p.wert; vor = p.voreingestellt; }
+      const eintrag = { uid, name: x.name || (x.hand && x.hand.name) || "Druck", datum, g: g.g, fil, vor, strom: k.strom, kwh: k.kwh, ergebnis: g.ergebnis };
       drucke.push(eintrag);
       const mo = (monate[m] = monate[m] || { fil: 0, strom: 0, kwh: 0, n: 0, g: 0, ohnePreis: 0 });
-      mo.fil += k.filament || 0; mo.strom += k.strom || 0; mo.kwh += k.kwh || 0; mo.n++; mo.g += g.g || 0;
-      if (k.filament == null) mo.ohnePreis++;
+      mo.fil += fil || 0; mo.strom += k.strom || 0; mo.kwh += k.kwh || 0; mo.n++; mo.g += g.g || 0;
+      if (vor) mo.ohnePreis++;
     }
     return { monate, drucke: drucke.sort((a, b) => (b.datum || "").localeCompare(a.datum || "")) };
   },
@@ -863,8 +866,8 @@ const WerkstattAnsicht = {
             <small>${WS_MONATE[Number(k.slice(5, 7)) - 1]} ${k.slice(2, 4)}</small></div>`; }).join("")}</div>
           <div class="ws-legende"><span><i class="fil"></i>Filament</span><span><i class="strom"></i>Strom</span></div>`
           : `<p class="leise">Noch keine verbuchten Drucke. Kosten entstehen beim Verbuchen nach jedem Druck.</p>`}
-        ${ohnePreis ? `<div class="hinweis amber klein">${ohnePreis} Rollen haben keinen Preis, ihr Filament zählt mit 0 €. Preis eintragen: Rolle öffnen › Infos.</div>` : ""}
-        ${drucke.length ? `<h3>Letzte Drucke</h3><div class="info-liste">${drucke.slice(0, 8).map((d) => `<button class="info-zeile zeilen-knopf" data-aktion="zum-druck" data-uid="${esc(d.uid)}"><span>${esc(d.name)}<small class="norm">${d.datum ? new Date(d.datum).toLocaleDateString("de-DE") : ""} · ${zahl(d.g, 1)} g${d.kwh != null ? ` · ${zahl(d.kwh, 2)} kWh` : ""}</small></span><strong>${eur((d.fil || 0) + (d.strom || 0))}</strong></button>`).join("")}</div>` : ""}
+        ${ohnePreis ? `<div class="hinweis klein">${ohnePreis} Rollen haben keinen eigenen Preis, ihr Filament zählt mit ${zahl(PREIS_STANDARD_ROLLE, 2)} € je Rolle <span class="voreingestellt">voreingestellt</span>. Preis eintragen: Rolle öffnen › Infos.</div>` : ""}
+        ${drucke.length ? `<h3>Letzte Drucke</h3><div class="info-liste">${drucke.slice(0, 8).map((d) => `<button class="info-zeile zeilen-knopf" data-aktion="zum-druck" data-uid="${esc(d.uid)}"><span>${esc(d.name)}<small class="norm">${d.datum ? new Date(d.datum).toLocaleDateString("de-DE") : ""} · ${zahl(d.g, 1)} g${d.kwh != null ? ` · ${zahl(d.kwh, 2)} kWh` : ""}</small></span><strong>${eur((d.fil || 0) + (d.strom || 0))}${d.vor ? this._voreingestelltHtml({ voreingestellt: true }) : ""}</strong></button>`).join("")}</div>` : ""}
       </div>
       <div class="dr-karte"><h3 class="dr-titel">Einstellungen</h3>
         ${WS_EINSTELLUNGEN.map((f) => `<div class="mod-regler"><div class="r-kopf"><span>${esc(f.name)}</span><strong id="ws-e-${f.k}">${zahl(e[f.k], f.nk || 0)} ${f.e}</strong></div>
