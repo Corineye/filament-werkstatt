@@ -2,12 +2,17 @@
 // Hilfe: P1S-Zeichnung mit Bereichen, Sovol-Trockner, Fehlerbilder, Kalibrierung
 // ---------------------------------------------------------------------------
 
-const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"]];
+const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"], ["kunststoffe", "🧪 Kunststoffe"], ["codes", "⚠️ Fehlercodes"]];
 // Welche Rollenwerte zu welchem Bereich der Zeichnung gehören
 const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "max_vol"], luefter: ["luefter_min", "luefter_max"],
   riemen: ["v_aussen", "v_innen", "v_fuellung"], bett: ["bett"], spule: ["tr_temp", "tr_dauer"] };
 
 const HilfeAnsicht = {
+  // Neue Hilfe-Reiter (v0.12): Konstruktions-Tipps, Slicer-Lexikon, Druckplatten
+  _hiKonstruktionHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+  _hiLexikonHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+  _hiPlattenHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+
   _hiZustand() {
     if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", rolle: null, kalWert: null };
     return this._hi;
@@ -15,7 +20,10 @@ const HilfeAnsicht = {
 
   _hiHtml() {
     const h = this._hiZustand();
-    const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml() : this._hiDruckerHtml();
+    const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml()
+      : h.tab === "kunststoffe" ? this._hiKunststoffeHtml() : h.tab === "codes" ? this._hiCodesHtml()
+      : h.tab === "konstruktion" ? this._hiKonstruktionHtml() : h.tab === "lexikon" ? this._hiLexikonHtml() : h.tab === "platten" ? this._hiPlattenHtml()
+      : this._hiDruckerHtml();
     return `<div class="hi-seite" data-einmal="hi-${h.tab}">
       <div class="chips hi-tabs unter-tabs">${HI_TABS.map(([id, n]) => `<button class="chip ${h.tab === id ? "an" : ""}" data-aktion="hi-tab" data-id="${id}">${n}</button>`).join("")}</div>
       ${inhalt}${h.tab === "fehler" && fehlerbild(h.fehler) ? this._hiFehlerPopupHtml() : ""}</div>`;
@@ -198,6 +206,7 @@ const HilfeAnsicht = {
   },
 
   _hiKlick(a, el) {
+    if (a.startsWith("hi-ks-") || a.startsWith("hi-cd-")) { this._ksKlick(a, el); return; }   // Kunststoffe/Fehlercodes (kunststoffe.js)
     const h = this._hiZustand();
     switch (a) {
       case "hi-tab": h.tab = el.dataset.id; h.fehler = null; break;

@@ -332,6 +332,45 @@ const KATEGORIEN = [
     worte: "düse düsen duese nozzle hotend" },
   { id: "magnet", name: "Magnete", einzahl: "Magnet", icon: "🧲", gewinde: false, masse: ["durchmesser", "breite", "dicke"],
     worte: "magnet magnete neodym magnetfolie" },
+  { id: "werkzeug", name: "Werkzeug & Zubehör", einzahl: "Werkzeug/Zubehör", icon: "🛠️", gewinde: false, masse: [],
+    worte: "werkzeug zubehör zubehoer spachtel zange seitenschneider lötspitze lötkolben klebestift ipa isopropanol alkohol druckplatte platte pinzette messschieber verbrauch tool" },
+];
+// Werkzeug & Zubehör: Art und Zustand
+const WZ_ARTEN = [
+  { id: "werkzeug", name: "Werkzeug", icon: "🛠️" },
+  { id: "verbrauch", name: "Verbrauchsmaterial", icon: "🧴" },
+  { id: "platte", name: "Druckplatte", icon: "▦" },
+];
+const WZ_ZUSTAND = [
+  { id: "neu", name: "neu", farbe: "mint" },
+  { id: "gut", name: "gut", farbe: "mint" },
+  { id: "abgenutzt", name: "abgenutzt", farbe: "amber" },
+  { id: "ersetzen", name: "ersetzen", farbe: "rot" },
+];
+const wzZustand = (id) => WZ_ZUSTAND.find((z) => z.id === id);
+// Vorlagen zum schnellen Anlegen (nur Vorschläge, nichts davon ist schon im Bestand)
+const WZ_VORLAGEN = [
+  { name: "Spachtel", art: "werkzeug", icon: "🔪", notiz: "Zum Lösen der Drucke von der Platte" },
+  { name: "Seitenschneider", art: "werkzeug", icon: "✂️", notiz: "Stützen und Filamentenden abknipsen" },
+  { name: "Spitzzange", art: "werkzeug", icon: "🗜️" },
+  { name: "Pinzette", art: "werkzeug", icon: "🥢", notiz: "Fäden und Reste an der Düse entfernen" },
+  { name: "Entgrater", art: "werkzeug", icon: "🪒" },
+  { name: "Messschieber", art: "werkzeug", icon: "📏" },
+  { name: "Inbusschlüssel-Satz", art: "werkzeug", icon: "🔧" },
+  { name: "Lötkolben", art: "werkzeug", icon: "🔥", notiz: "Zum Einschmelzen von Gewindeeinsätzen" },
+  { name: "Lötspitze für Einsätze M2", art: "werkzeug", icon: "📍", gewinde: "M2" },
+  { name: "Lötspitze für Einsätze M3", art: "werkzeug", icon: "📍", gewinde: "M3" },
+  { name: "Lötspitze für Einsätze M4", art: "werkzeug", icon: "📍", gewinde: "M4" },
+  { name: "Lötspitze für Einsätze M5", art: "werkzeug", icon: "📍", gewinde: "M5" },
+  { name: "Düsen-Reinigungsnadeln", art: "werkzeug", icon: "🪡" },
+  { name: "Klebestift", art: "verbrauch", icon: "🧴", menge: 2, min: 1, notiz: "Haftung auf glatten Platten, Trennschicht bei PETG" },
+  { name: "IPA (Isopropanol)", art: "verbrauch", icon: "🧪", menge: 1, min: 1, notiz: "Druckplatte entfetten" },
+  { name: "Mikrofasertuch", art: "verbrauch", icon: "🧽", menge: 3 },
+  { name: "Spülmittel", art: "verbrauch", icon: "🫧", notiz: "Platte gründlich waschen, besser als nur IPA" },
+  { name: "Textured PEI Plate", art: "platte", icon: "▦" },
+  { name: "Smooth PEI Plate", art: "platte", icon: "▦" },
+  { name: "Cool Plate (SuperTack)", art: "platte", icon: "▦" },
+  { name: "Engineering Plate", art: "platte", icon: "▦" },
 ];
 const kategorie = (id) => KATEGORIEN.find((k) => k.id === id) || KATEGORIEN[0];
 
@@ -376,6 +415,7 @@ function teilName(t) {
     case "magnet":
       if (t.name) return t.name;
       return t.form === "rund" ? `Ø ${z(t.durchmesser)} × ${z(t.dicke)} mm` : `${z(t.durchmesser)} × ${z(t.breite)} × ${z(t.dicke)} mm`;
+    case "werkzeug": return t.name || "Werkzeug";
     default: return t.name || "Teil";
   }
 }
@@ -390,6 +430,10 @@ function teilUntertitel(t) {
     case "feder": return `Draht ${z(t.draht)} mm${t.fach ? ` · Fach ${t.fach}` : ""}`;
     case "duese": return `${t.material || "Material unbekannt"} · ${t.drucker || "P1S"}`;
     case "magnet": return t.form === "folie" ? `Dicke ${z(t.dicke)} mm` : t.form === "rund" ? "Scheibenmagnet" : "Quadermagnet";
+    case "werkzeug": {
+      const art = WZ_ARTEN.find((a) => a.id === t.art);
+      return `${art ? art.name : "Werkzeug"}${t.gewinde ? ` · ${t.gewinde}` : ""}${t.fach ? ` · Fach ${t.fach}` : ""}`;
+    }
     default: return "";
   }
 }
@@ -878,6 +922,7 @@ p { margin: 4px 0 12px; }
 .punkt-leucht { width: 10px; height: 10px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 12px var(--mint); }
 .nav-oben { display: flex; gap: 4px; margin-left: 12px; flex: 1; }
 .nav-punkt { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px; color: var(--leise); position: relative; }
+.nav-oben .nav-punkt.nur-icon { padding: 8px 10px; }
 .nav-punkt:hover { background: var(--flaeche-hover); color: var(--text); }
 .nav-punkt.aktiv { background: var(--mint-weich); color: var(--mint); }
 .nav-punkt.bald { opacity: .5; }
@@ -896,7 +941,7 @@ p { margin: 4px 0 12px; }
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); background: rgba(8,12,11,0.88);
   backdrop-filter: blur(16px); border-top: 1px solid var(--rand);
 }
-.nav-unten .nav-punkt { flex-direction: column; gap: 2px; padding: 6px 8px; font-size: 11px; min-width: 60px; }
+.nav-unten .nav-punkt { flex-direction: column; gap: 2px; padding: 6px 4px; font-size: 11px; min-width: 0; flex: 1; }
 .nav-unten .nav-icon { font-size: 20px; }
 .nav-unten small { position: absolute; top: 0; right: 4px; font-size: 8px !important; padding: 0 3px !important; }
 
@@ -1464,7 +1509,7 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .dialog textarea[readonly] { font-size: 13px; }
 .nav-oben { overflow-x: auto; scrollbar-width: none; }
 .nav-oben::-webkit-scrollbar { display: none; }
-@media (max-width: 1240px) { .nav-oben .nav-punkt { padding: 8px 10px; } }
+@media (max-width: 1440px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
 @media (max-width: 1080px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
 .nav-unten .nav-punkt { transition: color .15s, background .15s; border-radius: 14px; }
 .nav-unten .nav-punkt.aktiv .nav-icon { animation: tipp .3s ease; }
@@ -1784,7 +1829,7 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .nav-oben .nav-punkt { white-space: nowrap; flex: none; }
 @media (max-width: 1400px) { .nav-oben .nav-punkt { padding: 8px 9px; gap: 6px; } }
 @media (max-width: 1340px) { .kopf .speicher { font-size: 0; } .kopf .speicher::before { font-size: 14px; } }
-@media (max-width: 1180px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
+@media (max-width: 1320px) { .nav-oben .nav-name { display: none; } .nav-oben .nav-punkt { padding: 8px 11px; } .nav-oben .nav-icon { font-size: 18px; } }
 @media (max-width: 1640px) { .kopf-suche kbd { display: none; } }
 @media (max-width: 1520px) { .kopf-suche-text { display: none; } .kopf-suche { width: 38px; padding: 0; justify-content: center; margin-left: 4px; } }
 
@@ -1865,6 +1910,413 @@ input[type=range]:active::-webkit-slider-thumb { background: var(--gelb); box-sh
 .dr-l-stift { position: absolute; top: 6px; right: 8px; font-style: normal; font-size: 11px; color: var(--leise); }
 .dr-stufen { margin: 12px 0 4px; }
 .dr-stufen .chip { min-width: 54px; }
+/* ===== Hilfe › Kunststoffe und Fehlercodes (kunststoffe.js) ===== */
+.ks-seite, .cd-seite { max-width: 1240px; }
+.ks-kopfzeile { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; }
+.ks-einleitung { flex: 1; margin: 0; font-size: 14px; }
+.ks-suche { flex: 0 1 360px; }
+.mobil .ks-kopfzeile { flex-direction: column; align-items: stretch; gap: 10px; }
+.mobil .ks-suche { flex: none; min-width: 0; width: 100%; }
+.ks-filter { margin-bottom: 14px; }
+.ks-warnung { border: 1px solid rgba(255,181,71,.45); background: linear-gradient(135deg, rgba(255,181,71,.12), rgba(255,181,71,.04)); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; animation: ansicht-rein .3s ease; }
+.ks-warnung > strong { color: var(--amber); display: block; margin-bottom: 4px; }
+.ks-warnung p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; }
+.ks-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; align-items: start; }
+.mobil .ks-raster { grid-template-columns: 1fr; gap: 12px; }
+.ks-karte { position: relative; background: var(--flaeche); border: 1px solid var(--rand); border-radius: var(--radius); padding: 16px 16px 14px 18px; backdrop-filter: blur(10px); overflow: hidden;
+  transition: border-color .2s, background .2s; animation: ansicht-rein .35s ease both; }
+.ks-karte::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--ks-farbe); box-shadow: 0 0 14px var(--ks-farbe); opacity: .8; }
+.ks-karte:hover { border-color: rgba(62,230,168,.28); }
+.ks-karte.auf { grid-column: 1 / -1; border-color: rgba(62,230,168,.35); background: radial-gradient(600px 200px at 0% 0%, rgba(62,230,168,.07), transparent 70%), var(--flaeche); }
+.ks-karte.fremd { border-style: dashed; }
+.ks-kopf { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 0; }
+.ks-name { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.ks-name strong { font-size: 19px; letter-spacing: .2px; color: var(--ks-farbe); }
+.ks-name small { color: var(--leise); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ks-pfeil { color: var(--leise); font-size: 20px; line-height: 1; transition: transform .2s ease, color .2s; }
+.auf > .ks-kopf .ks-pfeil, .auf > .ks-var-kopf .ks-pfeil, .auf > .cd-gruppe-kopf .ks-pfeil { transform: rotate(90deg); color: var(--mint); }
+.ks-kurz { font-size: 13.5px; line-height: 1.45; margin: 8px 0 10px; color: #cfe0d8; }
+.ks-fremd { display: inline-block; font-size: 11px; color: var(--leise); border: 1px dashed var(--rand); border-radius: 6px; padding: 1px 6px; }
+.ks-ampel { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 9px; border-radius: 999px; white-space: nowrap; border: 1px solid; flex: none; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.ks-ampel i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.ks-ampel.gruen { color: var(--mint); border-color: rgba(62,230,168,.4); background: var(--mint-weich); }
+.ks-ampel.gelb { color: #ffd166; border-color: rgba(255,209,102,.4); background: rgba(255,209,102,.1); }
+.ks-ampel.orange { color: #ff9f5a; border-color: rgba(255,159,90,.45); background: rgba(255,159,90,.1); }
+.ks-ampel.rot { color: var(--rot); border-color: rgba(255,107,107,.45); background: rgba(255,107,107,.1); }
+.ks-werte { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ks-wert { background: rgba(0,0,0,.22); border: 1px solid var(--rand); border-radius: 10px; padding: 6px 9px; display: grid; gap: 1px; min-width: 0; }
+.ks-wert span { font-size: 11px; color: var(--leise); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ks-wert strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.ks-wert.breit { grid-column: 1 / -1; }
+.chip.ks-mehr { font-size: 12px; padding: 4px 10px; border-style: dashed; color: var(--mint); }
+.ks-wert.amber strong { color: var(--amber); }
+.ks-wert[title] { cursor: help; }
+.ks-rollen { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+.ks-rollen-titel { font-size: 11px; color: var(--leise); text-transform: uppercase; letter-spacing: .6px; margin-right: 2px; }
+.chip.ks-rolle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 6px; font-size: 12px; border-color: rgba(62,230,168,.3); }
+.chip.ks-rolle:hover { border-color: rgba(62,230,168,.6); background: var(--mint-weich); }
+.chip.ks-rolle small { color: var(--leise); font-size: 11px; }
+.ks-farbe { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); flex: none; }
+.ks-farbe.klar { background: repeating-conic-gradient(rgba(255,255,255,.35) 0 25%, transparent 0 50%) 0 0 / 6px 6px; }
+.ks-var-vorschau { display: block; width: 100%; text-align: left; margin-top: 10px; font-size: 12px; color: var(--mint); padding: 8px 0 0; border-top: 1px solid var(--rand); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ks-var-vorschau span { color: var(--leise); }
+.ks-var-vorschau:hover span { color: var(--text); }
+.ks-detail { padding-top: 14px; margin-top: 12px; border-top: 1px solid var(--rand); display: grid; gap: 10px; }
+.ks-block h4, .ks-var-titel { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--leise); text-transform: uppercase; letter-spacing: .6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ks-block p { margin: 0; font-size: 14px; line-height: 1.5; }
+.ks-block ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.55; }
+.ks-pro-contra { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mobil .ks-pro-contra { grid-template-columns: 1fr; }
+.ks-block.pro, .ks-block.contra, .ks-block.ks-p1s, .ks-block.ks-sicher, .ks-block.ks-essen { background: rgba(0,0,0,.18); border: 1px solid var(--rand); border-radius: 12px; padding: 10px 12px; }
+.ks-block.pro li::marker { color: var(--mint); }
+.ks-block.contra li::marker { color: var(--amber); }
+.ks-block.ks-essen { border-color: rgba(255,181,71,.25); }
+.ks-var-titel { margin-top: 6px; }
+.ks-var-titel .leise { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.ks-varianten { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; align-items: start; }
+.mobil .ks-varianten { grid-template-columns: 1fr; }
+.ks-variante { border: 1px solid var(--rand); border-radius: 12px; background: rgba(255,255,255,.02); transition: border-color .2s, background .2s; }
+.ks-variante:hover { border-color: rgba(62,230,168,.25); }
+.ks-variante.auf { grid-column: 1 / -1; border-color: rgba(62,230,168,.35); background: rgba(62,230,168,.04); }
+.ks-var-kopf { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; text-align: left; }
+.ks-var-name { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.ks-var-name strong { font-size: 14px; font-weight: 600; }
+.ks-neu, .ks-hab { font-style: normal; font-size: 11px; padding: 1px 7px; border-radius: 999px; }
+.ks-neu { color: #8fd8ff; border: 1px solid rgba(143,216,255,.35); }
+.ks-hab { color: var(--mint); border: 1px solid rgba(62,230,168,.35); }
+.ks-var-tags { font-size: 12px; letter-spacing: 1px; opacity: .85; }
+.ks-var-detail { padding: 0 12px 12px; display: grid; gap: 8px; }
+.ks-var-detail h5 { margin: 0 0 2px; font-size: 12px; color: var(--leise); font-weight: 600; }
+.ks-var-detail p { margin: 0; font-size: 13.5px; line-height: 1.5; }
+.ks-var-detail .ks-rollen { margin-top: 2px; }
+.ks-var-detail p.ks-unsicher { color: var(--leise); font-size: 12.5px; }
+.ks-pruefen { display: inline-block; font-size: 10.5px; padding: 0 6px; border-radius: 6px; border: 1px dashed rgba(255,209,102,.5); color: #ffd166; margin-right: 4px; cursor: help; }
+.ks-legende { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.ks-leer { text-align: center; }
+/* Fehlercodes */
+.cd-kopf { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; background: radial-gradient(500px 160px at 0% 0%, rgba(62,230,168,.08), transparent 70%), var(--flaeche); }
+.cd-kopf-text { flex: 1; min-width: 0; }
+.cd-kopf p { margin: 4px 0 0; font-size: 14px; }
+.cd-wiki { text-decoration: none; white-space: nowrap; flex: none; }
+.mobil .cd-kopf { flex-direction: column; align-items: stretch; }
+.mobil .cd-wiki { text-align: center; }
+.cd-suche { width: 100%; min-width: 0; margin-bottom: 12px; }
+.cd-gruppen { display: grid; gap: 10px; }
+.cd-gruppe { background: var(--flaeche); border: 1px solid var(--rand); border-radius: 16px; backdrop-filter: blur(10px); transition: border-color .2s; animation: ansicht-rein .3s ease both; }
+.cd-gruppe.auf { border-color: rgba(62,230,168,.32); }
+.cd-gruppe-kopf { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; text-align: left; }
+.cd-gruppe-kopf strong { flex: 1; font-size: 15px; }
+.cd-icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: rgba(0,0,0,.25); border: 1px solid var(--rand); font-size: 17px; flex: none; }
+.cd-anzahl { font-size: 12px; color: var(--mint); background: var(--mint-weich); border-radius: 999px; padding: 2px 9px; }
+.cd-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 8px; padding: 0 12px 12px; }
+.mobil .cd-codes { grid-template-columns: 1fr; padding: 0 10px 10px; }
+.cd-code { background: rgba(0,0,0,.22); border: 1px solid var(--rand); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; align-content: start; }
+.cd-code-kopf { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.cd-code-kopf code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; color: var(--mint); letter-spacing: .3px; }
+.cd-code-kopf small { font-size: 11.5px; }
+.cd-art { font-size: 10.5px; color: var(--leise); border: 1px solid var(--rand); border-radius: 6px; padding: 0 6px; }
+.cd-text { margin: 0; font-size: 14px; line-height: 1.45; }
+.cd-tun { margin: 0; font-size: 13px; line-height: 1.45; color: #cfe0d8; }
+.cd-tun span { display: inline-block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; color: #062018; background: var(--mint); border-radius: 5px; padding: 0 5px; margin-right: 6px; font-weight: 700; }
+.cd-quelle { margin-top: 14px; }
+
+/* ==== Werkstatt v0.12: Bibliothek-Filter, kluge Warteschlange, Projekte, Werkzeug & Zubehör (Inventar) ==== */
+/* Warteschlange: Umschalter, Zeitplan, Trenner je Rolle, rote Markierung */
+.ws-modus { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.ws-modus .mini { margin: 0; }
+.ws-umschalter { display: inline-flex; padding: 3px; border-radius: 12px; background: rgba(0,0,0,.3); border: 1px solid var(--rand); }
+.ws-umschalter button { padding: 7px 14px; border-radius: 9px; font-size: 13px; color: var(--leise); transition: background .18s, color .18s; white-space: nowrap; }
+.ws-umschalter button:hover { color: var(--text); }
+.ws-umschalter button.an { background: var(--mint-weich); color: var(--mint); box-shadow: inset 0 0 0 1px rgba(62,230,168,.45); }
+.mobil .ws-modus { flex-direction: column; align-items: stretch; }
+.mobil .ws-umschalter { display: grid; grid-template-columns: 1fr 1fr; }
+.ws-plan { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 14px 16px; margin-bottom: 12px;
+  background: radial-gradient(420px 140px at 0% 0%, rgba(62,230,168,.08), transparent 70%), var(--flaeche); }
+.mobil .ws-plan { grid-template-columns: 1fr; gap: 10px; }
+.ws-plan-zeile { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.ws-plan-zeile > div { display: grid; gap: 2px; min-width: 0; }
+.ws-plan-zeile strong { font-size: 14px; }
+.ws-plan-zeile small { font-size: 12px; line-height: 1.35; }
+.ws-plan-icon { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 9px; background: rgba(0,0,0,.28); font-size: 15px; }
+.ws-plan-zahl { color: var(--gelb); font-size: 17px; }
+.ws-trenner { display: flex; align-items: center; gap: 8px; margin: 8px 0 -2px; font-size: 12px; font-weight: 600; color: var(--leise); letter-spacing: .2px; animation: blende .25s ease; }
+.ws-trenner::after { content: ""; flex: 1; height: 1px; background: var(--rand); }
+.ws-trenner .farbtupfer { width: 14px; height: 14px; border-width: 1px; }
+.ws-trenner.geladen { color: var(--gruen); }
+.ws-trenner.geladen::after { background: rgba(91,227,125,.35); }
+.ws-pillen { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pille.ws-uhr { color: var(--gelb); background: var(--gelb-weich); font-variant-numeric: tabular-nums; }
+.pille.ws-ohne-dauer { color: var(--leise); background: rgba(255,255,255,.05); font-weight: 500; }
+.pille.ws-pj-pille { color: var(--pj, var(--mint)); background: color-mix(in srgb, var(--pj, var(--mint)) 14%, transparent); border: 1px solid color-mix(in srgb, var(--pj, var(--mint)) 35%, transparent); }
+button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--mint)) 24%, transparent); }
+.ws-auftrag.fehlt { border-color: rgba(255,107,107,.5); background: linear-gradient(90deg, rgba(255,107,107,.10), var(--flaeche) 40%); box-shadow: inset 3px 0 0 var(--rot); }
+.ws-nr { position: relative; }
+.ws-auftrag.fehlt .ws-nr { background: rgba(255,107,107,.16); color: var(--rot); }
+.ws-rot-punkt { position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; background: var(--rot); box-shadow: 0 0 0 2px var(--grund), 0 0 10px var(--rot); animation: ws-rot-puls 1.6s ease-in-out infinite; }
+@keyframes ws-rot-puls { 50% { box-shadow: 0 0 0 2px var(--grund), 0 0 2px var(--rot); } }
+.mobil .ws-knoepfe { flex-wrap: wrap; }
+
+/* Bibliothek: Suche, Filter, Trefferzahl */
+.ws-bib-werkzeug { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.ws-bib-werkzeug .such-feld { flex: 1 1 260px; max-width: 360px; }
+.ws-bib-filter { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ws-bib-filter .auswahl { min-width: 170px; }
+.ws-bib-status .chip { padding: 8px 12px; }
+.mobil .ws-bib-werkzeug { display: grid; grid-template-columns: 1fr auto; }
+.mobil .ws-bib-werkzeug .such-feld { max-width: none; }
+.mobil .ws-bib-filter { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-radius: 14px; border: 1px solid rgba(62,230,168,.3); background: rgba(62,230,168,.05); animation: hoch .18s ease; }
+.mobil .ws-bib-filter .auswahl { min-width: 0; }
+.mobil .ws-bib-status { grid-column: 1 / -1; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.ws-treffer { display: flex; gap: 10px; align-items: center; justify-content: space-between; min-height: 30px; margin-bottom: 10px; font-size: 13px; color: var(--leise); }
+.ws-treffer strong { color: var(--text); }
+.ws-treffer .mini { margin-left: 0; flex: none; }
+.ws-bib-leer { grid-column: 1 / -1; }
+.ws-modell-knoepfe .rund { flex: none; }
+.ws-modell { min-width: 0; }
+.ws-modell-knoepfe { flex-wrap: wrap; }
+.ws-modell-knoepfe .knopf { min-width: 0; }
+
+/* Projekte: Übersicht */
+.ws-pj-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.mobil .ws-pj-raster { grid-template-columns: 1fr; }
+.ws-pj-karte { position: relative; overflow: hidden; display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: center; text-align: left; padding: 16px 16px 14px 18px; color: inherit;
+  background: radial-gradient(300px 120px at 0% 0%, color-mix(in srgb, var(--pj) 14%, transparent), transparent 70%), var(--flaeche); transition: border-color .18s, transform .18s; }
+.ws-pj-karte::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--pj); box-shadow: 0 0 14px var(--pj); }
+.ws-pj-karte:hover { border-color: color-mix(in srgb, var(--pj) 55%, transparent); transform: translateY(-1px); }
+.ws-pj-icon { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; font-size: 22px; background: color-mix(in srgb, var(--pj) 16%, transparent); border: 1px solid color-mix(in srgb, var(--pj) 40%, transparent); }
+.ws-pj-icon.klein { width: 34px; height: 34px; border-radius: 10px; font-size: 17px; flex: none; }
+.ws-pj-text { display: grid; gap: 2px; min-width: 0; }
+.ws-pj-text strong { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-pj-text small { font-size: 12px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ws-pj-prozent { font-weight: 800; font-size: 18px; color: var(--pj); font-variant-numeric: tabular-nums; }
+.ws-pj-balken { grid-column: 1 / -1; margin: 6px 0 0; }
+.ws-pj-balken span, .ws-pj-detail .ws-balken span { background: var(--pj); box-shadow: 0 0 10px var(--pj); }
+.ws-pj-fuss { grid-column: 1 / -1; font-size: 12px; }
+/* Projekte: Detail */
+.ws-pj-zurueck { margin: 0 0 10px; color: var(--leise); border-color: var(--rand); }
+.ws-pj-zurueck:hover { color: var(--text); }
+.ws-pj-kopf { display: flex; gap: 18px; align-items: center; margin-bottom: 12px; background: radial-gradient(420px 180px at 0% 0%, color-mix(in srgb, var(--pj) 14%, transparent), transparent 70%), var(--flaeche);
+  border-color: color-mix(in srgb, var(--pj) 35%, transparent); }
+.ws-pj-ring { position: relative; width: 112px; height: 112px; flex: none; }
+.ws-pj-ring .ring { overflow: visible; }
+.ws-pj-ring-text { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.ws-pj-ring-text span { font-size: 22px; line-height: 1; }
+.ws-pj-ring-text strong { font-size: 18px; }
+.ws-pj-kopf-text { min-width: 0; display: grid; gap: 4px; }
+.ws-pj-kopf-text h2 { margin: 0; font-size: 22px; overflow-wrap: anywhere; }
+.ws-pj-kopf-text p { margin: 0; line-height: 1.4; }
+.ws-pj-kopf-knoepfe { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.knopf.rot-text { color: var(--rot); }
+.mobil .ws-pj-kopf { flex-direction: column; align-items: stretch; text-align: center; }
+.mobil .ws-pj-ring { align-self: center; }
+.mobil .ws-pj-kopf-knoepfe { justify-content: center; }
+.ws-pj-zahlen { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.mobil .ws-pj-zahlen { grid-template-columns: 1fr 1fr; gap: 8px; }
+.ws-pj-zahl { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--flaeche); border: 1px solid var(--rand); animation: blende .3s ease; }
+.ws-pj-zahl span { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--leise); }
+.ws-pj-zahl strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.ws-pj-zahl small { font-size: 11px; color: var(--leise); }
+.ws-pj-teile-kopf { align-items: center; }
+.ws-pj-teile-kopf h3 { margin: 0; }
+.mobil .ws-pj-teile-kopf { flex-direction: row; }
+.ws-pj-teil.fertig { border-color: rgba(62,230,168,.35); }
+.ws-pj-teil.fertig .ws-foto { box-shadow: inset 0 0 0 2px rgba(62,230,168,.4); }
+.ws-pj-teil .ws-modell-knoepfe { flex-wrap: wrap; }
+/* Projekt-Dialoge */
+.ws-pj-farben { gap: 10px; }
+.ws-farbe { width: 32px; height: 32px; border-radius: 50%; background: var(--f); border: 2px solid rgba(255,255,255,.15); transition: transform .15s, box-shadow .15s; }
+.ws-farbe:hover { transform: scale(1.08); }
+.ws-farbe.an { box-shadow: 0 0 0 3px var(--grund), 0 0 0 5px var(--f), 0 0 16px var(--f); }
+.ws-pj-icons .chip { font-size: 17px; padding: 5px 10px; }
+.dialog textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--rand); background: rgba(0,0,0,.3); color: var(--text); font: inherit; font-size: 14px; resize: vertical; }
+.ws-pj-wahl { display: grid; gap: 6px; max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; }
+.ws-pj-zeile { display: flex; gap: 10px; align-items: center; text-align: left; padding: 9px 12px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); color: inherit; transition: background .15s, border-color .15s; }
+.ws-pj-zeile:hover { background: var(--flaeche-hover); }
+.ws-pj-zeile.an { border-color: rgba(62,230,168,.5); background: var(--mint-weich); }
+.ws-pj-zeile-text { flex: 1; min-width: 0; display: grid; gap: 1px; font-size: 14px; overflow-wrap: anywhere; }
+.ws-pj-zeile-text small { font-size: 12px; color: var(--leise); }
+.ws-pj-zeile b { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--rand); color: var(--leise); }
+.ws-pj-zeile.an b { color: #062018; background: var(--mint); border-color: var(--mint); }
+.ws-pj-quellen .chip { padding: 6px 11px; font-size: 12px; }
+
+/* Inventar: Werkzeug & Zubehör */
+.kats { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.kat strong { overflow-wrap: anywhere; }
+.inv-schnell { grid-column: 1 / -1; margin-bottom: 14px; padding: 14px 16px; background: radial-gradient(420px 140px at 0% 0%, rgba(255,213,74,.07), transparent 70%), var(--flaeche); }
+.inv-schnell-kopf { display: grid; gap: 2px; margin-bottom: 8px; }
+.inv-vorlagen { display: grid; gap: 10px; margin: 6px 0 12px; }
+.inv-schnell .inv-vorlagen { margin-bottom: 0; }
+.inv-vorlagen-gruppe { display: grid; gap: 6px; }
+.inv-vorlagen .chip { padding: 6px 11px; font-size: 12px; }
+.mobil .inv-vorlagen .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.pille.inv-zustand { font-size: 11px; padding: 2px 8px; }
+.chip.an.zustand-amber { background: var(--amber-weich); border-color: rgba(255,181,71,.5); color: var(--amber); }
+.chip.an.zustand-rot { background: rgba(255,107,107,.16); border-color: rgba(255,107,107,.5); color: var(--rot); }
+.r-kopf strong.mint { color: var(--mint); }
+.r-kopf strong.amber { color: var(--amber); }
+.r-kopf strong.rot { color: var(--rot); }
+
+/* ==== Start (Übersicht) und Notizbuch ==== */
+.st-seite { max-width: 1320px; margin: 0 auto; }
+.st-kopf { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.st-kopf h2 { font-size: 24px; letter-spacing: .2px; }
+.st-kopf p { margin: 2px 0 0; }
+.st-lage { font-size: 13px; padding: 6px 14px; }
+.st-raster { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 14px; align-items: stretch; }
+.st-kachel { position: relative; background: var(--flaeche); border: 1px solid var(--rand); border-radius: var(--radius); padding: 16px 18px; backdrop-filter: blur(10px);
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; animation: st-rein .4s cubic-bezier(.2,.8,.2,1) both; transition: border-color .18s, background .18s, transform .18s, box-shadow .18s; }
+.st-kachel[data-aktion] { cursor: pointer; }
+.st-kachel[data-aktion]:hover { border-color: rgba(62,230,168,.35); background: var(--flaeche-hover); transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,.25), 0 0 0 1px rgba(62,230,168,.08); }
+.st-kachel[data-aktion]:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.st-kachel.still { animation: none; }
+.st-raster > :nth-child(2) { animation-delay: .04s; } .st-raster > :nth-child(3) { animation-delay: .08s; } .st-raster > :nth-child(4) { animation-delay: .12s; }
+.st-raster > :nth-child(5) { animation-delay: .16s; } .st-raster > :nth-child(n+6) { animation-delay: .2s; }
+@keyframes st-rein { from { opacity: 0; transform: translateY(10px); } }
+.st-kachel-kopf { display: flex; align-items: center; gap: 8px; }
+.st-kachel-kopf h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--leise); letter-spacing: .2px; }
+.st-kachel-kopf .zahl-punkt { margin-left: 0; }
+.st-pfeil { margin-left: auto; color: var(--leise); font-size: 20px; line-height: 1; transition: transform .18s, color .18s; }
+.st-kachel:hover .st-pfeil { color: var(--mint); transform: translateX(3px); }
+.zahl-punkt.rot-punkt { background: var(--rot); color: #2a0606; }
+.st-drucker { grid-column: span 2; }
+.st-warnungen { grid-row: span 2; }
+.st-letzte { grid-column: span 2; }
+.st-warnungen.rot-rand { border-color: rgba(255,107,107,.35); }
+/* Drucker */
+.st-dr { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.st-ring { position: relative; width: 104px; height: 104px; flex: none; }
+.st-ring-text { position: absolute; inset: 0; display: grid; place-content: center; }
+.st-ring-text strong { font-size: 22px; }
+.st-dr-text { flex: 1; min-width: 0; display: grid; gap: 6px; justify-items: start; }
+.st-dr-name { font-size: 19px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-werte { display: grid; grid-template-columns: repeat(2, minmax(0, 120px)); gap: 8px; width: 100%; }
+.st-werte > div { background: rgba(0,0,0,.22); border: 1px solid var(--rand); border-radius: 12px; padding: 7px 10px; display: grid; gap: 1px; }
+.st-werte span { font-size: 11px; color: var(--leise); }
+.st-werte strong { font-size: 15px; }
+.st-werte.st-gross { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.st-werte.st-gross strong { font-size: 20px; }
+.st-titelbild { width: 96px; height: 96px; object-fit: contain; border-radius: 14px; background: rgba(0,0,0,.3); border: 1px solid var(--rand); flex: none; }
+/* Listen in Kacheln */
+.st-liste { display: grid; gap: 6px; }
+.st-warn { display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 11px; border-radius: 12px; background: rgba(0,0,0,.2); border: 1px solid var(--rand); font-size: 13px; line-height: 1.35; transition: background .15s, border-color .15s; }
+.st-warn:hover { background: var(--flaeche-hover); border-color: rgba(255,255,255,.16); }
+.st-warn > span:nth-child(2) { flex: 1; min-width: 0; }
+.st-warn i { font-style: normal; color: var(--leise); }
+.st-warn.rot { color: inherit; border-color: rgba(255,107,107,.35); background: rgba(255,107,107,.08); }
+.st-warn.amber { color: inherit; border-color: rgba(255,181,71,.3); background: var(--amber-weich); }
+.st-warn.leise { color: inherit; }
+.st-warn-icon { flex: none; width: 22px; text-align: center; }
+.st-ruhe { display: grid; place-items: center; gap: 6px; text-align: center; padding: 18px 8px; flex: 1; }
+.st-ruhe span { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 22px; color: var(--mint); background: var(--mint-weich); box-shadow: 0 0 24px rgba(62,230,168,.2); }
+.st-zeile, .st-schlange li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.st-zeile-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.st-zeile-text strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-zeile-text small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-schlange { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.st-nr { width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--mint-weich); color: var(--mint); flex: none; }
+.st-rolle { display: flex; align-items: center; gap: 14px; }
+.st-rolle .spule-svg { width: 58px; height: 58px; flex: none; }
+.st-rolle > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.st-gramm { font-size: 20px; font-weight: 700; margin-top: 2px; }
+.st-gramm.mint { color: var(--mint); }
+.st-rollen { display: grid; gap: 4px; }
+.st-rollen-zeile { display: flex; align-items: center; gap: 10px; padding: 6px 8px; margin: 0 -8px; border-radius: 10px; text-align: left; }
+.st-rollen-zeile:hover { background: var(--flaeche-hover); }
+.st-rollen-zeile .farbtupfer { width: 22px; height: 22px; }
+.st-g { font-weight: 700; font-size: 14px; white-space: nowrap; }
+.st-fotos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.st-foto { display: grid; gap: 3px; text-align: left; min-width: 0; padding: 0; border-radius: 14px; }
+.st-foto-bild { aspect-ratio: 16 / 10; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,.3); border: 1px solid var(--rand); display: grid; place-items: center; font-size: 26px; margin-bottom: 4px; transition: border-color .15s; }
+.st-foto-bild img { width: 100%; height: 100%; object-fit: cover; transition: transform .3s; }
+.st-foto:hover .st-foto-bild { border-color: rgba(62,230,168,.45); }
+.st-foto:hover img { transform: scale(1.04); }
+.st-foto strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-foto small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-zahl { display: flex; align-items: baseline; gap: 10px; }
+.st-zahl strong { font-size: 34px; font-weight: 700; line-height: 1; }
+.st-zahl strong.mint { color: var(--mint); }
+.st-kurz { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.st-kachel p { margin: 0; }
+.st-kachel > small { font-size: 12px; }
+@media (max-width: 1180px) { .app:not(.mobil) .st-raster { grid-template-columns: repeat(2, minmax(0, 1fr)); } .app:not(.mobil) .st-warnungen { grid-row: auto; } }
+.mobil .st-raster { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.mobil .st-drucker, .mobil .st-letzte { grid-column: auto; }
+.mobil .st-warnungen { grid-row: auto; }
+.mobil .st-kopf h2 { font-size: 21px; }
+.mobil .st-ring { width: 72px; height: 72px; }
+.mobil .st-werte { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.mobil .st-werte > div { padding: 6px 8px; }
+.mobil .st-werte span, .mobil .st-werte strong { white-space: nowrap; }
+.mobil .st-werte strong { font-size: 14px; }
+.mobil .st-ring-text strong { font-size: 16px; }
+.mobil .st-titelbild { width: 52px; height: 52px; border-radius: 10px; }
+.mobil .st-dr { gap: 12px; }
+.mobil .st-dr-name { font-size: 16px; }
+.mobil .st-fotos { gap: 8px; }
+/* Haken (Erinnerung erledigt) */
+.nb-haken { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--leise); flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #062018; transition: background .15s, border-color .15s, transform .1s; }
+.nb-haken:hover { border-color: var(--mint); background: var(--mint-weich); }
+.nb-haken:active { transform: scale(.9); }
+.nb-haken.an { background: var(--mint); border-color: var(--mint); }
+/* Notizbuch */
+.nb-seite { max-width: 1320px; margin: 0 auto; }
+.nb-kopf { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.nb-kopf p { margin: 4px 0 0; }
+.nb-knoepfe { display: flex; gap: 8px; }
+.nb-werkzeug { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; }
+.nb-werkzeug .such-feld { max-width: 320px; }
+.nb-liste { columns: 300px; column-gap: 12px; }
+.nb-liste > * { break-inside: avoid; margin-bottom: 12px; }
+.nb-karte { background: var(--flaeche); border: 1px solid var(--rand); border-radius: 16px; padding: 14px 16px; backdrop-filter: blur(10px); display: grid; gap: 6px; min-width: 0;
+  animation: st-rein .3s cubic-bezier(.2,.8,.2,1) both; transition: border-color .15s; }
+.nb-karte.still { animation: none; }
+.nb-karte:hover { border-color: rgba(255,255,255,.14); }
+.nb-karte-kopf { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.nb-quelle { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); font-weight: 600; }
+.klein-tupfer { width: 12px; height: 12px; border-width: 1px; }
+.q-fehl .nb-quelle { color: var(--rot); }
+.q-eigen .nb-quelle { color: var(--mint); }
+.q-wartung .nb-quelle { color: var(--amber); }
+.nb-titel { font-size: 15px; overflow-wrap: anywhere; }
+.nb-unter { font-size: 12px; margin-top: -4px; }
+.nb-text { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; max-height: 12em; overflow: hidden; }
+.nb-antworten { margin: 4px 0 0; display: grid; gap: 3px; font-size: 12px; padding: 8px 10px; border-radius: 10px; background: rgba(255,107,107,.06); border: 1px solid rgba(255,107,107,.18); }
+.nb-antworten div { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; }
+.nb-antworten dt { color: var(--leise); flex: 1; min-width: 0; }
+
+.nb-antworten dd { margin: 0; overflow-wrap: anywhere; text-align: right; max-width: 60%; font-weight: 600; }
+.nb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.nb-tag { font-size: 12px; color: var(--mint); background: var(--mint-weich); border-radius: 999px; padding: 2px 9px; }
+.nb-tag:hover { filter: brightness(1.2); }
+.nb-fuss { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
+.nb-link { padding: 5px 11px; font-size: 12px; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.nb-aktionen { display: flex; gap: 6px; flex: none; }
+.nb-aktionen .rund { min-width: 30px; height: 30px; font-size: 12px; }
+.nb-erinnerung { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.nb-erinnerung .nb-inhalt { display: grid; gap: 6px; min-width: 0; }
+.nb-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.nb-erinnerung.rot-rand { border-color: rgba(255,107,107,.35); }
+.nb-erinnerung.amber-rand { border-color: rgba(255,181,71,.35); }
+.nb-erinnerung.erledigt { opacity: .6; }
+.nb-erinnerung.erledigt .nb-titel { text-decoration: line-through; color: var(--leise); }
+.nb-edit { border-color: rgba(62,230,168,.45); box-shadow: 0 0 0 1px rgba(62,230,168,.12), 0 10px 30px rgba(0,0,0,.25); gap: 8px; }
+.nb-edit .text { margin-top: 0; }
+.nb-edit .text:focus, .nb-edit input[type="date"]:focus { outline: none; border-color: rgba(62,230,168,.6); }
+.nb-edit textarea { min-height: 110px; }
+.nb-edit .knopf-reihe { margin-top: 6px; }
+.nb-datum { margin: 2px 0 0; }
+.nb-datum input { color-scheme: dark; }
+.nb-schnell .chip, .nb-vorschlaege .chip { padding: 5px 11px; font-size: 12px; }
+.nb-vorschlaege { display: grid; gap: 6px; }
+.nb-linkwahl { margin: 0; }
+.nb-leer { column-span: all; }
+.mobil .nb-liste { columns: 1; }
+.mobil .nb-kopf { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+.mobil .nb-knoepfe .knopf { flex: 1; }
+.mobil .nb-werkzeug { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+.mobil .nb-werkzeug .such-feld { max-width: none; }
+.mobil .nb-chips { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 2px 16px; scrollbar-width: none; }
+.mobil .nb-chips::-webkit-scrollbar { display: none; }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -1875,6 +2327,7 @@ const INV_STATUS = [
   { id: "wenig", name: "Wenig Bestand" },
   { id: "ungezaehlt", name: "Nicht nachgezählt" },
   { id: "ohne", name: "Menge fehlt" },
+  { id: "ersetzen", name: "Zustand: ersetzen/abgenutzt" },
 ];
 const INV_SORTIERUNG = [
   { id: "kategorie", name: "Kategorie" },
@@ -1974,6 +2427,14 @@ function teilSvg(t, gross = false) {
       <path d="M ${cx - 22 * s} ${top + 30 * s} h ${44 * s} l ${-6 * s} ${12 * s} h ${-32 * s} z" fill="#b08d3e" stroke="${linie}"/>
       <path d="M ${cx - 12 * s} ${top + 42 * s} h ${24 * s} l ${-9 * s} ${14 * s} h ${-6 * s} z" fill="#d6a933" stroke="${linie}"/>
       <text x="${cx}" y="${top + 20 * s}" fill="var(--mint)" font-size="${gross ? 16 : 10}" font-weight="700" text-anchor="middle">${z(t.groesse)}</text>`;
+  } else if (t.kat === "werkzeug") {
+    // Symbol auf einer Kachel, Rand in der Farbe des Zustands
+    const zu = wzZustand(t.zustand), farbe = { mint: "var(--mint)", amber: "var(--amber)", rot: "var(--rot)" }[zu ? zu.farbe : ""] || "var(--rand)";
+    const g = gross ? 92 : 52, cx = B / 2, cy = H / 2;
+    const icon = t.icon || (WZ_ARTEN.find((a) => a.id === t.art) || WZ_ARTEN[0]).icon;
+    innen = `<rect x="${cx - g / 2}" y="${cy - g / 2}" width="${g}" height="${g}" rx="${g / 4}" fill="rgba(62,230,168,.06)" stroke="${farbe}" stroke-width="${gross ? 2 : 1.4}"/>
+      <text x="${cx}" y="${cy + g * 0.17}" font-size="${g * 0.5}" text-anchor="middle">${esc(icon)}</text>
+      ${t.gewinde ? `<text x="${cx + g / 2 + 6}" y="${cy + 4}" fill="var(--mint)" font-size="${gross ? 13 : 10}" font-weight="700">${esc(t.gewinde)}</text>` : ""}`;
   } else if (t.kat === "magnet") {
     const cx = B / 2, cy = H / 2;
     if (t.form === "folie") {
@@ -2010,6 +2471,7 @@ const InventarAnsicht = {
       if (f.status === "wenig" && !wenigBestand(t)) return false;
       if (f.status === "ungezaehlt" && (t.gezaehlt || t.menge == null)) return false;
       if (f.status === "ohne" && t.menge != null) return false;
+      if (f.status === "ersetzen" && !["ersetzen", "abgenutzt"].includes(t.zustand)) return false;
       return passtZurSuche(t, worte);
     });
     const katI = (t) => KATEGORIEN.findIndex((k) => k.id === t.kat);
@@ -2064,11 +2526,26 @@ const InventarAnsicht = {
       <select data-inv-filter="${k}"><option value="">${leer}</option>${optionen}</select></label>`;
   },
 
+  // Vorlagen für Werkzeug & Zubehör, die noch nicht im Bestand sind
+  _invVorlagenHtml(aktion = "inv-vorlage", aktiv = null) {
+    const da = new Set(this._inv().filter((t) => t.kat === "werkzeug").map((t) => (t.name || "").toLowerCase()));
+    const gruppen = WZ_ARTEN.map((a) => [a, WZ_VORLAGEN.map((v, i) => ({ v, i })).filter((x) => x.v.art === a.id && !da.has(x.v.name.toLowerCase()))]).filter(([, l]) => l.length);
+    if (!gruppen.length) return "";
+    return `<div class="inv-vorlagen">${gruppen.map(([a, l]) => `<div class="inv-vorlagen-gruppe"><span class="leise klein">${a.icon} ${a.name}</span>
+      <div class="chips">${l.map(({ v, i }) => `<button class="chip ${aktiv === i ? "an" : ""}" data-aktion="${aktion}" data-i="${i}">${v.icon} ${esc(v.name)}</button>`).join("")}</div></div>`).join("")}</div>`;
+  },
+
   _invRasterHtml() {
     const liste = this._invGefiltert();
-    let html = liste.length
+    let html = "";
+    if (this._invF.kat === "werkzeug" && !this._invSuche) {
+      const v = this._invVorlagenHtml();
+      if (v) html += `<div class="inv-schnell dr-karte" data-einmal="inv-schnell"><div class="inv-schnell-kopf"><strong>⚡ Schnell hinzufügen</strong>
+        <span class="leise klein">Typische Werkzeuge und Verbrauchsmaterial. Antippen, Zustand und Menge prüfen, anlegen.</span></div>${v}</div>`;
+    }
+    html += liste.length
       ? `<div class="raster">${liste.map((t) => this._invKachelHtml(t)).join("")}</div>`
-      : `<div class="leer-hinweis">Nichts gefunden.</div>`;
+      : `<div class="leer-hinweis">${this._invF.kat === "werkzeug" && !this._invSuche ? "Noch kein Werkzeug oder Zubehör erfasst. Leg oben los." : "Nichts gefunden."}</div>`;
     // Querverweise: passende Teile zu den Treffern, die selbst nicht in der Liste sind
     if (this._invSuche && liste.length) {
       const dabei = new Set(liste.map((t) => t.id));
@@ -2090,7 +2567,8 @@ const InventarAnsicht = {
       <div class="kachel-name">${esc(teilName(t))}</div>
       <div class="kachel-sub">${esc(teilUntertitel(t))}</div>
       <div class="kachel-fuss">
-        <span class="mat" style="--m:var(--leise)">${esc(kategorie(t.kat).einzahl)}</span>
+        ${t.kat === "werkzeug" && wzZustand(t.zustand) ? `<span class="pille ${wzZustand(t.zustand).farbe} inv-zustand">${esc(wzZustand(t.zustand).name)}</span>`
+          : `<span class="mat" style="--m:var(--leise)">${esc(t.kat === "werkzeug" ? (WZ_ARTEN.find((a) => a.id === t.art) || WZ_ARTEN[0]).name : kategorie(t.kat).einzahl)}</span>`}
         <span class="rest ${t.menge == null ? "leise" : wenig ? "rot" : ""}">${t.menge == null ? "Menge fehlt" : `${zahl(t.menge)} Stk${t.gezaehlt ? "" : " *"}`}</span>
       </div>
     </button>`;
@@ -2108,9 +2586,11 @@ const InventarAnsicht = {
       html += `<h3 class="abschnitt">1 · Was ist es?</h3>
         <div class="chips">${KATEGORIEN.map((x) => `<button class="chip ${t.kat === x.id ? "an" : ""}" data-aktion="inv-neu-kat" data-id="${x.id}">${x.icon} ${x.einzahl}</button>`).join("")}</div>`;
       if (t.kat === "magnet") html += `<div class="chips oben-abstand">${["rund", "quader"].map((f) => `<button class="chip ${t.form === f ? "an" : ""}" data-aktion="inv-neu-form" data-id="${f}">${f === "rund" ? "Scheibe (rund)" : "Quader"}</button>`).join("")}</div>`;
-      html += `<h3 class="abschnitt">2 · Maße</h3>`;
+      html += `<h3 class="abschnitt">2 · ${t.kat === "werkzeug" ? "Was genau?" : "Maße"}</h3>`;
+      if (t.kat === "werkzeug") html += `<p class="leise klein">Vorlage wählen oder selbst benennen:</p>${this._invVorlagenHtml("inv-neu-vorlage", this._invNeu.vorlage)}`;
     }
     html += `<div class="zeichnung">${teilSvg(t, true)}</div>`;
+    if (t.kat === "werkzeug") html += this._invWerkzeugHtml(t);
     if (k.gewinde) {
       html += `<div class="rechner-block"><div class="r-kopf"><span>Gewinde</span><strong>${esc(t.gewinde)}</strong></div>
         <div class="chips">${GEWINDE.map((g) => `<button class="chip ${t.gewinde === g ? "an" : ""}" data-aktion="inv-gewinde" data-id="${g}">${g}</button>`).join("")}</div></div>`;
@@ -2135,14 +2615,14 @@ const InventarAnsicht = {
       html += `<p class="leise klein">Maße nach Norm (${t.kat === "mutter" ? "DIN 934" : "DIN 125"}), gelten für alle ${esc(t.gewinde)}-${t.kat === "mutter" ? "Muttern" : "Scheiben"}.</p>`;
     }
     if (t.kat === "magnet" && t.form !== "folie") html += `<div class="hinweis klein">💡 Loch im Druck für ${t.form === "rund" ? "Ø" : "Maß"} ${zahl(t.durchmesser, 2)} mm: etwa ${zahl(t.durchmesser + 0.15, 2)} mm einplanen (Richtwert, je nach Drucker 0,1–0,2 mm Zugabe).</div>`;
-    if (t.kat === "feder" || neu) {
+    if (t.kat === "feder" || t.kat === "werkzeug" || neu) {
       html += `<label class="formular-zeile">Fach / Lagerort<input class="text" data-inv-text="fach" value="${esc(t.fach || "")}" placeholder="z. B. R1F3 oder Schublade 2"></label>`;
     }
 
     // Menge
     html += `${neu ? `<h3 class="abschnitt">3 · Menge</h3>` : ""}
       <div class="rechner-block menge-block">
-        <div class="r-kopf"><span>Menge</span><strong id="inv-menge">${t.menge == null ? "–" : `${zahl(t.menge)} Stück`}</strong></div>
+        <div class="r-kopf"><span>Menge${t.kat === "werkzeug" && t.art === "verbrauch" ? " (Flaschen, Stifte, Packungen …)" : ""}</span><strong id="inv-menge">${t.menge == null ? "–" : `${zahl(t.menge)} Stück`}</strong></div>
         <div class="regler-zeile mengen-knoepfe">
           <button class="rund" data-aktion="inv-menge" data-d="-10">−10</button>
           <button class="rund" data-aktion="inv-menge" data-d="-1">−1</button>
@@ -2182,6 +2662,16 @@ const InventarAnsicht = {
       </section>`;
   },
 
+  // Werkzeug & Zubehör: Name, Art und Zustand
+  _invWerkzeugHtml(t) {
+    return `<label class="formular-zeile">Name<input class="text" data-inv-text="name" value="${esc(t.name || "")}" placeholder="z. B. Spachtel, IPA, Textured PEI Plate" maxlength="60"></label>
+      <div class="rechner-block"><div class="r-kopf"><span>Art</span></div>
+        <div class="chips">${WZ_ARTEN.map((a) => `<button class="chip ${t.art === a.id ? "an" : ""}" data-aktion="inv-wz-art" data-id="${a.id}">${a.icon} ${a.name}</button>`).join("")}</div></div>
+      <div class="rechner-block"><div class="r-kopf"><span>Zustand</span><strong class="${(wzZustand(t.zustand) || {}).farbe || ""}">${esc((wzZustand(t.zustand) || { name: "–" }).name)}</strong></div>
+        <div class="chips inv-zustaende">${WZ_ZUSTAND.map((z) => `<button class="chip ${t.zustand === z.id ? `an zustand-${z.farbe}` : ""}" data-aktion="inv-wz-zustand" data-id="${z.id}">${z.name}</button>`).join("")}</div>
+        ${t.zustand === "ersetzen" ? `<p class="leise klein">Steht auf der Einkaufsliste in der Werkstatt.</p>` : ""}</div>`;
+  },
+
   _invNeuStarten() {
     this._invNeu = { id: "neu", kat: "schraube", gewinde: "M3", laenge: 10, kopf: "Zylinderkopf Innensechskant", menge: 10, gezaehlt: true, min: null, notiz: "", fach: "" };
     this._modus = "inv-neu";
@@ -2191,8 +2681,16 @@ const InventarAnsicht = {
   _invNeuKat(kat) {
     const v = { schraube: { gewinde: "M3", laenge: 10, kopf: "Zylinderkopf Innensechskant" }, mutter: { gewinde: "M3" }, scheibe: { gewinde: "M3" },
       einsatz: { gewinde: "M3", laenge: 5, aussen: 5, material: "Messing" }, feder: { draht: 0.4, aussen: 5, laenge: 20, material: "Edelstahl" },
-      duese: { groesse: 0.4, drucker: "Bambu Lab P1S", material: "" }, magnet: { form: "rund", durchmesser: 6, breite: 6, dicke: 2 } }[kat];
+      duese: { groesse: 0.4, drucker: "Bambu Lab P1S", material: "" }, magnet: { form: "rund", durchmesser: 6, breite: 6, dicke: 2 },
+      werkzeug: { name: "", art: "werkzeug", zustand: "neu", icon: "", menge: 1 } }[kat];
     this._invNeu = { id: "neu", kat, menge: this._invNeu.menge, gezaehlt: true, min: null, notiz: "", fach: this._invNeu.fach || "", ...v };
+  },
+  // Vorlage übernehmen (Werkzeug & Zubehör)
+  _invVorlage(i) {
+    const v = WZ_VORLAGEN[i];
+    if (!v) return;
+    this._invNeu = { id: "neu", kat: "werkzeug", art: v.art, name: v.name, icon: v.icon, zustand: "neu", menge: v.menge || 1, min: v.min || null,
+      gezaehlt: true, notiz: v.notiz || "", fach: (this._invNeu && this._invNeu.fach) || "", vorlage: i, ...(v.gewinde ? { gewinde: v.gewinde } : {}) };
   },
 
   // Gibt true zurück, wenn der Klick zum Inventar gehörte
@@ -2207,6 +2705,10 @@ const InventarAnsicht = {
         break;
       case "inv-neu-kat": this._invNeuKat(el.dataset.id); break;
       case "inv-neu-form": this._invNeu.form = el.dataset.id; break;
+      case "inv-vorlage": this._invNeuStarten(); this._invVorlage(Number(el.dataset.i)); break;
+      case "inv-neu-vorlage": this._invVorlage(Number(el.dataset.i)); break;
+      case "inv-wz-art": t.art = el.dataset.id; if (this._modus === "inv-neu" && t.vorlage == null) t.icon = ""; speichernWennAlt(); break;
+      case "inv-wz-zustand": t.zustand = el.dataset.id; speichernWennAlt(); break;
       case "inv-gewinde": t.gewinde = el.dataset.id; speichernWennAlt(); break;
       case "inv-schritt": {
         const f = masseFuer(t).find((x) => x.k === el.dataset.k);
@@ -2230,7 +2732,10 @@ const InventarAnsicht = {
         this._toast(`${teilName(t)} gelöscht.`);
         return true;
       case "inv-anlegen": {
+        if (this._invNeu.kat === "werkzeug" && !(this._invNeu.name || "").trim()) { this._toast("Bitte einen Namen eingeben oder eine Vorlage wählen."); return true; }
         const n = { ...this._invNeu, id: `${this._invNeu.kat}-${Date.now().toString(36)}`, angelegt_am: new Date().toISOString() };
+        delete n.vorlage;
+        if (n.name) n.name = n.name.trim();
         this._inv().push(n);
         this._modus = null; this._invNeu = null;
         this._speichern();
@@ -2278,7 +2783,14 @@ const InventarAnsicht = {
       if (anz) anz.textContent = teil.min ? `${teil.min} Stück` : "aus";
       return true;
     }
-    if (t.dataset.invText) { this._teil()[t.dataset.invText] = t.value; return true; }
+    if (t.dataset.invText) {
+      this._teil()[t.dataset.invText] = t.value;
+      if (t.dataset.invText === "name") {
+        const titel = this.shadowRoot.querySelector(".sheet-titel h2");
+        if (titel) titel.textContent = this._modus === "inv-neu" ? `Neues Teil: ${teilName(this._teil())}` : teilName(this._teil());
+      }
+      return true;
+    }
     return false;
   },
 
@@ -3481,12 +3993,17 @@ const BuchenAnsicht = {
 // Hilfe: P1S-Zeichnung mit Bereichen, Sovol-Trockner, Fehlerbilder, Kalibrierung
 // ---------------------------------------------------------------------------
 
-const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"]];
+const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"], ["kunststoffe", "🧪 Kunststoffe"], ["codes", "⚠️ Fehlercodes"]];
 // Welche Rollenwerte zu welchem Bereich der Zeichnung gehören
 const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "max_vol"], luefter: ["luefter_min", "luefter_max"],
   riemen: ["v_aussen", "v_innen", "v_fuellung"], bett: ["bett"], spule: ["tr_temp", "tr_dauer"] };
 
 const HilfeAnsicht = {
+  // Neue Hilfe-Reiter (v0.12): Konstruktions-Tipps, Slicer-Lexikon, Druckplatten
+  _hiKonstruktionHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+  _hiLexikonHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+  _hiPlattenHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
+
   _hiZustand() {
     if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", rolle: null, kalWert: null };
     return this._hi;
@@ -3494,7 +4011,10 @@ const HilfeAnsicht = {
 
   _hiHtml() {
     const h = this._hiZustand();
-    const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml() : this._hiDruckerHtml();
+    const inhalt = h.tab === "trockner" ? this._hiTrocknerHtml() : h.tab === "fehler" ? this._hiFehlerHtml() : h.tab === "kalibrierung" ? this._hiKalHtml()
+      : h.tab === "kunststoffe" ? this._hiKunststoffeHtml() : h.tab === "codes" ? this._hiCodesHtml()
+      : h.tab === "konstruktion" ? this._hiKonstruktionHtml() : h.tab === "lexikon" ? this._hiLexikonHtml() : h.tab === "platten" ? this._hiPlattenHtml()
+      : this._hiDruckerHtml();
     return `<div class="hi-seite" data-einmal="hi-${h.tab}">
       <div class="chips hi-tabs unter-tabs">${HI_TABS.map(([id, n]) => `<button class="chip ${h.tab === id ? "an" : ""}" data-aktion="hi-tab" data-id="${id}">${n}</button>`).join("")}</div>
       ${inhalt}${h.tab === "fehler" && fehlerbild(h.fehler) ? this._hiFehlerPopupHtml() : ""}</div>`;
@@ -3677,6 +4197,7 @@ const HilfeAnsicht = {
   },
 
   _hiKlick(a, el) {
+    if (a.startsWith("hi-ks-") || a.startsWith("hi-cd-")) { this._ksKlick(a, el); return; }   // Kunststoffe/Fehlercodes (kunststoffe.js)
     const h = this._hiZustand();
     switch (a) {
       case "hi-tab": h.tab = el.dataset.id; h.fehler = null; break;
@@ -3729,11 +4250,12 @@ const HilfeAnsicht = {
   },
 };
 // ---------------------------------------------------------------------------
-// Werkstatt: Warteschlange mit Bestandsprüfung, Einkaufsliste, Modell-Bibliothek,
-// Fehldrucke, Wartungsplan mit Verschleißteilen, Kosten je Druck und Monat
+// Werkstatt: Warteschlange mit Bestandsprüfung und kluger Sortierung, Einkaufsliste,
+// Modell-Bibliothek mit Filtern, Projekte, Fehldrucke, Wartungsplan mit
+// Verschleißteilen, Kosten je Druck und Monat
 // ---------------------------------------------------------------------------
 
-const WS_TABS = [["schlange", "📋 Warteschlange"], ["einkauf", "🛒 Einkauf"], ["bibliothek", "📚 Bibliothek"], ["fehl", "💥 Fehldrucke"], ["wartung", "🔧 Wartung"], ["kosten", "💶 Kosten"]];
+const WS_TABS = [["schlange", "📋 Warteschlange"], ["einkauf", "🛒 Einkauf"], ["bibliothek", "📚 Bibliothek"], ["projekte", "📁 Projekte"], ["fehl", "💥 Fehldrucke"], ["wartung", "🔧 Wartung"], ["kosten", "💶 Kosten"]];
 const WS_EINSTELLUNGEN = [
   { k: "strompreis", name: "Strompreis", e: "€/kWh", min: 0.1, max: 0.8, step: 0.01, nk: 2 },
   { k: "linie_g", name: "Anfangslinie je Druck", e: "g", min: 0, max: 2, step: 0.05, nk: 2 },
@@ -3830,6 +4352,47 @@ function modellSchluessel(name) {
 }
 function tageSeit(iso) { return iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : null; }
 
+// Bibliothek-Filter
+const WS_ZEITRAUM = [["", "Jederzeit"], ["7", "Letzte 7 Tage"], ["30", "Letzte 30 Tage"], ["90", "Letzte 3 Monate"], ["jahr", "Dieses Jahr"]];
+const WS_ERGEBNIS = [["ok", "✅ Erfolgreich"], ["fehl", "💥 Fehldruck"], ["ab", "⛔ Abgebrochen"]];
+// Zeitplan der Warteschlange
+const WS_ABEND = 22;          // „Bis 22:00 schaffst du …“
+const WS_PAUSE_MIN = 5;       // Platte abnehmen, nächsten Druck starten
+const WS_WECHSEL_MIN = 3;     // Rolle tauschen
+// Projekte
+const WS_PJ_FARBEN = ["#3ee6a8", "#5cc8ff", "#ffb547", "#ff6b6b", "#c58cff", "#ffd54a", "#ff8ad8", "#8da49a"];
+const WS_PJ_ICONS = ["📦", "🏠", "🎁", "🔧", "🎮", "🌱", "🚗", "🧩", "🎄", "💡", "🐾", "🖨️"];
+const WS_PJ_TEIL_STATUS = { fertig: ["✓ fertig", "mint"], schlange: ["📋 in der Warteschlange", "amber"], fehl: ["💥 Fehldruck", "rot"], offen: ["offen", "leise"] };
+
+// Druckdauer aus dem G-Code-Text („1h 23m 4s“, „2d 3h“, „45m“, „1:23:00“) in Minuten
+function wsDauerMin(text) {
+  if (text == null || text === "") return null;
+  if (typeof text === "number") return text;
+  const s = String(text).toLowerCase();
+  const uhr = s.match(/^\s*(\d+):(\d{2})(?::(\d{2}))?\s*$/);
+  if (uhr) return Number(uhr[1]) * 60 + Number(uhr[2]) + (uhr[3] ? Number(uhr[3]) / 60 : 0);
+  let min = 0, gefunden = false;
+  for (const [, z, e] of s.matchAll(/(\d+(?:[.,]\d+)?)\s*(d|h|m(?!s)|s)/g)) {
+    gefunden = true;
+    min += parseFloat(z.replace(",", ".")) * { d: 1440, h: 60, m: 1, s: 1 / 60 }[e];
+  }
+  return gefunden ? Math.round(min) : null;
+}
+function wsDauerText(min) {
+  if (min == null) return "–";
+  min = Math.round(min);
+  return min >= 60 ? `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""}` : `${min} min`;
+}
+const wsUhr = (ms) => new Date(ms).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+// Dauer eines Auftrags: eingestellt oder aus dem G-Code
+const wsAuftragDauer = (a) => (a.dauer_min != null && a.dauer_min > 0 ? a.dauer_min : wsDauerMin(a.zeit));
+// Dauer eines fertigen Drucks aus Start und Ende
+function wsDruckDauer(d) {
+  if (!d || !d.start || !d.ende) return null;
+  const m = (new Date(d.ende) - new Date(d.start)) / 60000;
+  return m > 0 && m < 14 * 1440 ? Math.round(m) : null;
+}
+
 const WerkstattAnsicht = {
   _wsZustand() {
     if (!this._ws) this._ws = { tab: "schlange", neu: null };
@@ -3839,17 +4402,20 @@ const WerkstattAnsicht = {
   _wsHtml() {
     const w = this._wsZustand();
     const zahlen = { schlange: this._daten.warteschlange.length, einkauf: this._wsEinkauf().length, wartung: this._wsWartung().filter((a) => a.faellig).length };
-    const inhalt = { einkauf: () => this._wsEinkaufHtml(), bibliothek: () => this._wsBibliothekHtml(), fehl: () => this._wsFehlHtml(), wartung: () => this._wsWartungHtml(), kosten: () => this._wsKostenHtml() }[w.tab] || (() => this._wsSchlangeHtml());
+    const inhalt = { einkauf: () => this._wsEinkaufHtml(), bibliothek: () => this._wsBibliothekHtml(), projekte: () => this._wsProjekteHtml(), fehl: () => this._wsFehlHtml(), wartung: () => this._wsWartungHtml(), kosten: () => this._wsKostenHtml() }[w.tab] || (() => this._wsSchlangeHtml());
+    const pj = w.tab === "projekte" && w.projekt && this._wsProjekt(w.projekt) ? `-${w.projekt}` : "";
+    // Fotos für Projekte nachladen (Bibliothek und Fehldrucke laden sie beim Tab-Wechsel)
+    if (w.tab === "projekte" && this._drVerlauf && !this._wsFotosAngefragt) { this._wsFotosAngefragt = true; setTimeout(() => this._wsFotos(), 0); }
     return `<div class="ws-seite">
       <div class="chips unter-tabs" role="tablist">${WS_TABS.map(([id, n]) => `<button class="chip ${w.tab === id ? "an" : ""}" data-aktion="ws-tab" data-id="${id}">${n}${zahlen[id] ? ` <span class="zahl-punkt ${id === "wartung" ? "amber-punkt" : ""}">${zahlen[id]}</span>` : ""}</button>`).join("")}</div>
-      <div class="ws-inhalt wechsel-rein" data-einmal="ws-${w.tab}">${inhalt()}</div></div>`;
+      <div class="ws-inhalt wechsel-rein" data-einmal="ws-${w.tab}${pj}">${inhalt()}</div></div>`;
   },
 
   // ---- Warteschlange ----
-  _wsBestand() {
+  _wsBestand(liste = this._daten.warteschlange) {
     // Aufträge der Reihe nach von den Rollen abziehen: späterer Auftrag sieht, was übrig bleibt
     const e = this._daten.einstellungen, rest = {};
-    return this._daten.warteschlange.map((a) => {
+    return liste.map((a) => {
       const r = this._daten.rollen.find((x) => x.id === a.rolleId);
       const bedarf = (a.gewicht || 0) + e.linie_g + e.extruder_g;
       if (!r) return { a, r: null, stufe: "ohne", bedarf };
@@ -3862,25 +4428,107 @@ const WerkstattAnsicht = {
       return { a, r, stufe, bedarf, vorher, danach: vorher - bedarf, ersatz };
     });
   },
+  _wsKlug() { return !!this._daten.einstellungen.schlange_klug; },
+  // Klug sortieren: nach Rolle gruppieren, die geladene Rolle zuerst, dann die Rollen in der
+  // Reihenfolge, in der sie zuerst vorkommen; innerhalb einer Rolle bleibt die eigene Reihenfolge.
+  // Aufträge ohne (bekannte) Rolle kommen ans Ende.
+  _wsKlugeReihenfolge(q = this._daten.warteschlange) {
+    const geladen = this._daten.geladen, gruppen = new Map();
+    for (const a of q) {
+      const k = a.rolleId && this._daten.rollen.some((r) => r.id === a.rolleId) ? a.rolleId : "";
+      if (!gruppen.has(k)) gruppen.set(k, []);
+      gruppen.get(k).push(a);
+    }
+    const zuerst = (k) => (k && k === geladen ? 0 : k ? 1 : 2);
+    return [...gruppen.keys()].sort((a, b) => zuerst(a) - zuerst(b)).flatMap((k) => gruppen.get(k));
+  },
+  _wsReihenfolge() { return this._wsKlug() ? this._wsKlugeReihenfolge() : this._daten.warteschlange.slice(); },
+  // Rollenwechsel einer Reihenfolge (ab der geladenen Rolle)
+  _wsWechsel(liste) {
+    let vorher = this._daten.geladen || null, n = 0;
+    for (const a of liste) { if (!a.rolleId) continue; if (vorher && a.rolleId !== vorher) n++; vorher = a.rolleId; }
+    return n;
+  },
+  // Druckt der Drucker gerade? Restzeit wie in der Drucker-Ansicht
+  _wsDruckLaeuft() {
+    const zustand = this._drZustand ? this._drZustand() : null;
+    if (!["running", "pause", "prepare", "slicing"].includes(zustand)) return null;
+    const h = this._drZ("rest_h");
+    return { rest_min: h != null ? Math.max(0, h * 60) : 0, name: this._drW("name") };
+  },
+  // Zeitplan: ab jetzt bzw. nach dem laufenden Druck, Pause je Druck, Zeit je Rollenwechsel
+  _wsZeitplan(liste) {
+    const laeuft = this._wsDruckLaeuft(), jetzt = Date.now();
+    let t = jetzt + (laeuft ? laeuft.rest_min * 60000 : 0), rolle = this._daten.geladen || null;
+    const start = t;
+    const plan = liste.map((x, i) => {
+      const min = wsAuftragDauer(x.a);
+      if (min == null) return { ende: null, min: null };
+      if (i > 0 || laeuft) t += WS_PAUSE_MIN * 60000;
+      if (x.a.rolleId && rolle && x.a.rolleId !== rolle) t += WS_WECHSEL_MIN * 60000;
+      if (x.a.rolleId) rolle = x.a.rolleId;
+      t += min * 60000;
+      return { ende: t, min };
+    });
+    const abend = new Date(jetzt); abend.setHours(WS_ABEND, 0, 0, 0);
+    const morgen = abend.getTime() <= jetzt;
+    if (morgen) abend.setDate(abend.getDate() + 1);
+    const bisAbend = plan.filter((p) => p.ende != null && p.ende <= abend.getTime()).length;
+    return { plan, laeuft, start, ende: t, morgen, bisAbend, ohneDauer: plan.filter((p) => p.ende == null).length };
+  },
   _wsSchlangeHtml() {
-    const liste = this._wsBestand();
+    const q = this._daten.warteschlange, klug = this._wsKlug();
+    const liste = this._wsBestand(this._wsReihenfolge());
+    const zp = this._wsZeitplan(liste);
     const text = { ok: ["✓ reicht", "mint"], knapp: ["knapp", "amber"], fehlt: ["reicht nicht", "rot"], ungewogen: ["Rolle nicht gewogen", "amber"], unbekannt: ["Gewicht unbekannt", "leise"], ohne: ["keine Rolle gewählt", "amber"] };
+    const wechselManuell = this._wsWechsel(q), wechselKlug = this._wsWechsel(this._wsKlugeReihenfolge());
+    const geladen = this._daten.rollen.find((r) => r.id === this._daten.geladen);
+    const projekte = this._wsProjekte();
+    const heute = new Date().toDateString();
+    let letzteRolle = null;
     return `<div class="ws-kopfzeile"><p class="leise">Was als Nächstes gedruckt wird. Die Bestandsprüfung rechnet die Aufträge der Reihe nach von den Rollen ab.</p>
       <button class="knopf" data-aktion="ws-neu">＋ Auftrag</button></div>
+      ${q.length > 1 ? `<div class="ws-modus" role="group" aria-label="Reihenfolge">
+        <div class="ws-umschalter"><button class="${klug ? "" : "an"}" data-aktion="ws-klug" data-id="aus" aria-pressed="${!klug}">✋ Meine Reihenfolge</button>
+          <button class="${klug ? "an" : ""}" data-aktion="ws-klug" data-id="an" aria-pressed="${klug}">🧠 Klug sortieren</button></div>
+        ${klug && wechselKlug < wechselManuell ? `<button class="mini mint-rand" data-aktion="ws-klug-uebernehmen">Als meine Reihenfolge übernehmen</button>` : ""}</div>` : ""}
+      ${q.length ? `<div class="ws-plan dr-karte">
+        <div class="ws-plan-zeile"><span class="ws-plan-icon">⏱</span><div><strong>${zp.laeuft ? `Start nach dem laufenden Druck · noch ${wsDauerText(zp.laeuft.rest_min)}` : "Start: jetzt"}</strong>
+          <small class="leise">${zp.ohneDauer < liste.length ? `Alles fertig um ${zp.ohneDauer ? "≥ " : ""}${wsUhr(zp.ende)}${new Date(zp.ende).toDateString() !== heute ? ` (${new Date(zp.ende).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" })})` : ""}` : "Noch für keinen Auftrag eine Druckdauer eingetragen"} · je Druck ${WS_PAUSE_MIN} min Platte wechseln, je Rollenwechsel ${WS_WECHSEL_MIN} min</small></div></div>
+        <div class="ws-plan-zeile ws-plan-abend"><span class="ws-plan-icon">🌙</span><div><strong>Bis ${zp.morgen ? "morgen " : ""}${WS_ABEND}:00 schaffst du <b class="ws-plan-zahl">${zp.bisAbend}</b> ${zp.bisAbend === 1 ? "Druck" : "Drucke"}${zp.bisAbend < liste.length ? ` von ${liste.length}` : ""}</strong>
+          ${zp.ohneDauer ? `<small class="amber">${zp.ohneDauer} ${zp.ohneDauer === 1 ? "Auftrag hat" : "Aufträge haben"} keine Druckdauer und ${zp.ohneDauer === 1 ? "zählt" : "zählen"} nicht mit. Dauer eintragen mit ✎</small>` : ""}</div></div>
+        <div class="ws-plan-zeile"><span class="ws-plan-icon">🔁</span><div><strong>${klug ? wechselKlug : wechselManuell} Rollenwechsel</strong>
+          <small class="leise">${klug ? (wechselKlug < wechselManuell ? `statt ${wechselManuell} in deiner Reihenfolge` : "weniger geht nicht") : wechselKlug < wechselManuell ? `Klug sortiert wären es nur ${wechselKlug}` : "Die Reihenfolge ist schon günstig"}${geladen ? ` · geladen: ${esc(geladen.name)}` : " · keine Rolle als geladen markiert"}</small></div></div>
+      </div>` : ""}
       ${!liste.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📋</span><strong>Die Warteschlange ist leer</strong>
         <span class="leise">Füge Aufträge hier hinzu, aus dem 3D-Modell-Viewer oder mit „Nochmal drucken“ in der Bibliothek.</span></div>` : ""}
       <div class="ws-liste">${liste.map((x, i) => {
         const [st, farbe] = text[x.stufe];
-        return `<div class="ws-auftrag dr-karte" data-einmal="ws-a-${esc(x.a.id)}">
-          <div class="ws-nr">${i + 1}</div>
+        const p = zp.plan[i];
+        let trenner = "";
+        if (klug) {
+          const k = x.r ? x.r.id : "";
+          if (k !== letzteRolle) {
+            const art = !k ? "Ohne Rolle" : k === this._daten.geladen ? `Geladen: ${esc(x.r.name)}` : `${i ? "🔁 Rollenwechsel: " : "Zuerst einlegen: "}${esc(x.r.name)}`;
+            trenner = `<div class="ws-trenner ${k && k === this._daten.geladen ? "geladen" : ""}">${x.r && x.r.hex ? `<span class="farbtupfer" style="background:${esc(x.r.hex)}"></span>` : ""}${art}</div>`;
+            letzteRolle = k;
+          }
+        }
+        const mi = q.indexOf(x.a);
+        const pj = projekte.filter((pr) => pr.teile.some((t) => t.art === "auftrag" && t.ref === x.a.id));
+        return `${trenner}<div class="ws-auftrag dr-karte ${x.stufe === "fehlt" ? "fehlt" : ""}" data-einmal="ws-a-${esc(x.a.id)}">
+          <div class="ws-nr">${i + 1}${x.stufe === "fehlt" ? `<i class="ws-rot-punkt" title="Rolle reicht nicht"></i>` : ""}</div>
           <div class="ws-text"><strong>${esc(x.a.name)}</strong>
-            <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${x.a.zeit ? ` · ${esc(x.a.zeit)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}</small>
-            <span class="pille ${farbe}">${st}${x.vorher != null && x.a.gewicht ? (x.danach < 0 ? ` · es fehlen ${zahl(-x.danach)} g` : ` · danach ${zahl(x.danach)} g`) : ""}</span>
+            <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${p.min != null ? ` · ${wsDauerText(p.min)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}</small>
+            <span class="ws-pillen"><span class="pille ${farbe}">${st}${x.vorher != null && x.a.gewicht ? (x.danach < 0 ? ` · es fehlen ${zahl(-x.danach)} g` : ` · danach ${zahl(x.danach)} g`) : ""}</span>
+              ${p.ende != null ? `<span class="pille ws-uhr">fertig um ${wsUhr(p.ende)}${new Date(p.ende).toDateString() !== heute ? ` (${new Date(p.ende).toLocaleDateString("de-DE", { weekday: "short" })})` : ""}</span>` : `<span class="pille ws-ohne-dauer">Dauer fehlt</span>`}
+              ${pj.map((pr) => `<span class="pille ws-pj-pille" style="--pj:${esc(pr.farbe)}">${esc(pr.icon)} ${esc(pr.name)}</span>`).join("")}</span>
             ${x.ersatz && x.ersatz.length ? `<div class="chips ws-ersatz"><span class="leise klein">Reicht stattdessen:</span>${x.ersatz.map((r) => `<button class="chip" data-aktion="ws-rolle" data-id="${esc(x.a.id)}" data-rolle="${esc(r.id)}">${esc(r.name)} · ${zahl(r.rest_g)} g</button>`).join("")}</div>` : ""}
             ${x.a.notiz ? `<small class="leise">📝 ${esc(x.a.notiz)}</small>` : ""}</div>
           <div class="ws-knoepfe">
-            <button class="rund" data-aktion="ws-hoch" data-id="${esc(x.a.id)}" ${i === 0 ? "disabled" : ""} aria-label="Nach oben">↑</button>
-            <button class="rund" data-aktion="ws-runter" data-id="${esc(x.a.id)}" ${i === liste.length - 1 ? "disabled" : ""} aria-label="Nach unten">↓</button>
+            ${klug ? "" : `<button class="rund" data-aktion="ws-hoch" data-id="${esc(x.a.id)}" ${mi === 0 ? "disabled" : ""} aria-label="Nach oben">↑</button>
+            <button class="rund" data-aktion="ws-runter" data-id="${esc(x.a.id)}" ${mi === q.length - 1 ? "disabled" : ""} aria-label="Nach unten">↓</button>`}
+            <button class="rund" data-aktion="ws-zu-projekt" data-art="auftrag" data-ref="${esc(x.a.id)}" aria-label="Zu Projekt" title="Zu Projekt">📁</button>
             <button class="rund" data-aktion="ws-bearbeiten" data-id="${esc(x.a.id)}" aria-label="Bearbeiten">✎</button>
             <button class="rund" data-aktion="ws-weg" data-id="${esc(x.a.id)}" aria-label="Entfernen">✓</button>
           </div></div>`;
@@ -3888,17 +4536,28 @@ const WerkstattAnsicht = {
   },
   _wsAuftragNeu(werte) {
     const voll = this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => b.rest_g - a.rest_g)[0] || this._daten.rollen[0] || {};
-    this._wsZustand().neu = { id: null, name: "", gewicht: 20, rolleId: this._daten.letzte_rolle || voll.id, notiz: "", ...werte };
+    const n = { id: null, name: "", gewicht: 20, rolleId: this._daten.letzte_rolle || voll.id, notiz: "", ...werte };
+    if (n.dauer_min == null) n.dauer_min = wsDauerMin(n.zeit) || 0;
+    this._wsZustand().neu = n;
+    this._ws.dlg = "auftrag";
     this._dialog = "ws-auftrag";
   },
+  // Alle Werkstatt-Dialoge laufen über this._dialog = "ws-auftrag", welcher es ist, steht in _ws.dlg
   _wsAuftragDialogHtml() {
+    const dlg = this._ws.dlg || "auftrag";
+    if (dlg === "projekt") return this._wsProjektDialogHtml();
+    if (dlg === "zu-projekt") return this._wsZuProjektDialogHtml();
+    if (dlg === "pj-teil") return this._wsPjTeilDialogHtml();
     const n = this._ws.neu;
     const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
     return `<h2>${n.id ? "Auftrag bearbeiten" : "Neuer Auftrag"}</h2>
       <label class="feld"><span>Was wird gedruckt?</span><input id="ws-name" value="${esc(n.name)}" placeholder="z. B. Kabelhalter" maxlength="80"></label>
       <div class="mod-regler"><div class="r-kopf"><span>Filament</span><strong id="ws-gewicht">${zahl(n.gewicht, 1)} g</strong></div>
         <div class="regler-zeile"><button class="rund" data-aktion="ws-g" data-d="-5">−5</button><input type="range" min="0" max="1000" step="0.5" value="${n.gewicht}" data-ws="gewicht"><button class="rund" data-aktion="ws-g" data-d="5">+5</button></div></div>
-      <label class="auswahl breit-auswahl"><span>Rolle</span><select data-ws="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${r.id === n.rolleId ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : ""}</option>`).join("")}</select></label>
+      <div class="mod-regler"><div class="r-kopf"><span>Druckdauer</span><strong id="ws-dauer">${n.dauer_min ? wsDauerText(n.dauer_min) : "unbekannt"}</strong></div>
+        <div class="regler-zeile"><button class="rund" data-aktion="ws-d" data-d="-15">−15</button><input type="range" min="0" max="1440" step="5" value="${n.dauer_min || 0}" data-ws="dauer" aria-label="Druckdauer in Minuten"><button class="rund" data-aktion="ws-d" data-d="15">+15</button></div>
+        <small class="leise klein">In Minuten, steht im Slicer. Damit rechnet die Warteschlange aus, wann was fertig ist.</small></div>
+      <label class="auswahl breit-auswahl"><span>Rolle</span><select data-ws="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${r.id === n.rolleId ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : ""}${r.id === this._daten.geladen ? " · geladen" : ""}</option>`).join("")}</select></label>
       <label class="feld"><span>Notiz (optional)</span><input id="ws-notiz" value="${esc(n.notiz)}" maxlength="140"></label>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf" data-aktion="ws-speichern">${n.id ? "Speichern" : "Hinzufügen"}</button></div>`;
   },
@@ -3909,8 +4568,9 @@ const WerkstattAnsicht = {
     let g = null;
     if (m.art === "gcode") g = m.gcode && m.gcode.info.gramm;
     else if (m.kenn) { const r = this._modRolle(); g = gewichtSchaetzen(m.kenn, materialInfo(r ? r.material : "PLA").dichte, { duese: m.duese, waende: m.waende, fuellung: m.fuellung }).gramm; }
+    const zeit = m.art === "gcode" ? m.gcode.info.zeit || null : null;
     this._daten.warteschlange.push({ id: `a-${Date.now().toString(36)}`, name: m.name.replace(/\.(gcode\.3mf|gcode|3mf|stl)$/i, ""), gewicht: g ? Math.round(g * 10) / 10 : null,
-      zeit: m.art === "gcode" ? m.gcode.info.zeit || null : null, rolleId: m.rolleId, notiz: "", am: new Date().toISOString(), quelle: m.art });
+      zeit, dauer_min: wsDauerMin(zeit), rolleId: m.rolleId, notiz: "", am: new Date().toISOString(), quelle: m.art });
     this._speichern();
     this._toast(`„${m.name}“ steht jetzt in der Warteschlange (Platz ${this._daten.warteschlange.length}).`);
   },
@@ -3932,7 +4592,8 @@ const WerkstattAnsicht = {
     for (const r of d.rollen) if (r.rest_g != null) mats[r.material] = (mats[r.material] || 0) + r.rest_g;
     for (const [m, g] of Object.entries(mats)) if (g < e.mindest_material_g) liste.push({ art: "material", titel: `${m} allgemein`, text: `insgesamt nur noch ${zahl(g)} g ${m}`, dringend: g < e.mindest_material_g / 2 });
     for (const t of d.inventar) {
-      if (wenigBestand(t) || (t.menge === 0)) liste.push({ art: "teil", titel: teilName(t), text: `${t.menge} Stk${t.min ? `, Mindestbestand ${t.min}` : ""}`, id: t.id, dringend: t.menge === 0, icon: kategorie(t.kat).icon });
+      if (wenigBestand(t) || (t.menge === 0)) liste.push({ art: "teil", titel: teilName(t), text: `${t.menge} Stk${t.min ? `, Mindestbestand ${t.min}` : ""}`, id: t.id, dringend: t.menge === 0, icon: t.icon || kategorie(t.kat).icon });
+      else if (t.zustand === "ersetzen") liste.push({ art: "teil", titel: teilName(t), text: "Zustand: ersetzen", id: t.id, dringend: false, icon: t.icon || kategorie(t.kat).icon });
     }
     const h = this._drZ ? this._drZ("stunden") : null;
     if (h != null) for (const t of this._wsTeile()) {
@@ -3959,13 +4620,14 @@ const WerkstattAnsicht = {
   },
 
   // ---- Modell-Bibliothek ----
-  _wsModelle() {
+  // Drucke nach Modell zusammenfassen (ohne Angabe: alle Drucke, sonst die gefilterten)
+  _wsModelle(drucke = this._buAlle()) {
     const gruppen = new Map();
-    for (const d of this._buAlle()) {
+    for (const d of drucke) {
       if (d.status === "laeuft") continue;
       const k = modellSchluessel(d.name);
       const x = this._buExtra(d.uid);
-      const g = gruppen.get(k) || { name: d.name, drucke: [], ok: 0, fehl: 0 };
+      const g = gruppen.get(k) || { name: d.name, schluessel: k, drucke: [], ok: 0, fehl: 0 };
       g.drucke.push(d);
       const erg = x.gebucht ? x.gebucht.ergebnis : d.status === "finish" ? "ok" : null;
       if (erg === "ok") g.ok++; else if (erg === "fehl") g.fehl++;
@@ -3974,25 +4636,371 @@ const WerkstattAnsicht = {
     }
     return [...gruppen.values()].sort((a, b) => (b.drucke[0].start || "").localeCompare(a.drucke[0].start || ""));
   },
+  // Ergebnis eines Drucks: ok (erfolgreich), fehl (als Fehldruck verbucht), ab (abgebrochen bzw. anders überlegt)
+  _wsErgebnis(d) {
+    const g = this._buExtra(d.uid).gebucht;
+    if (g) return g.ergebnis === "ok" ? "ok" : g.ergebnis === "fehl" ? "fehl" : "ab";
+    return d.status === "finish" ? "ok" : d.status === "failed" ? "ab" : null;
+  },
+  _wsBibF() {
+    const w = this._wsZustand();
+    if (!w.bib) w.bib = { fil: "", status: "", zeit: "" };
+    return w.bib;
+  },
+  _wsDruckPasst(d, f) {
+    if (f.status && this._wsErgebnis(d) !== f.status) return false;
+    if (f.fil) {
+      const g = this._buExtra(d.uid).gebucht, rid = g && g.rolle;
+      if (!rid) return false;
+      if (f.fil.startsWith("r:")) { if (rid !== f.fil.slice(2)) return false; }
+      else { const r = this._daten.rollen.find((x) => x.id === rid); if (!r || r.material !== f.fil.slice(2)) return false; }
+    }
+    if (f.zeit) {
+      const t = d.start ? new Date(d.start) : null;
+      if (!t || isNaN(t)) return false;
+      if (f.zeit === "jahr") { if (t.getFullYear() !== new Date().getFullYear()) return false; }
+      else if ((Date.now() - t.getTime()) / 86400000 > Number(f.zeit)) return false;
+    }
+    return true;
+  },
+  _wsBibTreffer() {
+    const f = this._wsBibF(), q = (this._ws.suche || "").trim();
+    let modelle = this._wsModelle(this._buAlle().filter((d) => this._wsDruckPasst(d, f)));
+    if (q) modelle = modelle.filter((m) => { const r = this._daten.rollen.find((x) => x.id === m.rolle); return suchPunkte(q, `${m.name} ${r ? `${r.name} ${r.material}` : ""}`); });
+    return { modelle, drucke: modelle.reduce((s, m) => s + m.drucke.length, 0) };
+  },
+  _wsBibAktiv() { const f = this._wsBibF(); return [f.fil, f.status, f.zeit].filter(Boolean).length + ((this._ws.suche || "").trim() ? 1 : 0); },
+  _wsBibZahlHtml(tr) {
+    const n = this._wsBibAktiv();
+    return `<span><strong>${tr.drucke}</strong> ${tr.drucke === 1 ? "Druck" : "Drucke"} in <strong>${tr.modelle.length}</strong> ${tr.modelle.length === 1 ? "Modell" : "Modellen"}${n ? ` · ${n} ${n === 1 ? "Filter" : "Filter"} aktiv` : ""}</span>
+      ${n ? `<button class="mini" data-aktion="ws-bib-reset">✕ Filter zurücksetzen</button>` : ""}`;
+  },
+  _wsBibRasterHtml(tr) {
+    if (tr.modelle.length) return tr.modelle.map((m) => this._wsModellKarte(m)).join("");
+    return `<div class="leer-karte dr-karte ws-bib-leer"><span class="gross-icon">🔍</span><strong>Kein Druck passt zu den Filtern</strong>
+      <span class="leise">Probier einen längeren Zeitraum oder ein anderes Filament.</span><button class="knopf leise klein-knopf" data-aktion="ws-bib-reset">Filter zurücksetzen</button></div>`;
+  },
   _wsBibliothekHtml() {
-    const modelle = this._wsModelle();
-    const q = this._ws.suche || "";
-    const zeige = q ? modelle.filter((m) => suchPunkte(q, m.name)) : modelle;
-    return `<div class="ws-kopfzeile"><input class="such-feld" data-ws="suche" value="${esc(q)}" placeholder="Modell suchen …" aria-label="Modell suchen"></div>
-      ${!modelle.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📚</span><strong>Noch keine Modelle</strong><span class="leise">Jeder Druck aus dem Druckverlauf landet hier, gleiche Modelle werden zusammengefasst.</span></div>` : ""}
-      <div class="ws-raster" id="ws-bib">${zeige.map((m) => this._wsModellKarte(m)).join("") || (modelle.length ? `<p class="leise">Kein Modell passt zu „${esc(q)}“.</p>` : "")}</div>`;
+    const w = this._wsZustand(), f = this._wsBibF(), q = w.suche || "";
+    const alle = this._wsModelle();
+    if (!alle.length) return `<div class="leer-karte dr-karte"><span class="gross-icon">📚</span><strong>Noch keine Modelle</strong><span class="leise">Jeder Druck aus dem Druckverlauf landet hier, gleiche Modelle werden zusammengefasst.</span></div>`;
+    const tr = this._wsBibTreffer();
+    // Filament-Auswahl: Rollen, mit denen schon etwas verbucht wurde (sonst alle), darüber die Materialien
+    const benutzt = new Set(this._buAlle().map((d) => (this._buExtra(d.uid).gebucht || {}).rolle).filter(Boolean));
+    const rollen = this._daten.rollen.filter((r) => !benutzt.size || benutzt.has(r.id)).sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const mats = [...new Set(rollen.map((r) => r.material))].sort();
+    const opt = (v, t) => `<option value="${esc(v)}" ${f.fil === v || f.zeit === v ? "selected" : ""}>${esc(t)}</option>`;
+    const anzahl = [f.fil, f.status, f.zeit].filter(Boolean).length;
+    const filter = `<div class="ws-bib-filter" data-einmal="ws-bib-filter">
+        <label class="auswahl ${f.fil ? "an" : ""}"><span>Filament</span><select data-ws="bib-fil"><option value="">Alle Filamente</option>
+          <optgroup label="Material">${mats.map((m) => opt(`m:${m}`, `Alle ${m}`)).join("")}</optgroup>
+          <optgroup label="Rolle">${rollen.map((r) => opt(`r:${r.id}`, `${r.name} · ${r.material}`)).join("")}</optgroup></select></label>
+        <label class="auswahl ${f.zeit ? "an" : ""}"><span>Zeitraum</span><select data-ws="bib-zeit">${WS_ZEITRAUM.map(([v, t]) => `<option value="${v}" ${f.zeit === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        <div class="chips ws-bib-status" role="group" aria-label="Ergebnis"><button class="chip ${f.status ? "" : "an"}" data-aktion="ws-bib-status" data-id="">Alle</button>
+          ${WS_ERGEBNIS.map(([v, t]) => `<button class="chip ${f.status === v ? "an" : ""} ${v === "ok" ? "" : "rot-chip"}" data-aktion="ws-bib-status" data-id="${v}">${t}</button>`).join("")}</div>
+      </div>`;
+    return `<div class="ws-bib-werkzeug">
+        <input class="such-feld" type="search" data-ws="suche" value="${esc(q)}" placeholder="Modell oder Filament suchen …" aria-label="Modell suchen" autocomplete="off">
+        ${this._mobil ? `<button class="auswahl filter-knopf ${anzahl ? "an" : ""}" data-aktion="ws-bib-auf" aria-expanded="${!!w.bibAuf}"><span>Filter</span><strong>${anzahl ? `${anzahl} aktiv` : "Keiner"}</strong></button>` : ""}
+        ${!this._mobil || w.bibAuf ? filter : ""}
+      </div>
+      <div class="ws-treffer" id="ws-bib-zahl">${this._wsBibZahlHtml(tr)}</div>
+      <div class="ws-raster" id="ws-bib">${this._wsBibRasterHtml(tr)}</div>`;
   },
   _wsModellKarte(m) {
     const d = m.drucke[0], f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
     const r = this._daten.rollen.find((x) => x.id === m.rolle);
     const quote = m.ok + m.fehl ? Math.round((m.ok / (m.ok + m.fehl)) * 100) : null;
+    const pj = this._wsProjekte().filter((p) => p.teile.some((t) => t.schluessel === m.schluessel && (t.art === "modell" || t.art === "auftrag" || m.drucke.some((x) => x.uid === t.ref))));
     return `<div class="ws-modell dr-karte">
       <div class="ws-foto" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="" loading="lazy">` : `<span>🧊</span>`}</div>
       <div class="ws-modell-text"><strong title="${esc(m.name)}">${esc(m.name)}</strong>
         <small class="leise">${m.drucke.length}× gedruckt · zuletzt ${esc(d.zeit || "–")}</small>
-        <small class="leise">${d.gewicht != null ? `${zahl(d.gewicht, 1)} g` : "–"}${r ? ` · ${esc(r.name)}` : ""}${quote != null ? ` · ${quote} % geglückt` : ""}</small></div>
-      <div class="ws-modell-knoepfe"><button class="knopf klein-knopf" data-aktion="ws-nochmal" data-uid="${esc(d.uid)}">↻ Nochmal drucken</button>
+        <small class="leise">${d.gewicht != null ? `${zahl(d.gewicht, 1)} g` : "–"}${r ? ` · ${esc(r.name)}` : ""}${quote != null ? ` · ${quote} % geglückt` : ""}</small>
+        ${pj.length ? `<span class="ws-pillen">${pj.map((p) => `<button class="pille ws-pj-pille" style="--pj:${esc(p.farbe)}" data-aktion="ws-pj-auf" data-id="${esc(p.id)}">${esc(p.icon)} ${esc(p.name)}</button>`).join("")}</span>` : ""}</div>
+      <div class="ws-modell-knoepfe"><button class="knopf klein-knopf" data-aktion="ws-nochmal" data-uid="${esc(d.uid)}" title="Nochmal drucken: in die Warteschlange">↻ Nochmal</button>
+        <button class="rund" data-aktion="ws-zu-projekt" data-art="modell" data-ref="${esc(m.schluessel)}" data-name="${esc(m.name)}" aria-label="Zu Projekt" title="Zu Projekt">📁</button>
         <button class="mini" data-aktion="zum-druck" data-uid="${esc(d.uid)}">Details</button></div></div>`;
+  },
+
+  // ---- Projekte ----
+  _wsProjekte() { return (this._daten && this._daten.projekte) || []; },
+  _wsProjekt(id) { return this._wsProjekte().find((p) => p.id === id); },
+  // Stand eines Projektteils: passender Druck (über die Druck-ID oder den Modellnamen), Auftrag in der Warteschlange
+  _wsPjTeilInfo(t) {
+    const q = this._daten.warteschlange;
+    const alle = this._buAlle().filter((d) => d.status !== "laeuft");
+    const drucke = t.art === "druck" ? alle.filter((d) => d.uid === t.ref) : alle.filter((d) => modellSchluessel(d.name) === t.schluessel);
+    const ok = drucke.find((d) => this._wsErgebnis(d) === "ok");
+    const d = ok || drucke[0] || null;
+    const auftrag = (t.art === "auftrag" && q.find((a) => a.id === t.ref)) || (!ok && q.find((a) => modellSchluessel(a.name) === t.schluessel)) || null;
+    const fertig = t.fertig != null ? t.fertig : !!ok;
+    const status = fertig ? "fertig" : auftrag ? "schlange" : d && this._wsErgebnis(d) === "fehl" ? "fehl" : "offen";
+    const g = d ? this._buExtra(d.uid).gebucht : null;
+    const gramm = g && g.g != null ? g.g : d && d.gewicht != null ? d.gewicht : auftrag && auftrag.gewicht != null ? auftrag.gewicht : null;
+    let kosten = null, geschaetzt = false;
+    if (g && g.kosten && (g.kosten.filament != null || g.kosten.strom != null)) kosten = (g.kosten.filament || 0) + (g.kosten.strom || 0);
+    else if (gramm != null) {
+      const r = this._daten.rollen.find((x) => x.id === ((g && g.rolle) || (auftrag && auftrag.rolleId)));
+      if (r && r.preis_kg) { kosten = (gramm * r.preis_kg) / 1000; geschaetzt = true; }
+    }
+    const min = d ? wsDruckDauer(d) : auftrag ? wsAuftragDauer(auftrag) : null;
+    return { t, d, auftrag, status, fertig, gramm, kosten, geschaetzt, min, foto: d ? fotoName(d) : null, anzahl: drucke.length };
+  },
+  _wsPjSumme(p) {
+    const infos = p.teile.map((t) => this._wsPjTeilInfo(t));
+    const s = { infos, fertig: 0, g: 0, g_fertig: 0, kosten: 0, geschaetzt: false, ohneKosten: 0, min: 0 };
+    for (const i of infos) {
+      if (i.fertig) { s.fertig++; s.g_fertig += i.gramm || 0; }
+      s.g += i.gramm || 0;
+      if (i.kosten != null) s.kosten += i.kosten; else s.ohneKosten++;
+      if (i.geschaetzt) s.geschaetzt = true;
+      s.min += i.min || 0;
+    }
+    s.anteil = infos.length ? s.fertig / infos.length : 0;
+    return s;
+  },
+  _wsPjZeile(s) {
+    return `${s.fertig}/${s.infos.length} ${s.infos.length === 1 ? "Teil" : "Teile"} fertig · ${zahl(s.g)} g · ${s.geschaetzt ? "ca. " : ""}${zahl(s.kosten, 2)} € · ${wsDauerText(s.min)}`;
+  },
+  _wsProjekteHtml() {
+    const w = this._wsZustand();
+    const p = w.projekt && this._wsProjekt(w.projekt);
+    if (p) return this._wsProjektHtml(p);
+    const liste = this._wsProjekte();
+    return `<div class="ws-kopfzeile"><p class="leise">Fasse zusammengehörige Drucke zu einem Projekt zusammen, z. B. alle Teile eines Gehäuses. Teile kommen aus der Bibliothek, der Warteschlange oder dem Druckverlauf (📁).</p>
+      <button class="knopf" data-aktion="ws-pj-neu">＋ Projekt</button></div>
+      ${!liste.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📁</span><strong>Noch keine Projekte</strong>
+        <span class="leise">Lege ein Projekt an und ordne ihm Drucke zu. Dann siehst du Fortschritt, Gewicht, Kosten und Druckzeit auf einen Blick.</span></div>` : ""}
+      <div class="ws-pj-raster">${liste.map((pr) => {
+        const s = this._wsPjSumme(pr);
+        return `<button class="ws-pj-karte dr-karte" data-aktion="ws-pj-auf" data-id="${esc(pr.id)}" style="--pj:${esc(pr.farbe)}" data-einmal="ws-pj-${esc(pr.id)}">
+          <span class="ws-pj-icon">${esc(pr.icon)}</span>
+          <span class="ws-pj-text"><strong>${esc(pr.name)}</strong>${pr.beschreibung ? `<small class="leise">${esc(pr.beschreibung)}</small>` : ""}</span>
+          <span class="ws-pj-prozent">${Math.round(s.anteil * 100)} %</span>
+          <span class="ws-balken ws-pj-balken"><span style="width:${Math.round(s.anteil * 100)}%"></span></span>
+          <small class="leise ws-pj-fuss">${s.infos.length ? this._wsPjZeile(s) : "Noch keine Teile"}</small></button>`;
+      }).join("")}</div>`;
+  },
+  _wsProjektHtml(p) {
+    const s = this._wsPjSumme(p);
+    const prozent = Math.round(s.anteil * 100);
+    const kachel = (titel, wert, sub) => `<div class="ws-pj-zahl"><span>${titel}</span><strong>${wert}</strong>${sub ? `<small>${sub}</small>` : ""}</div>`;
+    return `<div class="ws-pj-detail" style="--pj:${esc(p.farbe)}">
+      <button class="mini ws-pj-zurueck" data-aktion="ws-pj-zu">← Alle Projekte</button>
+      <div class="ws-pj-kopf dr-karte">
+        <div class="ws-pj-ring">${ringSvg(prozent, p.farbe)}<div class="ws-pj-ring-text"><span>${esc(p.icon)}</span><strong>${prozent} %</strong></div></div>
+        <div class="ws-pj-kopf-text"><h2>${esc(p.name)}</h2>${p.beschreibung ? `<p class="leise">${esc(p.beschreibung)}</p>` : ""}
+          <div class="ws-pj-kopf-knoepfe"><button class="knopf leise klein-knopf" data-aktion="ws-pj-bearbeiten" data-id="${esc(p.id)}">✎ Bearbeiten</button>
+            <button class="knopf leise klein-knopf rot-text" data-aktion="ws-pj-loeschen" data-id="${esc(p.id)}">🗑 Löschen</button></div></div>
+      </div>
+      <div class="ws-pj-zahlen">
+        ${kachel("Fortschritt", `${s.fertig} / ${s.infos.length}`, s.infos.length === 1 ? "Teil fertig" : "Teile fertig")}
+        ${kachel("Gewicht", `${zahl(s.g)} g`, s.g_fertig < s.g ? `davon ${zahl(s.g_fertig)} g gedruckt` : s.g ? "alles gedruckt" : "")}
+        ${kachel("Kosten", `${s.geschaetzt ? "ca. " : ""}${zahl(s.kosten, 2)} €`, s.ohneKosten ? `${s.ohneKosten} ohne Preis` : "Filament + Strom")}
+        ${kachel("Druckzeit", wsDauerText(s.min), "zusammen")}
+      </div>
+      <div class="ws-kopfzeile ws-pj-teile-kopf"><h3>Teile</h3><button class="knopf klein-knopf" data-aktion="ws-pj-teil-neu">＋ Teil hinzufügen</button></div>
+      ${!s.infos.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">🧩</span><strong>Noch keine Teile</strong><span class="leise">Füge Modelle aus der Bibliothek, Aufträge aus der Warteschlange, Drucke aus dem Verlauf oder geplante Teile hinzu.</span></div>` : ""}
+      <div class="ws-raster">${s.infos.map((i) => {
+        const foto = i.foto && this._drFotos && this._drFotos[i.foto];
+        const [st, farbe] = WS_PJ_TEIL_STATUS[i.status];
+        return `<div class="ws-modell ws-pj-teil dr-karte ${i.fertig ? "fertig" : ""}" data-einmal="ws-pj-t-${esc(i.t.id)}">
+          <div class="ws-foto" data-foto="${esc(i.foto || "")}">${foto ? `<img src="${esc(foto)}" alt="" loading="lazy">` : `<span>${i.fertig ? "✅" : i.auftrag ? "📋" : "🧩"}</span>`}</div>
+          <div class="ws-modell-text"><strong title="${esc(i.t.name)}">${esc(i.t.name)}</strong>
+            <span class="ws-pillen"><span class="pille ${farbe}">${st}</span>${i.t.fertig != null ? `<span class="pille ws-ohne-dauer" title="Von Hand gesetzt">von Hand</span>` : ""}</span>
+            <small class="leise">${i.gramm != null ? `${zahl(i.gramm, 1)} g` : "– g"} · ${i.kosten != null ? `${i.geschaetzt ? "ca. " : ""}${zahl(i.kosten, 2)} €` : "– €"} · ${wsDauerText(i.min)}</small>
+            <small class="leise">${{ modell: "aus der Bibliothek", druck: "aus dem Druckverlauf", auftrag: "aus der Warteschlange", plan: "geplant" }[i.t.art] || ""}${i.anzahl > 1 ? ` · ${i.anzahl}× gedruckt` : ""}</small></div>
+          <div class="ws-modell-knoepfe">
+            <button class="knopf ${i.fertig ? "leise" : ""} klein-knopf" data-aktion="ws-pj-fertig" data-id="${esc(i.t.id)}" title="${i.fertig ? "Doch nicht fertig" : "Als fertig abhaken"}">${i.fertig ? "↺ Offen" : "✓ Fertig"}</button>
+            ${!i.fertig && !i.auftrag ? `<button class="rund" data-aktion="ws-pj-drucken" data-id="${esc(i.t.id)}" aria-label="In die Warteschlange" title="In die Warteschlange">📋</button>` : ""}
+            ${i.d ? `<button class="mini" data-aktion="zum-druck" data-uid="${esc(i.d.uid)}">Details</button>` : ""}
+            <button class="rund" data-aktion="ws-pj-teil-weg" data-id="${esc(i.t.id)}" aria-label="Aus dem Projekt nehmen" title="Aus dem Projekt nehmen">✕</button></div></div>`;
+      }).join("")}</div></div>`;
+  },
+  // Projekt anlegen / bearbeiten
+  _wsProjektDialogHtml() {
+    const n = this._ws.pjNeu;
+    return `<h2>${n.id ? "Projekt bearbeiten" : "Neues Projekt"}</h2>
+      <label class="feld"><span>Name</span><input id="ws-pj-name" value="${esc(n.name)}" placeholder="z. B. Gehäuse Wetterstation" maxlength="60"></label>
+      <label class="feld"><span>Beschreibung (optional)</span><textarea id="ws-pj-text" rows="2" maxlength="300" placeholder="Wofür, was fehlt noch …">${esc(n.beschreibung)}</textarea></label>
+      <div class="feld-titel">Farbe</div>
+      <div class="chips ws-pj-farben">${WS_PJ_FARBEN.map((f) => `<button class="ws-farbe ${n.farbe === f ? "an" : ""}" style="--f:${f}" data-aktion="ws-pj-farbe" data-id="${f}" aria-label="Farbe ${f}" aria-pressed="${n.farbe === f}"></button>`).join("")}</div>
+      <div class="feld-titel oben-abstand">Symbol</div>
+      <div class="chips ws-pj-icons">${WS_PJ_ICONS.map((i) => `<button class="chip ${n.icon === i ? "an" : ""}" data-aktion="ws-pj-icon" data-id="${i}">${i}</button>`).join("")}</div>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf" data-aktion="ws-pj-speichern">${n.id ? "Speichern" : "Anlegen"}</button></div>`;
+  },
+  // Eintrag (Modell, Druck, Auftrag) einem oder mehreren Projekten zuordnen
+  _wsZuProjektDialogHtml() {
+    const z = this._ws.zu, liste = this._wsProjekte();
+    return `<h2>📁 Zu Projekt</h2><p class="leise">„${esc(z.name)}“ gehört zu …</p>
+      ${liste.length ? `<div class="ws-pj-wahl">${liste.map((p) => {
+        const drin = p.teile.some((t) => t.art === z.art && t.ref === z.ref);
+        return `<button class="ws-pj-zeile ${drin ? "an" : ""}" data-aktion="ws-zu-wahl" data-id="${esc(p.id)}" style="--pj:${esc(p.farbe)}" aria-pressed="${drin}">
+          <span class="ws-pj-icon klein">${esc(p.icon)}</span><span class="ws-pj-zeile-text">${esc(p.name)}<small>${p.teile.length} ${p.teile.length === 1 ? "Teil" : "Teile"}</small></span><b>${drin ? "✓" : "＋"}</b></button>`;
+      }).join("")}</div>` : `<p class="leise klein">Noch kein Projekt da.</p>`}
+      <button class="knopf leise breit oben-abstand" data-aktion="ws-zu-neu">＋ Neues Projekt mit diesem Teil</button>
+      <button class="knopf breit oben-abstand" data-aktion="dialog-zu">Fertig</button>`;
+  },
+  // Teile zum offenen Projekt hinzufügen
+  _wsPjTeilDialogHtml() {
+    const w = this._ws, p = this._wsProjekt(w.projekt);
+    if (!p) return `<p class="leise">Projekt nicht gefunden.</p><button class="knopf breit" data-aktion="dialog-zu">Schließen</button>`;
+    const quelle = w.pjQuelle || "bibliothek";
+    const drin = (art, ref) => p.teile.some((t) => t.art === art && t.ref === ref);
+    const zeile = (art, ref, name, sub) => `<button class="ws-pj-zeile ${drin(art, ref) ? "an" : ""}" data-aktion="ws-pj-teil-dazu" data-art="${art}" data-ref="${esc(ref)}" data-name="${esc(name)}">
+      <span class="ws-pj-zeile-text">${esc(name)}<small>${esc(sub)}</small></span><b>${drin(art, ref) ? "✓" : "＋"}</b></button>`;
+    let inhalt = "";
+    if (quelle === "bibliothek") {
+      const m = this._wsModelle();
+      inhalt = m.length ? m.map((x) => zeile("modell", x.schluessel, x.name, `${x.drucke.length}× gedruckt · zuletzt ${x.drucke[0].zeit || "–"}`)).join("") : `<p class="leise klein">Die Bibliothek ist leer.</p>`;
+    } else if (quelle === "schlange") {
+      const q = this._daten.warteschlange;
+      inhalt = q.length ? q.map((a) => zeile("auftrag", a.id, a.name, `${a.gewicht ? `${zahl(a.gewicht, 1)} g` : "Gewicht unbekannt"}${wsAuftragDauer(a) ? ` · ${wsDauerText(wsAuftragDauer(a))}` : ""}`)).join("") : `<p class="leise klein">Die Warteschlange ist leer.</p>`;
+    } else if (quelle === "verlauf") {
+      const v = this._buAlle().filter((d) => d.status !== "laeuft").slice(0, 40);
+      const erg = { ok: "erfolgreich", fehl: "Fehldruck", ab: "abgebrochen" };
+      inhalt = v.length ? v.map((d) => zeile("druck", d.uid, d.name, `${d.zeit || ""}${this._wsErgebnis(d) ? ` · ${erg[this._wsErgebnis(d)]}` : ""}`)).join("") : `<p class="leise klein">Noch keine Drucke im Verlauf.</p>`;
+    } else {
+      inhalt = `<label class="feld"><span>Name des Teils</span><input id="ws-pj-plan" placeholder="z. B. Deckel" maxlength="80"></label>
+        <p class="leise klein">Ein geplantes Teil wird fertig, sobald ein Druck mit gleichem Namen geglückt ist, oder wenn du es von Hand abhakst.</p>
+        <button class="knopf breit" data-aktion="ws-pj-plan-dazu">＋ Geplantes Teil hinzufügen</button>`;
+    }
+    return `<h2>Teil hinzufügen</h2><p class="leise klein">zu ${esc(p.icon)} ${esc(p.name)}</p>
+      <div class="chips ws-pj-quellen">${[["bibliothek", "📚 Bibliothek"], ["schlange", "📋 Warteschlange"], ["verlauf", "🕘 Verlauf"], ["plan", "✏️ Geplant"]].map(([id, n]) => `<button class="chip ${quelle === id ? "an" : ""}" data-aktion="ws-pj-quelle" data-id="${id}">${n}</button>`).join("")}</div>
+      <div class="ws-pj-wahl oben-abstand">${inhalt}</div>
+      <button class="knopf leise breit oben-abstand" data-aktion="dialog-zu">Fertig</button>`;
+  },
+  // Teil in ein Projekt aufnehmen (doppelt wird ignoriert); gibt true zurück, wenn neu
+  _wsPjTeilDazu(p, art, ref, name) {
+    if (p.teile.some((t) => t.art === art && t.ref === ref)) return false;
+    p.teile.push({ id: `t-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, art, ref, name, schluessel: art === "modell" ? ref : modellSchluessel(name), am: new Date().toISOString() });
+    return true;
+  },
+  // Name eines Eintrags je nach Art
+  _wsEintragName(art, ref, name) {
+    if (art === "auftrag") { const a = this._daten.warteschlange.find((x) => x.id === ref); return a ? a.name : name; }
+    if (art === "druck") { const d = this._buAlle().find((x) => x.uid === ref); return d ? d.name : name; }
+    return name;
+  },
+  _wsPjFormLesen() {
+    const n = this._ws.pjNeu, root = this.shadowRoot;
+    const a = root.getElementById("ws-pj-name"), b = root.getElementById("ws-pj-text");
+    if (a) n.name = a.value; if (b) n.beschreibung = b.value;
+  },
+  // Gibt true zurück, wenn der Klick zu den Projekten/zur Bibliothek gehörte
+  _wsPjKlick(a, el) {
+    const w = this._wsZustand();
+    const p = w.projekt && this._wsProjekt(w.projekt);
+    switch (a) {
+      case "ws-bib-status": this._wsBibF().status = el.dataset.id; break;
+      case "ws-bib-reset": w.bib = { fil: "", status: "", zeit: "" }; w.suche = ""; break;
+      case "ws-bib-auf": w.bibAuf = !w.bibAuf; break;
+      case "ws-pj-neu": w.pjNeu = { id: null, name: "", beschreibung: "", farbe: WS_PJ_FARBEN[this._wsProjekte().length % WS_PJ_FARBEN.length], icon: "📦" }; w.dlg = "projekt"; this._dialog = "ws-auftrag"; break;
+      case "ws-pj-bearbeiten": { const x = this._wsProjekt(el.dataset.id); if (!x) return true; w.pjNeu = { id: x.id, name: x.name, beschreibung: x.beschreibung || "", farbe: x.farbe, icon: x.icon }; w.dlg = "projekt"; this._dialog = "ws-auftrag"; break; }
+      case "ws-pj-farbe": this._wsPjFormLesen(); w.pjNeu.farbe = el.dataset.id; break;
+      case "ws-pj-icon": this._wsPjFormLesen(); w.pjNeu.icon = el.dataset.id; break;
+      case "ws-pj-speichern": {
+        this._wsPjFormLesen();
+        const n = w.pjNeu;
+        n.name = (n.name || "").trim(); n.beschreibung = (n.beschreibung || "").trim();
+        if (!n.name) { this._toast("Bitte einen Namen eingeben."); return true; }
+        if (!this._daten.projekte) this._daten.projekte = [];
+        let x = n.id && this._wsProjekt(n.id);
+        if (x) Object.assign(x, { name: n.name, beschreibung: n.beschreibung, farbe: n.farbe, icon: n.icon });
+        else {
+          x = { id: `p-${Date.now().toString(36)}`, name: n.name, beschreibung: n.beschreibung, farbe: n.farbe, icon: n.icon, teile: [], am: new Date().toISOString() };
+          this._daten.projekte.push(x);
+          if (n.mitTeil) this._wsPjTeilDazu(x, n.mitTeil.art, n.mitTeil.ref, n.mitTeil.name);
+          this._toast(`Projekt „${x.name}“ angelegt${n.mitTeil ? ` mit „${n.mitTeil.name}“` : ""}.`);
+        }
+        w.pjNeu = null; this._dialog = null;
+        if (!n.mitTeil) { w.tab = "projekte"; w.projekt = x.id; }
+        this._speichern();
+        break;
+      }
+      case "ws-pj-auf": w.tab = "projekte"; w.projekt = el.dataset.id; this._wsFotos(); break;
+      case "ws-pj-zu": w.projekt = null; break;
+      case "ws-pj-loeschen": {
+        const i = this._wsProjekte().findIndex((x) => x.id === el.dataset.id);
+        if (i < 0 || !confirm(`Projekt „${this._daten.projekte[i].name}“ löschen? Die Drucke selbst bleiben erhalten.`)) return true;
+        const [weg] = this._daten.projekte.splice(i, 1);
+        this._wsPjWeg = { p: weg, i };
+        w.projekt = null;
+        this._speichern();
+        this._toastMitKnopf(`Projekt „${weg.name}“ gelöscht.`, "Rückgängig", "ws-pj-zurueck");
+        break;
+      }
+      case "ws-pj-zurueck": {
+        const z = this._wsPjWeg;
+        if (z && !this._wsProjekt(z.p.id)) { this._daten.projekte.splice(Math.min(z.i, this._daten.projekte.length), 0, z.p); this._speichern(); }
+        this._wsPjWeg = null; this._toastText = null;
+        break;
+      }
+      case "ws-zu-projekt": {
+        const art = el.dataset.art, ref = el.dataset.ref;
+        const name = this._wsEintragName(art, ref, el.dataset.name || "");
+        w.zu = { art, ref, name };
+        w.dlg = "zu-projekt"; this._dialog = "ws-auftrag";
+        break;
+      }
+      case "ws-zu-wahl": {
+        const x = this._wsProjekt(el.dataset.id), z = w.zu;
+        if (!x || !z) return true;
+        if (!this._wsPjTeilDazu(x, z.art, z.ref, z.name)) x.teile = x.teile.filter((t) => !(t.art === z.art && t.ref === z.ref));
+        this._speichern();
+        break;
+      }
+      case "ws-zu-neu": w.pjNeu = { id: null, name: "", beschreibung: "", farbe: WS_PJ_FARBEN[this._wsProjekte().length % WS_PJ_FARBEN.length], icon: "📦", mitTeil: w.zu }; w.dlg = "projekt"; break;
+      case "ws-pj-teil-neu": w.pjQuelle = w.pjQuelle || "bibliothek"; w.dlg = "pj-teil"; this._dialog = "ws-auftrag"; break;
+      case "ws-pj-quelle": w.pjQuelle = el.dataset.id; break;
+      case "ws-pj-teil-dazu": {
+        if (!p) return true;
+        const art = el.dataset.art, ref = el.dataset.ref;
+        if (!this._wsPjTeilDazu(p, art, ref, this._wsEintragName(art, ref, el.dataset.name || ""))) p.teile = p.teile.filter((t) => !(t.art === art && t.ref === ref));
+        this._speichern();
+        break;
+      }
+      case "ws-pj-plan-dazu": {
+        const f = this.shadowRoot.getElementById("ws-pj-plan"), name = f ? f.value.trim() : "";
+        if (!p || !name) { this._toast("Bitte einen Namen eingeben."); return true; }
+        this._wsPjTeilDazu(p, "plan", `plan-${Date.now().toString(36)}`, name);
+        this._speichern();
+        this._toast(`„${name}“ ist jetzt Teil von „${p.name}“.`);
+        break;
+      }
+      case "ws-pj-fertig": {
+        const t = p && p.teile.find((x) => x.id === el.dataset.id);
+        if (!t) return true;
+        const i = this._wsPjTeilInfo({ ...t, fertig: undefined });
+        const soll = !this._wsPjTeilInfo(t).fertig;
+        if (soll === !!(i.d && this._wsErgebnis(i.d) === "ok")) delete t.fertig; else t.fertig = soll;   // wie automatisch: keine Ausnahme merken
+        this._speichern();
+        break;
+      }
+      case "ws-pj-teil-weg": {
+        if (!p) return true;
+        const t = p.teile.find((x) => x.id === el.dataset.id);
+        p.teile = p.teile.filter((x) => x.id !== el.dataset.id);
+        this._speichern();
+        if (t) this._toast(`„${t.name}“ aus dem Projekt genommen.`);
+        break;
+      }
+      case "ws-pj-drucken": {
+        const t = p && p.teile.find((x) => x.id === el.dataset.id);
+        if (!t) return true;
+        const i = this._wsPjTeilInfo(t), g = i.d ? this._buExtra(i.d.uid).gebucht : null;
+        const neu = { id: `a-${Date.now().toString(36)}`, name: t.name, gewicht: i.gramm, dauer_min: i.min, rolleId: (g && g.rolle) || this._daten.geladen || this._daten.letzte_rolle, notiz: "", am: new Date().toISOString(), quelle: "projekt" };
+        this._daten.warteschlange.push(neu);
+        if (t.art === "plan") { t.art = "auftrag"; t.ref = neu.id; }
+        this._speichern();
+        this._toast(`„${t.name}“ steht in der Warteschlange (Platz ${this._daten.warteschlange.length}).`);
+        break;
+      }
+      default: return false;
+    }
+    this._zeichnen();
+    return true;
   },
 
   // ---- Fehldrucke ----
@@ -4013,7 +5021,8 @@ const WerkstattAnsicht = {
             <small class="leise">${esc(d.zeit || "")} · bei ${zahl(x.gebucht.fortschritt)} %${r ? ` · ${esc(r.name)}` : ""}</small>
             ${ursachen.length ? `<small>🩺 ${esc(ursachen.map((u) => u.name).join(", "))}</small>` : `<small class="leise">Ursache nicht angegeben</small>`}
             ${x.fehl && x.fehl.geaendert && x.fehl.geaendert.length ? `<small class="mint">Geändert: ${esc(x.fehl.geaendert.join(", "))}</small>` : ""}</div>
-          <div class="ws-modell-knoepfe"><button class="mini" data-aktion="zum-druck" data-uid="${esc(d.uid)}">Details</button></div></div>`;
+          <div class="ws-modell-knoepfe"><button class="rund" data-aktion="ws-zu-projekt" data-art="druck" data-ref="${esc(d.uid)}" data-name="${esc(d.name)}" aria-label="Zu Projekt" title="Zu Projekt">📁</button>
+            <button class="mini" data-aktion="zum-druck" data-uid="${esc(d.uid)}">Details</button></div></div>`;
       }).join("")}</div>`;
   },
 
@@ -4117,17 +5126,32 @@ const WerkstattAnsicht = {
   // ---- Ereignisse ----
   _wsKlick(a, el) {
     const w = this._wsZustand(), q = this._daten.warteschlange;
+    if (this._wsPjKlick(a, el)) return;
     const idx = el.dataset.id ? q.findIndex((x) => x.id === el.dataset.id) : -1;
     switch (a) {
-      case "ws-tab": w.tab = el.dataset.id; if (w.tab === "bibliothek" || w.tab === "fehl") this._wsFotos(); break;
+      case "ws-tab":
+        if (el.dataset.id === "projekte" && w.tab === "projekte") w.projekt = null;   // zweiter Tipp: zurück zur Übersicht
+        w.tab = el.dataset.id;
+        if (["bibliothek", "fehl", "projekte"].includes(w.tab)) this._wsFotos();
+        break;
       case "ws-neu": this._wsAuftragNeu(); break;
       case "ws-bearbeiten": if (idx < 0) return; this._wsAuftragNeu({ ...q[idx] }); break;
       case "ws-g": { const n = w.neu; n.gewicht = Math.max(0, Math.min(1000, (n.gewicht || 0) + Number(el.dataset.d))); this._wsGewichtZeigen(); return; }
+      case "ws-d": { const n = w.neu; n.dauer_min = Math.max(0, Math.min(1440, (n.dauer_min || 0) + Number(el.dataset.d))); this._wsGewichtZeigen(); return; }
+      case "ws-klug": this._daten.einstellungen.schlange_klug = el.dataset.id === "an"; this._speichern(); break;
+      case "ws-klug-uebernehmen": {
+        this._daten.warteschlange = this._wsKlugeReihenfolge();
+        this._daten.einstellungen.schlange_klug = false;
+        this._speichern();
+        this._toast("Klug sortierte Reihenfolge übernommen. Du kannst sie jetzt wieder von Hand ändern.");
+        break;
+      }
       case "ws-speichern": {
         const n = w.neu;
         n.name = (this.shadowRoot.getElementById("ws-name").value || "").trim();
         n.notiz = (this.shadowRoot.getElementById("ws-notiz").value || "").trim();
         if (!n.name) { this._toast("Bitte einen Namen eingeben."); return; }
+        n.dauer_min = n.dauer_min > 0 ? n.dauer_min : null;
         if (n.id) { const i = q.findIndex((x) => x.id === n.id); if (i >= 0) q[i] = { ...q[i], ...n }; }
         else q.push({ ...n, id: `a-${Date.now().toString(36)}`, am: new Date().toISOString(), quelle: "hand" });
         w.neu = null; this._dialog = null; this._speichern();
@@ -4160,7 +5184,7 @@ const WerkstattAnsicht = {
         const d = this._buAlle().find((x) => x.uid === el.dataset.uid);
         if (!d) return;
         const g = this._buExtra(d.uid).gebucht;
-        q.push({ id: `a-${Date.now().toString(36)}`, name: d.name, gewicht: d.gewicht, rolleId: (g && g.rolle) || this._daten.letzte_rolle, notiz: "", am: new Date().toISOString(), quelle: "bibliothek" });
+        q.push({ id: `a-${Date.now().toString(36)}`, name: d.name, gewicht: d.gewicht, dauer_min: wsDruckDauer(d), rolleId: (g && g.rolle) || this._daten.letzte_rolle, notiz: "", am: new Date().toISOString(), quelle: "bibliothek" });
         this._speichern();
         this._toast(`„${d.name}“ steht in der Warteschlange (Platz ${q.length}).`);
         return;
@@ -4193,6 +5217,8 @@ const WerkstattAnsicht = {
   },
   _wsGewichtZeigen() {
     const n = this._ws.neu;
+    const d = this.shadowRoot.getElementById("ws-dauer"); if (d) d.textContent = n.dauer_min ? wsDauerText(n.dauer_min) : "unbekannt";
+    const di = this.shadowRoot.querySelector('[data-ws="dauer"]'); if (di) di.value = n.dauer_min || 0;
     const s = this.shadowRoot.getElementById("ws-gewicht"); if (s) s.textContent = `${zahl(n.gewicht, 1)} g`;
     const i = this.shadowRoot.querySelector('[data-ws="gewicht"]'); if (i) i.value = n.gewicht;
   },
@@ -4202,11 +5228,14 @@ const WerkstattAnsicht = {
     if (!k) return false;
     const w = this._wsZustand();
     if (k === "gewicht") { w.neu.gewicht = Number(t.value); this._wsGewichtZeigen(); }
+    else if (k === "dauer") { w.neu.dauer_min = Number(t.value); this._wsGewichtZeigen(); }
     else if (k === "suche") {
+      // Nur Trefferzahl und Raster neu, damit das Suchfeld den Fokus behält
       w.suche = t.value;
-      const box = this.shadowRoot.getElementById("ws-bib");
-      const m = this._wsModelle(), zeige = w.suche ? m.filter((x) => suchPunkte(w.suche, x.name)) : m;
-      if (box) box.innerHTML = zeige.map((x) => this._wsModellKarte(x)).join("") || `<p class="leise">Kein Modell passt zu „${esc(w.suche)}“.</p>`;
+      const tr = this._wsBibTreffer();
+      const box = this.shadowRoot.getElementById("ws-bib"), zahlBox = this.shadowRoot.getElementById("ws-bib-zahl");
+      if (box) box.innerHTML = this._wsBibRasterHtml(tr);
+      if (zahlBox) zahlBox.innerHTML = this._wsBibZahlHtml(tr);
     } else if (k.startsWith("e-")) {
       const f = WS_EINSTELLUNGEN.find((x) => x.k === k.slice(2));
       this._daten.einstellungen[f.k] = Number(t.value);
@@ -4218,6 +5247,7 @@ const WerkstattAnsicht = {
     const k = t.dataset && t.dataset.ws;
     if (!k) return false;
     if (k === "rolle") this._ws.neu.rolleId = t.value;
+    else if (k === "bib-fil" || k === "bib-zeit") { this._wsBibF()[k === "bib-fil" ? "fil" : "zeit"] = t.value; this._zeichnen(); }
     else if (k.startsWith("e-")) this._speichern();
     return true;
   },
@@ -7233,29 +8263,1285 @@ const ModellAnsicht = {
     return ["fuellung", "waende", "schicht_h", "schicht"].includes(k);
   },
 };
+
+// ============================================================================
+// Hilfe › Kunststoffe (Materialien und Unterarten) und Fehlercodes des Druckers
+// ============================================================================
+// Quelle Kunststoffe: Recherche 13.10.2026 (website/kunststoffe-recherche.md): Bambu-Wiki,
+// Bambu-Shopseiten und Datenblätter. Alle genannten Produkte gelten als in Deutschland erhältlich.
+// Unsicheres steht in „unsicher“ und wird leise als „bitte prüfen“ markiert.
+
+// Filter-Chips über der Materialliste
+const KS_FILTER = [
+  ["einsteiger", "🌱 Einsteigerfreundlich"], ["hitze", "🔥 Hitzebeständig"], ["flexibel", "🪀 Flexibel"], ["outdoor", "☀️ Outdoor/UV"],
+  ["lebensmittel", "🍎 Lebensmittel & Kinder"], ["faser", "🧶 Faserverstärkt (abrasiv)"], ["stuetz", "🪜 Stützmaterial"], ["optik", "✨ Optik & Deko"], ["p1s", "✅ P1S-geeignet"],
+];
+// Ampel „Für den P1S geeignet?“ (P1S mit Serien-Edelstahldüse, ohne AMS)
+const KS_P1S = {
+  ok: { stufe: "gruen", kurz: "P1S: gut", lang: "Gut geeignet" },
+  bedingt: { stufe: "gelb", kurz: "P1S: bedingt", lang: "Geht mit Einschränkungen" },
+  duese: { stufe: "orange", kurz: "P1S: Umrüstung", lang: "Nur mit gehärteter Düse und gehärtetem Extruder" },
+  nein: { stufe: "rot", kurz: "P1S: nein", lang: "Nicht geeignet" },
+};
+
+const KUNSTSTOFFE = [
+  { id: "pla", name: "PLA", voll: "Polylactid", farbe: "#3ee6a8", material: ["PLA"], p1s: "ok", filter: ["einsteiger", "optik"],
+    kurz: "Der Standard im Hobby-3D-Druck. Aus nachwachsenden Rohstoffen (Maisstärke, Zuckerrohr), druckt sehr einfach, verzieht kaum und riecht wenig.",
+    duese: "190–230 °C", dueseNotiz: "Spezialsorten bis 240–260 °C", bett: "35–65 °C", bettNotiz: "Cool Plate 35–45 °C, PEI 45–65 °C",
+    platte: "Cool Plate, Smooth oder Textured PEI", platteNotiz: "Engineering Plate nicht empfohlen; Klebestift oder Bambu Liquid Glue",
+    gehaeuse: "nein", gehaeuseNotiz: "Beim P1S ab Bett über 45 °C Glasdeckel abnehmen oder Tür öffnen (laut Bambu-Wiki), sonst Hitzestau und Verstopfung (Heat Creep).",
+    trocknen: "55 °C · 8 h", hygro: "niedrig–mittel", gehaertet: "nein", gehaertetNotiz: "außer gefüllte Sorten (CF, Glow, Wood)",
+    anwendungen: "Deko, Figuren, Prototypen, Spielzeug, Halterungen für drinnen, Cosplay",
+    staerken: ["sehr einfach zu drucken", "kaum Verzug (Warping)", "hohe Detailtreue, steif", "riesige Farb- und Effektauswahl", "geringe Emissionen"],
+    schwaechen: ["wenig hitzebeständig (verformt ab ca. 57 °C, Auto im Sommer!)", "spröde", "kriecht unter Dauerlast", "nur mäßig UV-beständig"],
+    sicherheit: "Geringe Emissionen, trotzdem lüften.",
+    lebensmittel: "Das Material an sich ist unbedenklich, gedruckte Teile sind aber in der Regel nicht lebensmittelsicher. Einzige Bambu-Sorte mit Lebensmittel- und Spielzeugangabe: PLA Pure.",
+    varianten: [
+      { id: "basic", name: "PLA Basic", arten: ["basic"], filter: ["einsteiger", "lebensmittel"],
+        was: "Standard-PLA, glänzend bis seidenmatt, sehr viele Farben, einsteigerfreundlich. Laut Bambu-Blog UL 2904 GREENGUARD (geprüfte Emissionen) – das ist kein Lebensmittelzertifikat.",
+        druck: "190–230 °C, bis 300 mm/s, alle Düsen inkl. 0,2 mm." },
+      { id: "pure", name: "PLA Pure", neu: "neu, Juni 2026", filter: ["einsteiger", "lebensmittel"],
+        was: "Für den Druck im Wohnraum: Rezeptur aus 5 Bestandteilen ohne übliche Zusätze, weniger Emissionen als PLA Basic. Laut Bambu EU 10/2011 (Lebensmittelkontakt), EN 71-3 (Spielzeug) und UL 2904 GREENGUARD. Für Spielzeug, Haushalt und Küchenhelfer für trockene Lebensmittel.",
+        druck: "Bambu-Profil „PLA Pure“ wählen. Für lebensmittelnahe Teile eine saubere Düse nutzen, nicht direkt nach anderen Materialien ohne Reinigung.",
+        unsicher: "Druckwerte im Detail nicht verifiziert; Zertifikate sind Herstellerangaben und gelten für das Filament, nicht automatisch für jedes Druckteil." },
+      { id: "matte", name: "PLA Matte", arten: ["matte", "matt"], filter: ["einsteiger", "optik"],
+        was: "Matte, samtige Oberfläche, Schichtlinien fallen weniger auf; etwas spröder als Basic. Deko, Modelle, Figuren.",
+        druck: "Wie PLA Basic, alle Düsen." },
+      { id: "silk", name: "PLA Silk / Silk+", arten: ["silk", "silk+"], filter: ["einsteiger", "optik"],
+        was: "Seidiger Hochglanz- bzw. Metallic-Look. Silk+ ist die verbesserte Fassung (bessere Schichthaftung, mehr Farben). Mechanisch schwächer als Basic. Vasen, Deko, Figuren.",
+        druck: "Silk+: 210–240 °C, bis 250 mm/s. Für den besten Glanz Außenwand langsam drucken (ca. 50 mm/s). Alle Düsen 0,2–0,8 mm, verformt ab ca. 56 °C." },
+      { id: "silkmulti", name: "PLA Silk Multi-Color", filter: ["optik"],
+        was: "Zwei oder drei Farben parallel im Strang – die Farbe wechselt je nach Blickwinkel und Wandrichtung. Vasen, Deko.",
+        druck: "Wie Silk. Am schönsten im Vasenmodus bzw. bei runden, einwandigen Objekten." },
+      { id: "gradient", name: "PLA Basic Gradient", arten: ["gradient"], filter: ["optik"],
+        was: "Farbverlauf entlang der Spule: die Farbe wechselt über die Länge.",
+        druck: "Wie Basic. Wie viel Verlauf man sieht, hängt von der Teilegröße ab." },
+      { id: "galaxy", name: "PLA Galaxy", arten: ["galaxy"], filter: ["optik", "faser"], p1s: "bedingt",
+        was: "Glitzer- und Sternenhimmel-Effekt durch Glas-Mikrokugeln (laut Datenblatt). Deko.",
+        druck: "190–230 °C. Datenblatt erlaubt 0,2–0,8 mm, besser 0,4 mm oder größer. Verschleiß bei Dauernutzung möglich.",
+        unsicher: "Gehärtete Düse: Datenblatt fordert keine, Händler raten von 0,2 mm ab – Angaben uneinheitlich." },
+      { id: "sparkle", name: "PLA Sparkle", arten: ["sparkle", "glitzer"], filter: ["optik", "faser"], p1s: "bedingt",
+        was: "Glitzert durch Metallpartikel. Deko, Figuren.",
+        druck: "190–230 °C, bis 250 mm/s; 0,2-mm-Düse nicht unterstützt.",
+        unsicher: "Bambu-Wiki stuft metallgefülltes PLA als „gehärtete Düse“ ein, die Shopseite sagt nichts dazu." },
+      { id: "marble", name: "PLA Marble", arten: ["marble", "marmor"], filter: ["optik"], p1s: "bedingt",
+        was: "Steinoptik mit Marmor-Sprenkeln durch Partikel. Deko, Architekturmodelle.",
+        druck: "190–230 °C, bis 250 mm/s; 0,2 mm nicht kompatibel (gefülltes PLA, ab 0,4 mm).",
+        unsicher: "Ob eine gehärtete Düse nötig ist, gibt Bambu uneinheitlich an." },
+      { id: "metal", name: "PLA Metal", arten: ["metal", "metallic"], filter: ["einsteiger", "optik"],
+        was: "Metallic-Look ohne echte Metallpartikel (laut Bambu keine Metallfüllstoffe). Deko, Cosplay.",
+        druck: "190–230 °C, bis 300 mm/s, keine Düsenbeschränkung genannt." },
+      { id: "glow", name: "PLA Glow", arten: ["glow"], filter: ["optik", "faser"], p1s: "duese",
+        was: "Leuchtet im Dunkeln nach; die Leuchtpigmente sind abrasiv. Nachtlichter, Schilder, Kinderdeko. Lädt sich mit UV- bzw. Sonnenlicht auf (ca. 2 h).",
+        druck: "190–230 °C (Wiki: 210–240 °C), bis 250 mm/s. Laut Bambu gehärtete Düse bei regelmäßigem Druck nötig; 0,4/0,6/0,8 mm, nicht 0,2 mm. Gelegentlich geht es mit 0,6-mm-Edelstahldüse – kostet aber Düse." },
+      { id: "wood", name: "PLA Wood", arten: ["wood", "holz"], filter: ["optik", "faser"], p1s: "bedingt",
+        was: "PLA mit feinem Holzmehl: Holzoptik, leichter Holzduft. Deko, Schachfiguren, Kästchen. Nimmt mehr Feuchte auf als PLA.",
+        druck: "190–240 °C, bis 250 mm/s. Gehärtete Düse empfohlen, Edelstahl laut Bambu nicht empfohlen; 0,2 mm nicht unterstützt. Am P1S höchstens mit 0,6-mm-Düse." },
+      { id: "translucent", name: "PLA Translucent", arten: ["translucent", "transparent", "klar"], filter: ["einsteiger", "optik"],
+        was: "Milchig durchscheinend (frosted), streut Licht. Lampenschirme, Leuchtobjekte.",
+        druck: "200–240 °C, bis 150 mm/s, Bett 35–65 °C, alle Düsen. Je dünner die Wand (Vasenmodus), desto durchscheinender." },
+      { id: "tough", name: "PLA Tough+", neu: "seit Juli 2025, ersetzt PLA Tough", filter: ["flexibel"],
+        was: "Schlagzäh, laut Bambu Zähigkeit auf ABS-Niveau und bis zu doppelte Schichthaftung. Hält wiederholtes Biegen aus: Clips, Schnapphaken, Federn.",
+        druck: "Höhere Drucktemperatur (Profil ca. 245 °C); bei mehr Hitze mehr Geruch, also lüften. Bambus Festigkeitswerte gelten nach Tempern (8 h bei 50 °C).",
+        unsicher: "Die ca. 245 °C stammen aus dem Forum, nicht aus dem Datenblatt." },
+      { id: "aero", name: "PLA Aero",
+        was: "Aufschäumendes Leicht-PLA: Teile wiegen etwa halb so viel wie aus PLA Basic. RC-Flugzeuge, Segler, Drohnen.",
+        druck: "Spezialprofil nötig: 220–260 °C (heißer = mehr Schaum), Flussrate 0,5–0,8, bis 180 mm/s, nur 0,4-mm-Düse. Sehr feuchteempfindlich (55 °C / 8 h trocknen). Bambu-Anleitung „Studio settings for RC models“ beachten." },
+      { id: "cf", name: "PLA-CF", arten: ["cf", "pla-cf"], filter: ["faser"], p1s: "duese",
+        was: "PLA mit Kohlefaser: steifer, matte Oberfläche, Schichtlinien kaum sichtbar, maßhaltig. Halterungen, Rahmen.",
+        druck: "210–240 °C, bis 200–250 mm/s. Gehärtete Düse erforderlich; 0,4/0,6/0,8 mm, nicht 0,2 mm." },
+      { id: "dynamic", name: "PLA Dynamic",
+        was: "Bei Händlern gelistet (z. B. „White Orange“), Beschreibung allgemein; der Unterschied zu Basic ist unklar.",
+        druck: "Händlerangabe: 190–220 °C.", unsicher: "Nicht in Bambu-Quellen bestätigt." },
+      { id: "lite", name: "PLA Lite",
+        was: "Günstige Spar-Linie von Bambu.", druck: "Wie PLA Basic.", unsicher: "Nur knapp beschrieben, Druckwerte nicht verifiziert." },
+    ] },
+
+  { id: "petg", name: "PETG", voll: "Polyethylenterephthalat-Glykol", farbe: "#5cc8ff", material: ["PETG"], p1s: "ok", filter: ["einsteiger", "outdoor"],
+    kurz: "Zäher, leicht flexibler Allrounder zwischen PLA und ABS. Wasser- und recht witterungsbeständig, geringe Emissionen.",
+    duese: "230–270 °C", dueseNotiz: "Wiki: 240–270 °C", bett: "60–80 °C", bettNotiz: "PETG HF: 65–75 °C",
+    platte: "Textured PEI, Smooth PEI, Engineering", platteNotiz: "Cool Plate nicht empfohlen; auf glattem PEI Klebestift als Trennschicht (haftet sonst zu stark)",
+    gehaeuse: "empfohlen", gehaeuseNotiz: "Nicht nötig, geschlossen empfohlen. Beim P1S ab Bett über 70 °C ggf. Deckel oder Tür öffnen (Wiki).",
+    trocknen: "65–70 °C · 8 h", hygro: "mittel", gehaertet: "nein", gehaertetNotiz: "außer PETG-CF",
+    anwendungen: "Funktionsteile, Outdoor-Teile (Blumentöpfe, Gießkannen), Gehäuse, mechanische Teile, Behälter",
+    staerken: ["zäh und schlagfest", "gute Schichthaftung", "chemikalien- und wasserbeständig", "wärmebeständiger als PLA (ca. 70 °C)", "kaum Verzug"],
+    schwaechen: ["Fädenziehen (Stringing)", "haftet manchmal zu stark auf glattem PEI", "weniger detailscharf", "kratzempfindlich"],
+    sicherheit: "Geringe Emissionen, lüften.",
+    lebensmittel: "PETG gilt als Rohstoff oft als lebensmittelgeeignet, Bambu gibt für seine PETG-Sorten aber keine Zertifizierung an. Druckteile sind wegen der Schichtrillen nicht lebensmittelsicher.",
+    varianten: [
+      { id: "basic", name: "PETG Basic", arten: ["basic"], filter: ["einsteiger", "outdoor"], was: "Standard-PETG.", druck: "240–270 °C, Standardprofil ca. 172 mm/s." },
+      { id: "hf", name: "PETG HF", arten: ["hf", "high flow", "high speed", "rapid"], filter: ["einsteiger", "outdoor"],
+        was: "Für schnelles Drucken (Profil ca. 258 mm/s, bis ca. 300 mm/s – etwa doppelt so schnell). Wasser-, UV- und temperaturbeständig; Bambu empfiehlt es für Outdoor-Teile.",
+        druck: "230–260 °C, Bett 65–75 °C. Vor Drucken über 6 h trocknen (65 °C / 8 h). Alle Düsen.",
+        unsicher: "„HF“ wird von Bambu nicht ausgeschrieben; „High Flow“ ist naheliegend." },
+      { id: "translucent", name: "PETG Translucent", arten: ["translucent", "transparent", "klar"], filter: ["optik"],
+        was: "Getönt durchsichtig bis klar (klarer als PLA Translucent). Lampen, Sichtfenster, Deko.",
+        druck: "230–270 °C, bis 220 mm/s. Durchsicht hängt von Wandstärke, Füllung und Tempo ab." },
+      { id: "cf", name: "PETG-CF", arten: ["cf", "petg-cf"], filter: ["faser"], p1s: "duese",
+        was: "Mit Kohlefaser: steifer, matt, weniger Fädenziehen, maßhaltig.",
+        druck: "240–270 °C. Gehärtete Düse nötig – laut Bambu-Wiki war eine Edelstahldüse nach 10 h PETG-CF sichtbar aufgeweitet. Nicht 0,2 mm." },
+    ] },
+
+  { id: "abs", name: "ABS", voll: "Acrylnitril-Butadien-Styrol", farbe: "#ff8a7a", material: ["ABS"], p1s: "ok", filter: ["hitze"],
+    kurz: "Klassischer technischer Kunststoff (LEGO-Steine sind aus ABS). Wärmebeständig und zäh, verzieht aber gern und riecht beim Druck.",
+    duese: "240–280 °C", bett: "90–100 °C", bettNotiz: "P1S schafft max. 100 °C – reicht",
+    platte: "Textured PEI, Smooth PEI, Engineering", platteNotiz: "mit Kleber; Cool Plate nicht",
+    gehaeuse: "ja", gehaeuseNotiz: "Tür und Deckel geschlossen lassen, Kammer vorheizen hilft.",
+    trocknen: "80 °C · 8 h", trocknenNotiz: "Standard-Spulen halten meist nur ca. 70 °C – umspulen oder hitzefeste Spule", hygro: "niedrig–mittel", gehaertet: "nein", gehaertetNotiz: "außer ABS-GF",
+    anwendungen: "Gehäuse, Teile im Auto-Innenraum, Funktionsteile, Teile zum Schleifen oder Aceton-Glätten",
+    staerken: ["wärmebeständig (ca. 90–100 °C)", "schlagzäh", "gut nachzubearbeiten", "mit Aceton glättbar"],
+    schwaechen: ["Verzug und Risse (Gehäuse nötig)", "Geruch und Emissionen (Styrol)", "nicht UV-beständig (vergilbt, versprödet)"],
+    sicherheit: "Deutlicher Geruch, Styrol-Emissionen und viele ultrafeine Partikel: gut lüften, Aktivkohlefilter nutzen, nicht im Wohn- oder Schlafraum drucken, nach Druckende abkühlen lassen, bevor du öffnest.",
+    lebensmittel: "Nicht für Lebensmittel, keine Zertifizierung bekannt.",
+    varianten: [
+      { id: "std", name: "ABS", arten: ["basic", "abs", ""], filter: ["hitze"], was: "Standard-ABS.", druck: "Werte wie oben." },
+      { id: "gf", name: "ABS-GF", arten: ["gf", "abs-gf"], filter: ["hitze", "faser"], p1s: "duese",
+        was: "Glasfaserverstärkt: steifer, maßhaltiger, weniger Verzug, matt. Gehäuse, Formen, Steckverbinder.",
+        druck: "240–270 °C, Bett 80–100 °C, bis 180 mm/s. Gehärtete Düse, 0,6 mm empfohlen, nicht 0,2 mm." },
+    ] },
+
+  { id: "asa", name: "ASA", voll: "Acrylnitril-Styrol-Acrylat", farbe: "#ffb057", material: ["ASA"], p1s: "ok", filter: ["hitze", "outdoor"],
+    kurz: "Das „Outdoor-ABS“: ähnlich wie ABS, aber sehr UV- und witterungsbeständig.",
+    duese: "240–280 °C", bett: "90–100 °C", platte: "Textured PEI, Smooth PEI, Engineering", platteNotiz: "wie ABS, mit Kleber",
+    gehaeuse: "ja", trocknen: "80 °C · 8 h", trocknenNotiz: "Spulengrenze (ca. 70 °C) beachten", hygro: "niedrig–mittel", gehaertet: "nein", gehaertetNotiz: "außer ASA-CF",
+    anwendungen: "Outdoor-Teile (Garten, Halterungen an Auto und Fahrrad, Schilder, Hausnummern), Teile in der Sonne",
+    staerken: ["UV- und witterungsbeständig", "wärmebeständig (ca. 95–100 °C)", "schlagzäh", "matte Oberfläche"],
+    schwaechen: ["Verzug (Gehäuse nötig)", "Geruch und Emissionen wie ABS"],
+    sicherheit: "Wie ABS: lüften, Aktivkohlefilter, nicht im Wohnraum.",
+    lebensmittel: "Nicht für Lebensmittel.",
+    varianten: [
+      { id: "std", name: "ASA", arten: ["basic", "asa", ""], filter: ["hitze", "outdoor"], was: "Standard-ASA.", druck: "Werte wie oben." },
+      { id: "aero", name: "ASA Aero", arten: ["aero"], filter: ["outdoor"],
+        was: "Aufschäumendes Leicht-ASA (50–75 % der ASA-Dichte), UV- und wasserfest: leichte Outdoor-Teile, RC-Flugzeuge, Drohnen.",
+        druck: "Spezialprofil: 240–280 °C, Flussrate ca. 0,45–0,80, Bett 80–90 °C, nur 0,4-mm-Düse. Engineering- oder High-Temp-Platte (Textured PEI nicht empfohlen). Gehäuse Pflicht, starker Geruch." },
+      { id: "cf", name: "ASA-CF", arten: ["cf", "asa-cf"], filter: ["outdoor", "faser"], p1s: "duese",
+        was: "Kohlefaser-ASA: steif, matt, für draußen.", druck: "Gehärtete Düse erforderlich, nicht 0,2 mm.",
+        unsicher: "Nur in einer Händlerliste gefunden, Druckwerte nicht verifiziert." },
+    ] },
+
+  { id: "pc", name: "PC", voll: "Polycarbonat", farbe: "#9aa7ff", material: ["PC"], p1s: "bedingt", filter: ["hitze"],
+    kurz: "Sehr fest, sehr schlagzäh und hitzebeständig (über 110 °C). Anspruchsvoll im Druck.",
+    duese: "260–290 °C", dueseNotiz: "P1S max. 300 °C – am oberen Rand", bett: "100–120 °C", bettNotiz: "laut Wiki – der P1S schafft max. 100 °C, also untere Grenze",
+    platte: "Smooth PEI, Textured PEI, Engineering", platteNotiz: "Klebestift ja, Liquid Glue laut Wiki nicht empfohlen",
+    gehaeuse: "ja", trocknen: "80 °C · 8 h", trocknenNotiz: "Trocknen ist Pflicht", hygro: "hoch", gehaertet: "nein",
+    p1sNotiz: "Laut Bambu „möglich“: Das Bett ist am Limit, Haftung und Verzug sind schwieriger. Bitte am eigenen Drucker ausprobieren.",
+    anwendungen: "Stark belastete oder heiße Funktionsteile, Schutzgehäuse, Halterungen in Motornähe",
+    staerken: ["höchste Schlagzähigkeit und Wärmebeständigkeit der Standard-Materialien", "teils durchsichtig"],
+    schwaechen: ["Verzug", "sehr feuchteempfindlich", "hohe Temperaturen nötig", "Emissionen"],
+    sicherheit: "Emissionen: lüften, Filter nutzen.", lebensmittel: "Nein.",
+    varianten: [
+      { id: "std", name: "PC", arten: ["basic", "pc", ""], filter: ["hitze"], was: "Standard-PC.", druck: "Werte wie oben." },
+      { id: "fr", name: "PC FR", arten: ["fr"], filter: ["hitze"],
+        was: "Flammhemmend nach UL 94 V-0. Elektronikgehäuse, Industrie- und Schutzteile.",
+        druck: "260–280 °C, Bett 90–110 °C mit Klebestift (PVP), Smooth oder Textured PEI. Vorher trocknen (80 °C / 8 h). Am P1S gleiche Grenzen wie PC." },
+    ] },
+
+  { id: "tpu", name: "TPU", voll: "Thermoplastisches Polyurethan", farbe: "#c58bff", material: ["TPU"], p1s: "ok", filter: ["flexibel"],
+    kurz: "Gummiartig elastisch. Die Härte wird in Shore A (weich) bzw. Shore D (härter) angegeben.",
+    duese: "200–250 °C", bett: "30–45 °C", platte: "Textured PEI (ideal), Smooth PEI", platteNotiz: "Engineering bei 30–35 °C; Cool Plate nicht empfohlen",
+    gehaeuse: "nein", gehaeuseNotiz: "Tür und Deckel öffnen bei Bett über 45 °C.",
+    trocknen: "70 °C · 8 h", trocknenNotiz: "Trocknen ist Pflicht", hygro: "hoch", gehaertet: "nein",
+    p1sNotiz: "Ohne AMS ideal: Weiche TPUs gehen ohnehin nur über die externe Spulenhalterung.",
+    anwendungen: "Handyhüllen, Dichtungen, Puffer, Reifen, Schuhsohlen, Griffe, Scharniere",
+    staerken: ["flexibel", "extrem zäh", "abriebfest", "dämpft Schläge"],
+    schwaechen: ["langsam zu drucken", "Fädenziehen", "je weicher, desto schwieriger", "kann sich im Extruder stauchen"],
+    sicherheit: "Geringe Emissionen.", lebensmittel: "Keine Zertifizierung bekannt.",
+    varianten: [
+      { id: "68d", name: "TPU for AMS (68D)", arten: ["68d", "for ams"], filter: ["einsteiger", "flexibel"],
+        was: "Härte 68D: zäh und nur leicht flexibel, AMS-tauglich. Schutzteile, Halterungen mit etwas Nachgiebigkeit. Ein eigenes „TPU 68D“ gibt es nicht – das ist dieses Produkt.",
+        druck: "220–240 °C, Bett 30–35 °C, vorher trocknen (70 °C / 8 h). 0,2 mm nicht unterstützt." },
+      { id: "95a", name: "TPU 95A HF", arten: ["95a", "95a hf", "hf"], filter: ["flexibel"],
+        was: "Klassisches, mittelweiches TPU als High-Flow-Version für schnelleren Druck. Hüllen, Dämpfer.",
+        druck: "Nicht AMS-tauglich – am P1S ohne AMS über die externe Spule kein Problem." },
+      { id: "90a", name: "TPU 90A", arten: ["90a"], filter: ["flexibel"],
+        was: "Fester als 85A: Schuhsohlen, RC-Reifen, Funktionsteile.",
+        druck: "200–250 °C, bis 200 mm/s. Standardprofil nicht verändern, Flussdynamik-Kalibrierung aus. 0,4/0,6/0,8 mm, nicht 0,2 mm." },
+      { id: "85a", name: "TPU 85A", arten: ["85a"], filter: ["flexibel"],
+        was: "Das weichste Bambu-TPU: Polster, Schutz, Fidget-Toys.",
+        druck: "Wie 90A, aber nur mit 0,6- oder 0,8-mm-Düse (0,2 und 0,4 nicht unterstützt). Mit 0,6-mm-Düse am P1S gut." },
+    ] },
+
+  { id: "pa", name: "PA / Nylon", voll: "Polyamid, mit Kohle- oder Glasfaser", farbe: "#7fd4c1", material: ["PA", "PA-CF", "PAHT-CF", "PA6-CF", "PA6-GF", "NYLON", "PA12"], p1s: "duese", filter: ["hitze", "faser"],
+    kurz: "Technischer Kunststoff: extrem zäh, verschleißfest, gleitfähig. Bambu verkauft Nylon nur faserverstärkt.",
+    duese: "260–290 °C", dueseNotiz: "CF/GF bis 300 °C", bett: "80–100 °C", bettNotiz: "mit Klebestift; Wiki nennt 100–120 °C – am P1S (max. 100 °C) ausprobieren",
+    platte: "Engineering, Smooth PEI, Textured PEI", platteNotiz: "Cool Plate nicht",
+    gehaeuse: "ja", trocknen: "80 °C · 8–12 h", trocknenNotiz: "Pflicht; beim Drucken unter 20 % Luftfeuchte (Trockenbox mit Durchführung)", hygro: "sehr hoch", gehaertet: "ja", gehaertetNotiz: "für alle CF/GF-Sorten, 0,6 mm empfohlen",
+    p1sNotiz: "Faserverstärkte Sorten erst nach Umrüstung auf gehärteten Extruder und gehärtetes Hotend. Unverstärktes PA (Fremdhersteller) ist laut Bambu „möglich“.",
+    anwendungen: "Zahnräder, Lager, Scharniere, Vorrichtungen, Werkzeughalter, Kfz-Teile",
+    staerken: ["sehr zäh und fest", "verschleißfest", "wärmebeständig (PAHT-CF bis ca. 194 °C)"],
+    schwaechen: ["extrem hygroskopisch (verliert feucht an Festigkeit)", "Verzug", "teuer"],
+    sicherheit: "Emissionen beim Druck; Faserstaub beim Schleifen nicht einatmen.", lebensmittel: "Nein.",
+    varianten: [
+      { id: "paht", name: "PAHT-CF", arten: ["paht-cf", "paht"], filter: ["hitze", "faser"],
+        was: "Hochtemperatur-Nylon mit Kohlefaser, nimmt relativ wenig Feuchte auf, hohe Zugfestigkeit. Vorrichtungen, Spritzgussformen, Prototypen. Für offene Drucker ungeeignet.",
+        druck: "260–290 °C, bis 100 mm/s. Gehärtete Düse, 0,6 mm empfohlen." },
+      { id: "pa6cf", name: "PA6-CF", arten: ["pa6-cf", "cf"], filter: ["hitze", "faser"],
+        was: "Sehr steif, fest und hitzebeständig – aber nur für trockene Umgebung (wird feucht weicher).",
+        druck: "260–290 °C, Bett 80–100 °C, bis 100 mm/s. Stützen innerhalb von 2 h entfernen. Gehärtete Düse, 0,6 mm empfohlen." },
+      { id: "pa6gf", name: "PA6-GF", arten: ["pa6-gf", "gf"], filter: ["hitze", "faser"],
+        was: "Mit Glasfaser: maßhaltig, hitze- und chemikalienbeständig, etwas zäher als CF.",
+        druck: "Gehärtete Düse, nicht 0,2 mm." },
+      { id: "pa", name: "PA unverstärkt", arten: ["pa", "nylon", "pa12"], p1s: "bedingt", filter: ["hitze"],
+        was: "Reines Nylon gibt es nur von Fremdherstellern. Zäh und gleitfähig, aber sehr feuchteempfindlich.",
+        druck: "Edelstahldüse reicht. Trocken drucken, Klebestift, Gehäuse geschlossen.",
+        unsicher: "Werte allgemein, nicht aus Bambu-Quellen." },
+    ] },
+
+  { id: "petcf", name: "PET-CF", voll: "PET mit Kohlefaser", farbe: "#6fa8dc", material: ["PET-CF"], p1s: "duese", filter: ["hitze", "faser"],
+    kurz: "PET (nicht PETG) mit Kohlefaser: nimmt sehr wenig Feuchte auf, maßhaltig und hitzebeständig – das „bessere Nylon“ für feuchte Umgebung.",
+    duese: "260–290 °C", bett: "80–100 °C", bettNotiz: "mit Klebestift", platte: "Engineering, Smooth PEI, Textured PEI",
+    gehaeuse: "empfohlen", gehaeuseNotiz: "Offen möglich, aber schlechtere Schichthaftung.",
+    trocknen: "80 °C · 8–12 h", trocknenNotiz: "Spule max. 90 °C", hygro: "niedrig", gehaertet: "ja", gehaertetNotiz: "0,6 mm empfohlen",
+    anwendungen: "Tragende Teile in heißer oder feuchter Umgebung, Kfz-Zubehör, Vorrichtungen",
+    staerken: ["kaum Feuchteaufnahme", "maßhaltig", "hitzebeständig", "steif"], schwaechen: ["abrasiv (gehärtete Düse)", "teuer"],
+    sicherheit: "Lüften; Faserstaub beim Schleifen vermeiden.", lebensmittel: "Nein.", varianten: [] },
+
+  { id: "ppacf", name: "PPA-CF", voll: "Polyphthalamid mit Kohlefaser", farbe: "#8fb3a6", material: ["PPA-CF", "PPA"], p1s: "nein", filter: ["hitze", "faser"],
+    kurz: "Hochleistungs-Polyamid mit Kohlefaser: sehr steif, hitze-, chemikalien- und feuchtebeständig.",
+    duese: "280–310 °C", dueseNotiz: "P1S max. 300 °C", bett: "100–120 °C", bettNotiz: "P1S max. 100 °C", platte: "Engineering, Smooth PEI (Klebestift)",
+    gehaeuse: "ja", trocknen: "100–140 °C · 8–12 h", trocknenNotiz: "nur mit hitzefester Spule (max. 160 °C)", hygro: "hoch", gehaertet: "ja",
+    p1sNotiz: "Bambu listet den P1S als kompatibel, aber Düse (max. 300 °C) und Bett (max. 100 °C) liegen am bzw. unter dem unteren Rand – für den Hobbydruck nicht empfohlen.",
+    anwendungen: "Industrie- und Kfz-Teile, Propeller, Teile für feuchte oder heiße Umgebung",
+    staerken: ["sehr steif", "hitze- und chemikalienbeständig", "feuchtebeständig"], schwaechen: ["braucht Profi-Drucker", "bis 100 mm/s", "teuer"],
+    sicherheit: "Emissionen, Faserstaub.", lebensmittel: "Nein.", varianten: [] },
+
+  { id: "ppscf", name: "PPS-CF", voll: "Polyphenylensulfid mit Kohlefaser", farbe: "#a0a0b8", material: ["PPS-CF", "PPS"], p1s: "nein", filter: ["hitze", "faser"],
+    kurz: "Industrie-Hochleistungskunststoff: flammhemmend (UL 94 V-0), über 200 °C einsetzbar, chemikalienbeständig.",
+    duese: "310–340 °C", bett: "100–120 °C", platte: "Engineering", gehaeuse: "ja", gehaeuseNotiz: "plus beheizte Kammer 60–90 °C",
+    trocknen: "100–140 °C · 8–12 h", hygro: "–", gehaertet: "ja",
+    p1sNotiz: "Laut Bambu nur für X1E, H2D und H2S. Der P1S erreicht weder die Düsen- noch die Kammertemperatur.",
+    anwendungen: "Industrieteile mit Flammschutz und hoher Dauertemperatur",
+    staerken: ["flammhemmend", "über 200 °C einsetzbar", "chemikalienbeständig"], schwaechen: ["nur für Profi-Drucker mit Kammerheizung"],
+    sicherheit: "Emissionen, Faserstaub.", lebensmittel: "Nein.", varianten: [] },
+
+  { id: "stuetz", name: "Stützmaterial", voll: "Support-Filamente von Bambu", farbe: "#d8d8d8", material: ["PVA", "SUPPORT", "SUPPORT FOR PLA", "SUPPORT FOR PLA/PETG", "SUPPORT FOR ABS", "SUPPORT FOR PA/PET"], p1s: "bedingt", filter: ["stuetz"],
+    kurz: "Spezielle Filamente nur für die Kontaktfläche zwischen Stütze und Teil: lassen sich leicht abziehen oder in Wasser auflösen.",
+    duese: "190–250 °C", dueseNotiz: "je nach Sorte (Support for PA/PET 260–300 °C)", bett: "wie das Modellmaterial",
+    platte: "wie das Modellmaterial", gehaeuse: "je nach Material", trocknen: "je nach Sorte", trocknenNotiz: "PVA 80 °C / 12 h", hygro: "bis sehr hoch (PVA)", gehaertet: "nein", gehaertetNotiz: "Support for PA/PET: gehärtete Düse empfohlen",
+    p1sNotiz: "Ohne AMS druckt der P1S nur ein Material. Stützmaterial geht nur mit manuellem Filamentwechsel (Bambu Studio: „Pause/Farbwechsel auf Schicht“) – lohnt sich nur bei wenigen Interface-Lagen. Alternative: Stützen aus demselben Material mit gut eingestelltem Z-Abstand.",
+    anwendungen: "Saubere Unterseiten bei Überhängen, komplexe Innengeometrien",
+    staerken: ["glatte Unterseiten", "werkzeugfrei zu entfernen", "PVA: wasserlöslich"], schwaechen: ["ohne AMS umständlich", "PVA sehr feuchteempfindlich"],
+    sicherheit: "Wie das jeweilige Modellmaterial.", lebensmittel: "Nein.",
+    varianten: [
+      { id: "plapetg", name: "Support for PLA/PETG", arten: ["for pla/petg", "pla/petg"], filter: ["stuetz"],
+        was: "Haftet nur schwach am Bauteil und lässt sich werkzeugfrei abziehen – glatte Unterseite. Nur als Support- bzw. Interface-Schicht, nicht für Modelle. Nicht mit PA-CF, PET-CF, ABS, TPU oder ASA.",
+        druck: "190–240 °C. Im Slicer unter „Support/Raft Interface“ wählen, nicht als Basis für Baumstützen; Z-Abstand 0." },
+      { id: "pla", name: "Support for PLA", arten: ["for pla"], filter: ["stuetz"],
+        was: "Wie oben, nur für PLA.", druck: "Wie Support for PLA/PETG.", unsicher: "Eine „New Version“ ist bei Händlern gelistet; der Unterschied ist nicht verifiziert." },
+      { id: "pva", name: "PVA", arten: ["pva"], filter: ["stuetz"],
+        was: "Wasserlöslich (warmes Wasser bis 50 °C bei PLA) – für komplexe Innengeometrien. Passt zu PLA, PETG, PLA-CF und PETG-CF.",
+        druck: "220–250 °C. Sehr hygroskopisch: 80 °C / 12 h trocknen (Spulengrenze beachten), unter 20 % Luftfeuchte verarbeiten. Normale Stützen statt Baumstützen." },
+      { id: "abs", name: "Support for ABS", arten: ["for abs"], filter: ["stuetz"],
+        was: "Leicht abtrennbar, gute Interface-Qualität für ABS (und ASA).", druck: "Gehäuse nötig." },
+      { id: "papet", name: "Support for PA/PET", arten: ["for pa/pet"], filter: ["stuetz"], p1s: "duese",
+        was: "Von Hand entfernbar, für PAHT-CF, PA6-CF, PET-CF und PA6-GF.", druck: "260–300 °C, trocknen, gehärtete Düse empfohlen (Wiki)." },
+    ] },
+
+  // Gängige Materialien anderer Hersteller (Werte allgemein, nicht aus Bambu-Quellen)
+  { id: "hips", name: "HIPS", voll: "Schlagzähes Polystyrol", fremd: true, farbe: "#e0c27a", material: ["HIPS"], p1s: "bedingt", filter: ["stuetz", "hitze"],
+    kurz: "Schlagzähes Polystyrol, in Limonen löslich – klassisches Stützmaterial für ABS. Druckt ähnlich wie ABS.",
+    duese: "230–250 °C", bett: "90–100 °C", platte: "Textured oder Smooth PEI", gehaeuse: "ja", trocknen: "ca. 60 °C · 4–6 h", hygro: "niedrig", gehaertet: "nein",
+    anwendungen: "Stützen für ABS (in Limonen auflösen), leichte Gehäuse, Modellbau",
+    staerken: ["druckt wie ABS", "leicht", "in Limonen löslich"], schwaechen: ["Verzug", "Styrol-Emissionen"],
+    sicherheit: "Styrol-Emissionen: lüften.", lebensmittel: "Nein.", varianten: [] },
+  { id: "pp", name: "PP", voll: "Polypropylen", fremd: true, farbe: "#b9d97a", material: ["PP"], p1s: "bedingt", filter: [],
+    kurz: "Leicht und chemikalienbeständig, ideal für Filmscharniere. Haftet auf fast nichts außer PP-Klebeband oder Spezialplatten und verzieht stark.",
+    duese: "220–250 °C", bett: "80–100 °C", platte: "PP-Klebeband oder Spezialplatte", gehaeuse: "empfohlen", trocknen: "ca. 60 °C · 6 h", hygro: "sehr niedrig", gehaertet: "nein",
+    p1sNotiz: "Schwierig: braucht einen speziellen Haftuntergrund.",
+    anwendungen: "Filmscharniere, Behälter für Chemikalien, leichte Teile",
+    staerken: ["leicht", "chemikalienbeständig", "biegefest (Filmscharniere)"], schwaechen: ["schlechte Betthaftung", "starker Verzug"],
+    sicherheit: "Lüften.", lebensmittel: "Druckteile nicht lebensmittelsicher.", varianten: [] },
+  { id: "pvb", name: "PVB", voll: "Polyvinylbutyral (z. B. „Polysmooth“)", fremd: true, farbe: "#a4c8f0", material: ["PVB"], p1s: "ok", filter: ["optik", "einsteiger"],
+    kurz: "Druckt ähnlich wie PLA und lässt sich mit Isopropanol glatt polieren – für glänzende, fast durchsichtige Oberflächen.",
+    duese: "190–220 °C", bett: "50–70 °C", platte: "Textured oder Smooth PEI", gehaeuse: "nein", trocknen: "ca. 50 °C · 6 h", hygro: "mittel", gehaertet: "nein",
+    anwendungen: "Vasen, Lampenschirme, Schaustücke mit glatter Oberfläche",
+    staerken: ["druckt wie PLA", "mit Isopropanol glättbar"], schwaechen: ["teurer als PLA", "Glätten braucht Übung"],
+    sicherheit: "Beim Glätten mit Isopropanol: lüften, keine offene Flamme.", lebensmittel: "Nein.", varianten: [] },
+  { id: "pctg", name: "PCTG / CPE", voll: "Verwandte von PETG", fremd: true, farbe: "#7cc6e8", material: ["PCTG", "CPE"], p1s: "ok", filter: ["outdoor"],
+    kurz: "PETG-Verwandte: zäher bzw. klarer als PETG, drucken ähnlich.",
+    duese: "240–270 °C", bett: "70–80 °C", platte: "Textured PEI", platteNotiz: "auf glattem PEI Kleber als Trennschicht", gehaeuse: "nein", trocknen: "ca. 65 °C · 6 h", hygro: "mittel", gehaertet: "nein",
+    anwendungen: "Funktionsteile, klare Abdeckungen, Outdoor-Teile",
+    staerken: ["sehr zäh", "klar", "chemikalienbeständig"], schwaechen: ["Fädenziehen wie PETG"],
+    sicherheit: "Geringe Emissionen, lüften.", lebensmittel: "Druckteile nicht lebensmittelsicher.", varianten: [] },
+  { id: "peek", name: "PEEK / PEKK / PEI", voll: "Hochleistungskunststoffe (PEI = Ultem)", fremd: true, farbe: "#c9a46c", material: ["PEEK", "PEKK", "PEI", "ULTEM"], p1s: "nein", filter: ["hitze"],
+    kurz: "Hochleistungskunststoffe für Luftfahrt und Medizintechnik: extrem hitze- und chemikalienbeständig.",
+    duese: "360–450 °C", bett: "120–160 °C", platte: "Spezialplatten", gehaeuse: "ja", gehaeuseNotiz: "plus Kammer 70–150 °C", trocknen: "120–150 °C", hygro: "mittel", gehaertet: "ja",
+    p1sNotiz: "Nicht geeignet: P1S max. 300 °C an der Düse, keine aktive Kammerheizung.",
+    anwendungen: "Industrie, Luftfahrt, Medizintechnik",
+    staerken: ["extrem hitzebeständig", "chemikalienbeständig"], schwaechen: ["braucht Industriedrucker", "sehr teuer"],
+    sicherheit: "Nur auf Industrieanlagen.", lebensmittel: "Nein.", varianten: [] },
+  { id: "metall", name: "Metall- & Keramik-Filamente", voll: "Bronze-, Kupfer-, Stahl-Fill, Sinter-Filamente", fremd: true, farbe: "#c08a5a", material: ["METALL", "BRONZE", "KUPFER", "COPPER"], p1s: "duese", filter: ["optik", "faser"],
+    kurz: "PLA oder Binder mit echtem Metall- bzw. Keramikpulver. Schwer, kalt anzufassen, polierbar – oder zum Sintern im Ofen.",
+    duese: "195–220 °C", dueseNotiz: "bei Metall-PLA, je nach Hersteller", bett: "50–60 °C", platte: "Textured PEI", gehaeuse: "nein", trocknen: "wie PLA", hygro: "niedrig–mittel", gehaertet: "ja",
+    p1sNotiz: "Stark abrasiv: ohne gehärtete Düse nicht geeignet.",
+    anwendungen: "Schmuck, Figuren mit Metallgefühl, Sinterteile",
+    staerken: ["echte Metalloptik und Gewicht", "polierbar"], schwaechen: ["stark abrasiv", "spröde", "teuer"],
+    sicherheit: "Beim Schleifen und Polieren Staubschutz.", lebensmittel: "Nein.", varianten: [] },
+];
+
+// ---- Fehlercodes (HMS) für den P1S ---------------------------------------------
+// Meldungen aus Bambus offizieller HMS-Texttabelle (englisch), Zuordnung zur X1-/P1-Serie über die
+// Bambu-Wiki-Seiten je Code; Kurzcodes (z. B. 0300-8004) sind Druckfehler-Meldungen derselben Tabelle.
+// Text sinngemäß übersetzt, „Was tun“ kurz zusammengefasst.
+const CD_WIKI = "https://wiki.bambulab.com/en/hms/home";
+const CD_GRUPPEN = [
+  { id: "bett", name: "Heizbett", icon: "🟫", codes: [
+    { c: "0300-0100-0001-0003", t: "Heizbett-Temperatur auffällig: Die Heizung ist überhitzt.", tun: "Drucker ausschalten und abkühlen lassen. Tritt es wieder auf: Heizbett-Kabel prüfen, Support kontaktieren." },
+    { c: "0300-0100-0001-0006", t: "Heizbett-Temperatur auffällig: Der Temperaturfühler hat womöglich einen Kurzschluss.", tun: "Ausschalten, Stecker und Kabel des Heizbetts prüfen (Kabel bricht gern an der Biegestelle)." },
+    { c: "0300-0100-0001-0007", t: "Heizbett-Temperatur auffällig: Der Temperaturfühler hat womöglich eine Unterbrechung.", tun: "Ausschalten, Heizbett-Stecker fest einstecken, Kabel auf Bruch prüfen." },
+    { c: "0300-0100-0001-000A", t: "Temperaturregelung des Heizbetts gestört, die AC-Platine ist evtl. defekt.", tun: "Neu starten. Bleibt die Meldung, laut Wiki AC-Platine prüfen bzw. tauschen lassen." },
+    { c: "0300-0100-0003-0008", t: "Die Betttemperatur liegt über dem Grenzwert und wird automatisch auf die Grenze gesetzt.", tun: "Nur ein Hinweis: Der P1S schafft max. 100 °C. Im Filamentprofil die Betttemperatur senken." },
+    { c: "0300-0D00-0001-0003", auch: "bis …-000A", t: "Die Druckplatte liegt nicht richtig. Bitte ausrichten.", tun: "Platte abnehmen, Bett und Plattenunterseite von Krümeln befreien, an den hinteren Stiften anlegen und neu starten." },
+    { c: "0300-0D00-0002-0003", auch: "bis …-000A", t: "Die Druckplatte liegt möglicherweise nicht richtig.", tun: "Platte prüfen und neu auflegen. Kommt die Meldung oft, Bett auf Fremdkörper und Wölbung prüfen." },
+    { c: "0300-0D00-0002-0001", t: "Referenzfahrt des Betts auffällig: Beule auf dem Bett oder Düsenspitze nicht sauber.", tun: "Düsenspitze bei Drucktemperatur von Filamentresten befreien, Platte auf Beulen und Reste prüfen." },
+    { c: "0300-0D00-0001-000C", t: "Die Daten der Bettnivellierung sind auffällig.", tun: "Fremdkörper auf dem Bett und an den Z-Schlitten entfernen, dann Nivellierung neu starten." },
+    { c: "0300-0A00-0001-0001", auch: "Sensor 2: 0300-0B00…, Sensor 3: 0300-0C00…", t: "Kraftsensor 1 im Heizbett ist zu empfindlich – klemmt evtl. zwischen Dehnungsarm und Bettträger, oder die Einstellschraube ist zu fest.", tun: "Z-Schlitten und Z-Riemenräder auf Fremdkörper prüfen, Bett frei beweglich? Sonst Support-Ticket mit Foto/Video." },
+    { c: "0300-0A00-0001-0002", auch: "auch …-0003, Sensor 2/3: 0B00/0C00", t: "Das Signal von Kraftsensor 1 ist schwach – Sensor defekt oder schlechter Kontakt.", tun: "Ausschalten, Sensorkabel unter dem Bett prüfen und fest einstecken." },
+    { c: "0300-0A00-0001-0004", auch: "Sensor 2/3: 0B00/0C00", t: "Störung an Kraftsensor 1: Die Bettplatte hat etwas außerhalb des Betts berührt.", tun: "Prüfen, ob Kabel, Reste oder Gegenstände das Bett berühren; Bett freiräumen." },
+    { c: "0300-0A00-0001-0005", auch: "Sensor 2/3: 0B00/0C00", t: "Kraftsensor 1 misst eine unerwartete Dauerkraft – das Bett klemmt evtl.", tun: "Bett von Hand auf Leichtgängigkeit prüfen, Fremdkörper entfernen, neu starten." },
+  ] },
+  { id: "hotend", name: "Hotend / Düse", icon: "🔥", codes: [
+    { c: "0300-0200-0001-0001", t: "Düsentemperatur auffällig: Die Heizung hat womöglich einen Kurzschluss.", tun: "Ausschalten. Heizpatrone und Kabel am Hotend prüfen, ggf. Hotend tauschen." },
+    { c: "0300-0200-0001-0002", t: "Düsentemperatur auffällig: Die Heizung hat womöglich eine Unterbrechung.", tun: "Ausschalten, Hotend-Stecker am Druckkopf fest einstecken, Kabel prüfen." },
+    { c: "0300-0200-0001-0003", t: "Düsentemperatur auffällig: Die Heizung ist überhitzt.", tun: "Sofort ausschalten und abkühlen lassen. Kommt es wieder, Support kontaktieren." },
+    { c: "0300-0200-0001-0006", t: "Düsentemperatur auffällig: Der Temperaturfühler hat womöglich einen Kurzschluss.", tun: "Ausschalten, Stecker des Thermistors am Druckkopf prüfen und fest einstecken." },
+    { c: "0300-0200-0001-0007", t: "Düsentemperatur auffällig: Der Temperaturfühler hat womöglich eine Unterbrechung.", tun: "Ausschalten, Thermistor-Kabel prüfen; bei Bruch Hotend bzw. Fühler tauschen." },
+    { c: "0300-4006", kurz: true, t: "Die Düse ist verstopft.", tun: "Kaltzug (Cold Pull) machen oder Düse mit Nadel reinigen. Bei PLA: Deckel/Tür auf, damit kein Hitzestau entsteht." },
+    { c: "0300-1200-0002-0001", t: "Die Frontabdeckung des Druckkopfs ist abgefallen.", tun: "Abdeckung wieder aufstecken (Magnete). Prüfen, ob der Druck noch sauber läuft." },
+  ] },
+  { id: "motoren", name: "Motoren / Achsen", icon: "⚙️", codes: [
+    { c: "0300-0600-0001-0001", auch: "Motor B: 0300-0700…, Motor Z: 0300-0800…", t: "Motor A hat eine Unterbrechung – Kabel locker oder Motor defekt.", tun: "Ausschalten, Motorkabel prüfen und fest einstecken. Bleibt es, Motor tauschen." },
+    { c: "0300-0600-0001-0002", auch: "Motor B/Z: 0700/0800", t: "Motor A hat einen Kurzschluss, ist evtl. defekt.", tun: "Ausschalten, Kabel auf Scheuerstellen prüfen, sonst Motor tauschen." },
+    { c: "0300-0600-0001-0003", auch: "Motor B/Z: 0700/0800", t: "Der Widerstand von Motor A ist auffällig, der Motor ist evtl. defekt.", tun: "Neu starten; bleibt die Meldung, Support kontaktieren." },
+    { c: "0300-1300-0001-0001", auch: "Motor B: 1400, Motor Z: 1500", t: "Der Stromsensor von Motor A ist auffällig (Messschaltung).", tun: "Neu starten. Bleibt es, ist meist die Hauptplatine betroffen – Support." },
+    { c: "0300-0D00-0001-000B", t: "Der Z-Motor scheint beim Fahren zu klemmen.", tun: "Z-Schlitten und Z-Riemenräder auf Fremdkörper prüfen, nichts unter dem Bett eingeklemmt?" },
+    { c: "0300-1000-0002-0001", t: "Die Resonanzfrequenz der X-Achse ist niedrig – der Riemen ist evtl. locker.", tun: "Riemenspannung prüfen bzw. nachspannen (Wiki-Anleitung), dann Kalibrierung." },
+    { c: "0300-1100-0002-0001", t: "Die Resonanzfrequenz der Y-Achse ist niedrig – der Riemen ist evtl. locker.", tun: "Y-Riemen prüfen und spannen, danach Kalibrierung." },
+    { c: "0300-1000-0002-0002", auch: "Y-Achse: 0300-1100-0002-0002", t: "Die Resonanzfrequenz der X-Achse weicht stark von der letzten Kalibrierung ab.", tun: "Carbonstange bzw. Führungsstange reinigen, dann Kalibrierung wiederholen." },
+    { c: "0300-0F00-0001-0001", t: "Auffällige Daten vom Beschleunigungssensor.", tun: "Drucker neu starten." },
+    { c: "0300-4000", kurz: true, t: "Referenzfahrt der Z-Achse fehlgeschlagen, der Druck wurde gestoppt.", tun: "Bett und Düse von Resten befreien, nichts unter dem Bett? Dann neu starten." },
+    { c: "0300-4009", kurz: true, t: "Referenzfahrt der X/Y-Achse fehlgeschlagen.", tun: "Prüfen, ob der Druckkopf frei fährt (Fremdkörper, Kabel), Stangen reinigen, neu starten." },
+    { c: "0300-400E", kurz: true, t: "Der Motor-Selbsttest ist fehlgeschlagen.", tun: "Neu starten; bleibt es, Motorkabel prüfen." },
+  ] },
+  { id: "extruder", name: "Extruder / Filament", icon: "🧵", codes: [
+    { c: "0300-8004", kurz: true, t: "Filament ist aufgebraucht. Bitte neues laden.", tun: "Neue Rolle einlegen und laden, dann „Fortsetzen“. Ohne AMS: externe Spule tauschen." },
+    { c: "0300-800D", kurz: true, t: "Der Extruder fördert nicht normal.", tun: "Druck ansehen; ist es vertretbar, fortsetzen. Sonst Filament (feucht? verknotet?) und Düse prüfen." },
+    { c: "0300-1600-0001-0001", t: "Der Stromsensor des Extrudermotors ist auffällig (Messschaltung).", tun: "Neu starten; bleibt es, Support kontaktieren." },
+    { c: "0500-0400-0002-0007", t: "Die Betttemperatur liegt über der Glasübergangstemperatur des Filaments – die Düse kann verstopfen. Tür offen lassen.", tun: "Typisch bei PLA mit heißem Bett: Tür öffnen bzw. Glasdeckel abnehmen, Betttemperatur senken." },
+  ] },
+  { id: "luefter", name: "Lüfter", icon: "🌀", codes: [
+    { c: "0300-0300-0001-0001", t: "Der Hotend-Lüfter dreht zu langsam oder steht – evtl. blockiert oder Stecker nicht richtig drin.", tun: "Ausschalten, Lüfter auf Fäden und Reste prüfen, Stecker fest einstecken, ggf. Lüfter tauschen." },
+    { c: "0300-0300-0002-0002", t: "Der Hotend-Lüfter läuft langsam, evtl. behindert.", tun: "Lüfter von Staub und Filamentresten befreien." },
+    { c: "0300-0400-0002-0001", t: "Der Bauteillüfter dreht zu langsam oder steht – evtl. blockiert oder Stecker locker.", tun: "Frontabdeckung abnehmen, Lüfter reinigen, Stecker prüfen." },
+    { c: "0300-4005", kurz: true, t: "Die Drehzahl des Hotend-Lüfters ist auffällig.", tun: "Wie oben: Lüfter reinigen und Stecker prüfen." },
+  ] },
+  { id: "kamera", name: "Kamera / KI-Erkennung", icon: "📷", codes: [
+    { c: "0C00-0300-0003-0008", t: "Mögliches Spaghetti-Problem erkannt. Bitte Druck ansehen und entscheiden, ob er abgebrochen wird.", tun: "Druck prüfen. Vorbeugen: Platte reinigen (Spülmittel), Filament trocknen, ggf. Kleber." },
+    { c: "0300-8003", kurz: true, t: "Die KI-Drucküberwachung hat Spaghetti erkannt (Druck pausiert).", tun: "Druck ansehen, bei Bedarf abbrechen; Platte reinigen und Filament trocknen." },
+    { c: "0C00-0300-0003-0006", t: "Ausgeworfenes Filament hat sich evtl. im Abfallschacht gestaut.", tun: "Abfallschacht hinten am Drucker leeren." },
+    { c: "0C00-0100-0002-0008", t: "Kein Bild von der Live-Kamera – Spaghetti- und Schacht-Erkennung sind gerade nicht verfügbar.", tun: "Drucker neu starten; Kamerakabel prüfen." },
+    { c: "0500-0100-0002-0002", t: "Die Live-Kamera ist nicht verbunden.", tun: "Ausschalten, Kamerakabel an Kamera und Platine prüfen." },
+    { c: "0500-0100-0002-0001", t: "Die Medien-Verarbeitung (Kamerabild) ist gestört.", tun: "Neu starten; hilft das mehrfach nicht, Support kontaktieren." },
+    { c: "0500-0200-0002-0006", t: "Fehler bei der Video-Übertragung (Streaming).", tun: "Netzwerk prüfen, neu starten bzw. Firmware aktualisieren." },
+  ] },
+  { id: "system", name: "Steuerung / System", icon: "🧠", codes: [
+    { c: "0500-0300-0001-0001", t: "Das MC-Modul (Bewegungssteuerung) ist gestört.", tun: "Neu starten, Kabelverbindungen zur Hauptplatine prüfen." },
+    { c: "0500-0300-0001-0002", t: "Der Druckkopf ist gestört.", tun: "Neu starten; Druckkopfkabel prüfen." },
+    { c: "0500-0300-0001-000A", t: "Systemzustand auffällig – bitte auf Werkseinstellungen zurücksetzen.", tun: "Vorher Druckaufträge sichern, dann am Display zurücksetzen." },
+    { c: "0500-0300-0001-000B", t: "Das Display ist gestört.", tun: "Drucker neu starten." },
+    { c: "0300-4100-0001-0001", t: "Die Systemspannung ist instabil – der Stromausfallschutz wurde ausgelöst.", tun: "Steckdose, Mehrfachstecker und Kabel prüfen; Drucker möglichst direkt anschließen." },
+    { c: "0300-4000-0002-0001", t: "Datenübertragung über die serielle Schnittstelle gestört – evtl. Softwarefehler.", tun: "Neu starten, Firmware aktualisieren." },
+    { c: "0500-0400-0001-0006", t: "Der vorherige Druck konnte nicht fortgesetzt werden.", tun: "Druck neu starten; nach Stromausfall Teil prüfen." },
+    { c: "0500-0500-0001-0007", t: "MQTT-Befehl konnte nicht überprüft werden.", tun: "Bambu Studio (inkl. Netzwerk-Plugin) bzw. Bambu Handy aktualisieren und neu starten. Betrifft auch Home-Assistant-Steuerung." },
+  ] },
+  { id: "netz", name: "Speicherkarte / Netzwerk", icon: "📶", codes: [
+    { c: "0500-0100-0003-0004", t: "Nicht genug Platz auf der microSD-Karte – keine Video- und Zeitraffer-Aufnahme möglich.", tun: "Alte Zeitraffer und Druckdateien von der Karte löschen." },
+    { c: "0500-0100-0003-0005", t: "Die microSD-Karte ist schreibgeschützt – keine Video- und Zeitraffer-Aufnahme.", tun: "Karte am PC prüfen bzw. formatieren (FAT32), sonst ersetzen." },
+    { c: "0500-0100-0003-0006", t: "microSD-Karte nicht formatiert.", tun: "Am Drucker formatieren (Daten gehen verloren)." },
+    { c: "0500-C011", kurz: true, t: "Die Leistung der SD-Karte hat nachgelassen – Druck, Protokolle und Videos können leiden.", tun: "Karte formatieren; hilft das nicht, neue Karte einsetzen." },
+    { c: "0500-400C", kurz: true, t: "Bitte microSD-Karte einstecken und den Druck neu starten.", tun: "Karte einstecken – ohne Karte druckt der P1S nicht aus der Cloud oder vom PC." },
+    { c: "0500-0200-0002-0001", auch: "auch …-0003, …-0005", t: "Verbindung zum Internet fehlgeschlagen.", tun: "WLAN am Drucker prüfen, Router-Abstand verringern, ggf. neu verbinden." },
+    { c: "0500-0200-0002-0002", t: "Anmeldung des Geräts fehlgeschlagen – Kontodaten prüfen.", tun: "In Bambu Handy/Studio ab- und wieder anmelden, Drucker ggf. neu binden." },
+    { c: "0500-0200-0002-0004", t: "Unberechtigter Benutzer – Kontodaten prüfen.", tun: "Mit dem Konto anmelden, an das der Drucker gebunden ist." },
+    { c: "0500-0200-0002-0008", t: "Zeitsynchronisation fehlgeschlagen.", tun: "Internetzugang prüfen (Zeitserver erreichbar?), neu starten." },
+    { c: "0500-0300-0002-000C", t: "WLAN-Hardwarefehler.", tun: "WLAN am Drucker aus- und wieder einschalten oder neu starten." },
+    { c: "0500-0400-0001-0001", t: "Druckauftrag konnte nicht heruntergeladen werden.", tun: "Netzwerk prüfen und Auftrag erneut senden." },
+    { c: "0500-0400-0001-0002", t: "Druckstatus konnte nicht gemeldet werden.", tun: "Netzwerk prüfen; der Druck läuft meist trotzdem weiter." },
+    { c: "0500-0400-0001-0003", t: "Inhalt der Druckdatei ist nicht lesbar.", tun: "Neu slicen und erneut senden." },
+    { c: "0500-0400-0001-0004", t: "Die Druckdatei ist nicht autorisiert.", tun: "Datei aus Bambu Studio mit dem gebundenen Konto senden." },
+    { c: "0500-4037", kurz: true, t: "Die geslicte Datei passt nicht zum Druckermodell.", tun: "In Bambu Studio „Bambu Lab P1S“ als Drucker wählen und neu slicen." },
+    { c: "0500-4038", kurz: true, t: "Der Düsendurchmesser in der Datei passt nicht zur eingestellten Düse.", tun: "Im Slicer die richtige Düse (z. B. 0,4 mm) wählen oder am Drucker die Düseneinstellung anpassen." },
+  ] },
+];
+
+const KunststoffAnsicht = {
+  _ksZustand() {
+    if (!this._ks) this._ks = { filter: "", q: "", auf: {}, cdQ: "", cdAuf: {} };
+    return this._ks;
+  },
+
+  // ---- Kunststoffe ---------------------------------------------------------
+  // P1S-Ampel einer Variante (erbt vom Material)
+  _ksP1s(m, v) { return (v && v.p1s) || m.p1s; },
+  _ksPasst(m, v, f) {
+    if (f === "p1s") return this._ksP1s(m, v) === "ok";
+    return ((v ? v.filter : m.filter) || []).includes(f);
+  },
+  _ksTextPasst(m, v, q) {
+    const t = (v ? [v.name, v.was, v.druck] : [m.name, m.voll, m.kurz, m.anwendungen, (m.staerken || []).join(" ")]).join(" ").toLowerCase();
+    return t.includes(q);
+  },
+  // Was nach Filter und Suche zu sehen ist: Material plus die passenden Varianten
+  _ksAuswahl() {
+    const k = this._ksZustand(), q = k.q.trim().toLowerCase();
+    return KUNSTSTOFFE.map((m) => {
+      const vars = m.varianten || [];
+      const mPasst = (!k.filter || this._ksPasst(m, null, k.filter)) && (!q || this._ksTextPasst(m, null, q));
+      const vPasst = vars.filter((v) => (!k.filter || this._ksPasst(m, v, k.filter)) && (!q || this._ksTextPasst(m, v, q) || this._ksTextPasst(m, null, q)));
+      if (!mPasst && !vPasst.length) return null;
+      // Passt nur das Material (keine Variante einzeln), werden alle Varianten gezeigt
+      const gefiltert = (k.filter || q) && vPasst.length && vPasst.length < vars.length;
+      return { m, varianten: gefiltert ? vPasst : vars, gefiltert };
+    }).filter(Boolean);
+  },
+  // Eigene Rollen eines Materials bzw. einer Variante
+  _ksRollen(m, v) {
+    const mats = m.material.map((x) => x.toLowerCase());
+    return (this._daten.rollen || []).filter((r) => {
+      const mat = String(r.material || "").toLowerCase();
+      if (!mats.includes(mat)) return false;
+      if (!v) return true;
+      const art = String(r.art || "").toLowerCase().trim();
+      return (v.arten || []).includes(art);
+    }).sort((a, b) => a.name.localeCompare(b.name, "de"));
+  },
+  // max: zugeklappte Karte zeigt nur die ersten Rollen, „+N“ klappt die Karte auf (mehrId)
+  _ksRollenHtml(rollen, titel, max = 0, mehrId = "") {
+    if (!rollen.length) return "";
+    const zeigen = max && rollen.length > max + 1 ? rollen.slice(0, max) : rollen;
+    const rest = rollen.length - zeigen.length;
+    return `<div class="ks-rollen"><span class="ks-rollen-titel">${esc(titel)}</span>${zeigen.map((r) =>
+      `<button class="chip ks-rolle" data-aktion="oeffnen-filament" data-id="${esc(r.id)}" title="${esc(r.name)} · ${esc(r.hersteller)}"><i class="ks-farbe ${r.hex === "transparent" ? "klar" : ""}" style="${r.hex && r.hex !== "transparent" ? `background:${esc(r.hex)}` : ""}"></i>${esc(r.name)}<small>${esc(r.hersteller)}</small></button>`).join("")}${rest ? `<button class="chip ks-mehr" data-aktion="hi-ks-auf" data-id="${esc(mehrId)}">+${rest} weitere</button>` : ""}</div>`;
+  },
+  _ksAmpelHtml(stufe, lang = false) {
+    const a = KS_P1S[stufe] || KS_P1S.bedingt;
+    return `<span class="ks-ampel ${a.stufe}" title="${esc(a.lang)}"><i></i>${esc(lang ? a.lang : a.kurz)}</span>`;
+  },
+  _ksUnsicherHtml(text) {
+    return text ? `<span class="ks-pruefen" title="${esc(text)}">bitte prüfen</span>` : "";
+  },
+
+  _hiKunststoffeHtml() {
+    const k = this._ksZustand();
+    return `<div class="ks-seite">
+      <div class="ks-kopfzeile">
+        <p class="leise ks-einleitung">Alle gängigen Filamente mit den wichtigsten Werten für deinen P1S (Edelstahldüse, ohne AMS). Tippe auf eine Karte für Details und Unterarten. Werte laut Bambu, sofern nicht anders markiert.</p>
+        <input class="suche ks-suche" type="search" placeholder="Suchen: Silk, Outdoor, Zahnrad …" value="${esc(k.q)}" data-ks="suche" aria-label="Kunststoffe durchsuchen">
+      </div>
+      <div class="chips ks-filter unter-tabs" role="group" aria-label="Filter">
+        <button class="chip ${!k.filter ? "an" : ""}" data-aktion="hi-ks-filter" data-id="">Alle</button>
+        ${KS_FILTER.map(([id, n]) => `<button class="chip ${k.filter === id ? "an" : ""}" data-aktion="hi-ks-filter" data-id="${id}" aria-pressed="${k.filter === id}">${n}</button>`).join("")}
+      </div>
+      ${k.filter === "lebensmittel" ? this._ksLebensmittelHtml() : ""}
+      <div id="ks-liste">${this._ksListeHtml()}</div>
+      <div class="ks-legende leise klein">${Object.keys(KS_P1S).map((s) => this._ksAmpelHtml(s, true)).join("")}</div>
+    </div>`;
+  },
+  _ksLebensmittelHtml() {
+    return `<div class="ks-warnung" data-einmal="ks-warnung"><strong>⚠️ Gedruckte Teile sind grundsätzlich nicht lebensmittelsicher</strong>
+      <p>In den Rillen zwischen den Schichten halten sich Bakterien, die sich nicht zuverlässig wegspülen lassen. Dazu kommen Reste früherer Materialien in der Düse und Farbzusätze.
+      Nur <b>PLA Pure</b> ist laut Bambu zertifiziert (EU 10/2011, Spielzeug EN 71-3) – und auch dann nur: kurzer Kontakt mit <b>trockenen</b> Lebensmitteln, keine Flüssigkeiten, nicht über 60 °C (keine Spülmaschine), saubere Düse.
+      PLA Basic hat nur ein Emissions-Zertifikat (GREENGUARD).</p>
+      <p class="leise klein">Kinder: Kleinteile können verschluckt werden, gedruckte Teile splittern (vor allem PLA und CF). Kinder nicht unbeaufsichtigt an den laufenden Drucker – Düse bis 300 °C, Bett bis 100 °C.</p></div>`;
+  },
+  _ksListeHtml() {
+    const k = this._ksZustand(), liste = this._ksAuswahl();
+    if (!liste.length) return `<div class="dr-karte ks-leer"><p class="leise">Nichts gefunden. Anderen Filter oder Suchbegriff probieren.</p><button class="mini mint-rand" data-aktion="hi-ks-zuruecksetzen">Filter zurücksetzen</button></div>`;
+    return `<div class="ks-raster">${liste.map((x) => this._ksKarteHtml(x)).join("")}</div>`;
+  },
+  _ksKarteHtml({ m, varianten, gefiltert }) {
+    const k = this._ksZustand(), auf = !!k.auf[m.id];
+    const rollen = this._ksRollen(m);
+    const wert = (icon, name, w, notiz, klasse = "") => `<div class="ks-wert ${klasse}" ${notiz ? `title="${esc(notiz)}"` : ""}><span>${icon} ${esc(name)}</span><strong>${esc(w)}</strong></div>`;
+    const ja = (x) => x === "ja" ? "amber" : "";
+    return `<article class="ks-karte ${auf ? "auf" : ""} ${m.fremd ? "fremd" : ""}" style="--ks-farbe:${m.farbe}" data-ks-karte="${m.id}" data-einmal="ks-${m.id}">
+      <button class="ks-kopf" data-aktion="hi-ks-auf" data-id="${m.id}" aria-expanded="${auf}">
+        <span class="ks-name"><strong>${esc(m.name)}</strong><small>${esc(m.voll)}</small></span>
+        ${this._ksAmpelHtml(m.p1s)}
+        <span class="ks-pfeil" aria-hidden="true">›</span>
+      </button>
+      <p class="ks-kurz">${esc(m.kurz)}${m.fremd ? ` <span class="ks-fremd">kein Bambu-Material · Richtwerte, bitte prüfen</span>` : ""}</p>
+      <div class="ks-werte">
+        ${wert("🌡️", "Düse", m.duese, m.dueseNotiz)}${wert("🟫", "Bett", m.bett, m.bettNotiz)}${wert("📦", "Gehäuse", m.gehaeuse, m.gehaeuseNotiz)}
+        ${wert("♨️", "Trocknen", m.trocknen, m.trocknenNotiz)}${wert("🔩", "Gehärtet", m.gehaertet, `Gehärtete Düse nötig? ${m.gehaertetNotiz || ""}`.trim(), ja(m.gehaertet))}${wert("💧", "Feuchte", m.hygro, "Wie stark das Material Wasser aus der Luft zieht")}
+        ${wert("🧱", "Druckplatte", m.platte, m.platteNotiz, "breit")}
+      </div>
+      ${this._ksRollenHtml(rollen, "Deine Rollen", auf ? 0 : 3, m.id)}
+      ${varianten.length && !auf ? `<button class="ks-var-vorschau" data-aktion="hi-ks-auf" data-id="${m.id}">${gefiltert ? `${varianten.length} passende ${varianten.length === 1 ? "Unterart" : "Unterarten"}: ` : `${varianten.length} ${varianten.length === 1 ? "Unterart" : "Unterarten"}: `}<span>${varianten.map((v) => esc(v.name)).join(" · ")}</span></button>` : ""}
+      ${auf ? `<div class="klapp" data-klapp="ks:${m.id}">${this._ksDetailHtml(m, varianten, gefiltert)}</div>` : ""}
+    </article>`;
+  },
+  _ksDetailHtml(m, varianten, gefiltert) {
+    const liste = (xs) => `<ul>${xs.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+    return `<div class="ks-detail">
+      <div class="ks-block"><h4>Typische Anwendungen</h4><p>${esc(m.anwendungen)}</p></div>
+      <div class="ks-pro-contra">
+        <div class="ks-block pro"><h4>Stärken</h4>${liste(m.staerken || [])}</div>
+        <div class="ks-block contra"><h4>Schwächen</h4>${liste(m.schwaechen || [])}</div>
+      </div>
+      ${m.p1sNotiz ? `<div class="ks-block ks-p1s"><h4>Am P1S ${this._ksAmpelHtml(m.p1s, true)}</h4><p>${esc(m.p1sNotiz)}</p></div>` : ""}
+      ${m.gehaeuseNotiz && m.gehaeuse !== "ja" ? `<div class="ks-block ks-sicher"><h4>📦 Gehäuse &amp; Deckel</h4><p>${esc(m.gehaeuseNotiz)}</p></div>` : ""}
+      <div class="ks-block ks-sicher"><h4>🛡️ Sicherheit</h4><p>${esc(m.sicherheit)}</p></div>
+      <div class="ks-block ks-essen"><h4>🍎 Lebensmittel &amp; Kinder</h4><p>${esc(m.lebensmittel)}</p></div>
+      ${varianten.length ? `<h4 class="ks-var-titel">Unterarten${gefiltert ? ` <span class="leise klein">· nur passende (${varianten.length} von ${m.varianten.length})</span>` : ""}</h4>
+        <div class="ks-varianten">${varianten.map((v) => this._ksVarianteHtml(m, v)).join("")}</div>` : ""}
+    </div>`;
+  },
+  _ksVarianteHtml(m, v) {
+    const k = this._ksZustand(), sl = `${m.id}:${v.id}`, auf = !!k.auf[sl];
+    const p = this._ksP1s(m, v), rollen = this._ksRollen(m, v);
+    const tags = (v.filter || []).map((f) => (KS_FILTER.find((x) => x[0] === f) || [])[1]).filter(Boolean).map((n) => n.split(" ")[0]).join("");
+    return `<div class="ks-variante ${auf ? "auf" : ""}">
+      <button class="ks-var-kopf" data-aktion="hi-ks-auf" data-id="${sl}" aria-expanded="${auf}">
+        <span class="ks-var-name"><strong>${esc(v.name)}</strong>${v.neu ? `<em class="ks-neu">${esc(v.neu)}</em>` : ""}${rollen.length ? `<em class="ks-hab">${rollen.length}× im Regal</em>` : ""}</span>
+        <span class="ks-var-tags" aria-hidden="true">${tags}</span>
+        ${p !== m.p1s ? this._ksAmpelHtml(p) : ""}
+        <span class="ks-pfeil" aria-hidden="true">›</span>
+      </button>
+      ${auf ? `<div class="klapp" data-klapp="ks:${sl}"><div class="ks-var-detail">
+        <div><h5>Was ist anders</h5><p>${esc(v.was)}</p></div>
+        <div><h5>Druckhinweise</h5><p>${esc(v.druck)}</p></div>
+        ${v.unsicher ? `<p class="ks-unsicher">${this._ksUnsicherHtml(v.unsicher)} ${esc(v.unsicher)}</p>` : ""}
+        ${p !== m.p1s ? `<p class="klein">${this._ksAmpelHtml(p, true)}</p>` : ""}
+        ${this._ksRollenHtml(rollen, "Deine Rollen")}
+      </div></div>` : ""}
+    </div>`;
+  },
+
+  // ---- Fehlercodes ---------------------------------------------------------
+  _cdPasst(c, q) {
+    if (!q) return true;
+    const roh = q.replace(/[\s_-]/g, "").toLowerCase();
+    const code = (c.c + (c.auch || "")).replace(/[\s_-]/g, "").toLowerCase();
+    return (roh && code.includes(roh)) || `${c.t} ${c.tun}`.toLowerCase().includes(q.toLowerCase());
+  },
+  _hiCodesHtml() {
+    const k = this._ksZustand();
+    const anzahl = CD_GRUPPEN.reduce((s, g) => s + g.codes.length, 0);
+    return `<div class="cd-seite">
+      <div class="dr-karte cd-kopf">
+        <div class="cd-kopf-text"><h2>Fehlercodes des P1S</h2>
+          <p class="leise">${anzahl} häufige HMS- und Druckfehler-Codes, nach Bauteil sortiert. Meldungen sinngemäß übersetzt; die Liste ist eine Auswahl, nicht vollständig.</p></div>
+        <a class="knopf cd-wiki" href="${CD_WIKI}" target="_blank" rel="noopener noreferrer">📘 Bambu Lab Wiki ↗</a>
+      </div>
+      <input class="suche cd-suche" type="search" placeholder="Code oder Stichwort, z. B. 0300-0300" value="${esc(k.cdQ)}" data-ks="code-suche" aria-label="Fehlercodes durchsuchen">
+      <div id="cd-liste">${this._cdListeHtml()}</div>
+      <p class="leise klein cd-quelle">Meldungstexte aus Bambus offizieller HMS-Tabelle, Zuordnung zum P1S über das Bambu-Wiki (X1-/P1-Seiten). Ein Code mit vier Blöcken ist eine HMS-Meldung, ein kurzer Code (z. B. 0300-8004) eine Druckfehler-Meldung.</p>
+    </div>`;
+  },
+  _cdListeHtml() {
+    const k = this._ksZustand(), q = k.cdQ.trim();
+    const gruppen = CD_GRUPPEN.map((g) => ({ g, codes: g.codes.filter((c) => this._cdPasst(c, q)) })).filter((x) => x.codes.length);
+    if (!gruppen.length) return `<div class="dr-karte"><p class="leise">Kein passender Code. Im Bambu Lab Wiki (oben) gibt es die vollständige Liste.</p></div>`;
+    return `<div class="cd-gruppen">${gruppen.map(({ g, codes }) => {
+      const auf = !!q || !!k.cdAuf[g.id];
+      return `<section class="cd-gruppe ${auf ? "auf" : ""}" data-einmal="cd-${g.id}">
+        <button class="cd-gruppe-kopf" data-aktion="hi-cd-auf" data-id="${g.id}" aria-expanded="${auf}">
+          <span class="cd-icon" aria-hidden="true">${g.icon}</span><strong>${esc(g.name)}</strong><span class="cd-anzahl">${codes.length}</span><span class="ks-pfeil" aria-hidden="true">›</span></button>
+        ${auf ? `<div class="klapp" data-klapp="cd:${g.id}"><div class="cd-codes">${codes.map((c) => `<div class="cd-code">
+          <div class="cd-code-kopf"><code>${esc(c.c)}</code>${c.kurz ? `<span class="cd-art">Druckfehler</span>` : ""}${c.auch ? `<small class="leise">${esc(c.auch)}</small>` : ""}</div>
+          <p class="cd-text">${esc(c.t)}</p>
+          <p class="cd-tun"><span>Was tun</span>${esc(c.tun)}</p></div>`).join("")}</div></div>` : ""}
+      </section>`;
+    }).join("")}</div>`;
+  },
+
+  // ---- Ereignisse ----------------------------------------------------------
+  _ksKlick(a, el) {
+    const k = this._ksZustand(), id = el.dataset.id;
+    switch (a) {
+      case "hi-ks-filter": k.filter = k.filter === id ? "" : id; break;
+      case "hi-ks-zuruecksetzen": k.filter = ""; k.q = ""; break;
+      case "hi-ks-auf": this._klappen(`ks:${id}`, !!k.auf[id], () => { k.auf[id] = !k.auf[id]; }); return;
+      case "hi-cd-auf": if (k.cdQ.trim()) return;   // bei Suche sind alle Treffer offen
+        this._klappen(`cd:${id}`, !!k.cdAuf[id], () => { k.cdAuf[id] = !k.cdAuf[id]; }); return;
+      default: return;
+    }
+    this._zeichnen();
+  },
+  // Suchfelder: nur die Liste neu zeichnen, damit das Feld den Fokus behält
+  _ksEingabe(t) {
+    const art = t.dataset && t.dataset.ks;
+    if (!art) return false;
+    const k = this._ksZustand();
+    if (art === "suche") {
+      k.q = t.value;
+      const box = this.shadowRoot.getElementById("ks-liste");
+      if (box) box.innerHTML = this._ksListeHtml();
+    } else if (art === "code-suche") {
+      k.cdQ = t.value;
+      const box = this.shadowRoot.getElementById("cd-liste");
+      if (box) box.innerHTML = this._cdListeHtml();
+    }
+    return true;
+  },
+};
+
+// ============================================================================
+// Start: die wichtigsten aktuellen Infos auf einen Blick, jede Kachel führt zu den Details
+// ============================================================================
+// Hinweise anderer Bereiche (Druck passt nicht auf die Rolle, Raumklima, Trocknen) werden
+// nur benutzt, wenn es die Funktionen gibt. Ein Fehler darin legt die Übersicht nicht lahm.
+const ST_ZUSTAND = {
+  aus: ["Aus", "leise"], startet: ["Startet …", "amber"], offline: ["Nicht erreichbar", "leise"],
+};
+
+// Rückgabe fremder Hinweis-Funktionen vereinheitlichen: String, Objekt oder Liste davon
+function stHinweise(x, std) {
+  if (!x) return [];
+  if (Array.isArray(x)) return x.flatMap((y) => stHinweise(y, std));
+  if (typeof x === "string") return [{ ...std, text: x }];
+  if (typeof x === "object") {
+    const t = x.text || x.titel || x.meldung || x.hinweis;
+    return t ? [{ ...std, text: String(t), stufe: x.stufe || std.stufe }] : [];
+  }
+  return [];
+}
+
+const StartAnsicht = {
+  // Fremde Hilfsfunktion aufrufen, ohne dass ein Fehler darin die Seite stört
+  _stVersuch(f) {
+    try { return f(); } catch (e) { console.warn("Filament-Werkstatt Übersicht:", e); return null; }
+  },
+
+  _stHtml() {
+    const warn = this._stWarnungen();
+    const stunde = new Date().getHours();
+    const gruss = stunde < 5 ? "Gute Nacht" : stunde < 11 ? "Guten Morgen" : stunde < 18 ? "Guten Tag" : "Guten Abend";
+    const datum = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+    const rot = warn.filter((w) => w.stufe === "rot").length;
+    const kachel = [
+      this._stDruckerHtml(),
+      this._stWarnHtml(warn),
+      this._stErinnerungHtml(),
+      this._stGeladenHtml(),
+      this._stSchlangeHtml(),
+      this._stWenigHtml(),
+      this._stLetzteHtml(),
+      this._stKlimaHtml(),
+      this._stEinkaufHtml(),
+      this._stWartungHtml(),
+      this._stShopHtml(),
+    ].filter(Boolean);
+    return `<div class="st-seite">
+      <header class="st-kopf"><div><h2>${gruss}</h2><p class="leise">${esc(datum)}</p></div>
+        <span class="pille ${rot ? "rot" : warn.length ? "amber" : "mint"} st-lage">${warn.length ? `${warn.length} ${warn.length === 1 ? "Hinweis" : "Hinweise"}` : "✓ Alles im grünen Bereich"}</span></header>
+      <div class="st-raster">${kachel.join("")}</div></div>`;
+  },
+
+  // Kachelrahmen: die ganze Kachel ist ein Link, Knöpfe darin haben eigene Ziele
+  _stKachel(klasse, ziel, titel, inhalt, zusatz = "") {
+    const attr = Object.entries(ziel).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
+    return `<section class="st-kachel ${klasse}" ${attr} role="link" tabindex="0" data-einmal="st-${klasse.split(" ")[0]}">
+      <header class="st-kachel-kopf"><h3>${titel}</h3>${zusatz}<span class="st-pfeil" aria-hidden="true">›</span></header>${inhalt}</section>`;
+  },
+
+  // ---- Drucker ----
+  _stDruckerHtml() {
+    return this._stKachel("st-drucker", { aktion: "st-zu", ziel: "drucker" }, "🖨️ Drucker", `<div id="st-drucker">${this._stDruckerInhalt()}</div>`);
+  },
+  _stDruckerInhalt() {
+    const zustand = this._drZustand();
+    const [text, farbe] = DR_STATUS[zustand] || ST_ZUSTAND[zustand] || [zustand, "leise"];
+    const druckt = ["running", "pause", "prepare", "slicing"].includes(zustand);
+    const fortschritt = this._drZ("fortschritt") || 0;
+    const restH = this._drZ("rest_h");
+    const ende = this._drW("ende");
+    const bild = druckt && this._drS("titelbild");
+    const bildUrl = bild && bild.attributes && bild.attributes.entity_picture;
+    const name = this._drW("name");
+    const restText = restH == null ? "–" : restH >= 1 ? `${Math.floor(restH)} h ${Math.round((restH % 1) * 60)} min` : `${Math.round(restH * 60)} min`;
+    const endeText = ende && !isNaN(new Date(ende)) ? new Date(ende).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "–";
+    const ring = druckt || zustand === "finish" ? fortschritt : 0;
+    const fehler = this._drW("hms") === "on" || this._drW("fehler") === "on";
+    const titel = druckt || zustand === "finish" || zustand === "failed" ? name || "Druck"
+      : zustand === "aus" ? "Drucker ist aus" : zustand === "offline" ? "Keine Verbindung" : zustand === "startet" ? "Drucker startet" : "Bereit zum Drucken";
+    return `<div class="st-dr">
+      <div class="st-ring">${ringSvg(ring, farbe === "rot" ? "var(--rot)" : farbe === "amber" ? "var(--amber)" : "var(--mint)")}
+        <div class="st-ring-text"><strong>${druckt || zustand === "finish" ? `${zahl(fortschritt)} %` : zustand === "aus" ? "⏻" : "–"}</strong></div></div>
+      <div class="st-dr-text">
+        <span class="pille ${farbe}">${esc(text)}</span>
+        <strong class="st-dr-name" title="${esc(titel)}">${esc(titel)}</strong>
+        ${druckt ? `<div class="st-werte"><div><span>Restzeit</span><strong>${restText}</strong></div><div><span>Fertig um</span><strong>${endeText}</strong></div></div>`
+          : `<small class="leise">${zustand === "aus" ? "Steckdose ist ausgeschaltet." : zustand === "finish" ? "Druck ist fertig." : "Kein Druck läuft."}</small>`}
+        ${fehler ? `<small class="rot">⚠️ Der Drucker meldet einen Fehler.</small>` : ""}
+      </div>
+      ${bildUrl ? `<img class="st-titelbild" src="${esc(bildUrl)}" alt="Titelbild des Drucks">` : ""}
+    </div>`;
+  },
+  // Live: Druckerkachel höchstens alle 2 s neu füllen, wenn die Übersicht offen ist
+  _stHassNeu() {
+    if (this._ansicht !== "start" || !this._daten || this._modus || this._dialog || this._ddOffen || this._stTimer) return;
+    this._stTimer = setTimeout(() => {
+      this._stTimer = null;
+      const el = this.shadowRoot.getElementById("st-drucker");
+      if (el && this._ansicht === "start") el.innerHTML = this._stDruckerInhalt();
+    }, 2000);
+  },
+
+  // ---- Hinweise aus allen Bereichen ----
+  _stWarnungen() {
+    const l = [];
+    const d = this._daten;
+    if (this._drW("hms") === "on" || this._drW("fehler") === "on") l.push({ icon: "⚠️", text: "Der Drucker meldet einen Fehler.", stufe: "rot", aktion: "st-zu", ziel: "drucker" });
+    if (this._drVerlauf) for (const x of this._buOffene()) {
+      l.push(x.status === "failed"
+        ? { icon: "⛔", text: `„${x.name}“ wurde abgebrochen: Fehldruck verbuchen?`, stufe: "rot", aktion: "bu-start", uid: x.uid, ergebnis: "fehl" }
+        : { icon: "✅", text: `„${x.name}“ ist fertig: Verbrauch verbuchen${x.gewicht != null ? ` (${zahl(x.gewicht, 1)} g)` : ""}`, stufe: "amber", aktion: "bu-start", uid: x.uid });
+    }
+    l.push(...stHinweise(this._stVersuch(() => this._druckWarnung?.()), { icon: "🧵", stufe: "rot", aktion: "st-zu", ziel: "drucker" }));
+    const klima = this._stVersuch(() => this._raumklima?.());
+    if (klima) l.push(...stHinweise(klima.warnungen, { icon: "💧", stufe: "amber", aktion: "st-zu", ziel: "drucker" }));
+    for (const r of d.rollen) {
+      if (r.achtung) l.push({ icon: "❗", text: `${r.name}: nach Fehldruck testen`, stufe: "rot", aktion: "oeffnen-filament", id: r.id });
+      if (this._feuchteHinweis) {
+        for (const h of stHinweise(this._stVersuch(() => this._feuchteHinweis(r)), { icon: "♨️", stufe: "", aktion: "oeffnen-filament", id: r.id })) {
+          l.push({ ...h, text: `${r.name}: ${h.text}`, stufe: h.stufe || "leise" });
+        }
+      }
+    }
+    for (const w of this._wsWartung().filter((x) => x.faellig)) l.push({ icon: "🔧", text: `Wartung fällig: ${w.a.name}`, stufe: "amber", aktion: "such-werkstatt", tab: "wartung" });
+    const rang = { rot: 0, amber: 1 };
+    return l.sort((a, b) => (rang[a.stufe] ?? 2) - (rang[b.stufe] ?? 2));
+  },
+  _stWarnHtml(l) {
+    const inhalt = l.length
+      ? `<div class="st-liste">${l.slice(0, 7).map((w) => `<button class="st-warn ${w.stufe || ""}" data-aktion="${w.aktion}" ${["ziel", "uid", "id", "tab", "ergebnis"].filter((k) => w[k]).map((k) => `data-${k}="${esc(w[k])}"`).join(" ")}>
+          <span class="st-warn-icon">${w.icon}</span><span>${esc(w.text)}</span><i>›</i></button>`).join("")}</div>
+        ${l.length > 7 ? `<small class="leise">und ${l.length - 7} weitere</small>` : ""}`
+      : `<div class="st-ruhe"><span>✓</span><small class="leise">Nichts zu tun: alles verbucht, keine Wartung fällig.</small></div>`;
+    return `<section class="st-kachel st-warnungen ${l.some((w) => w.stufe === "rot") ? "rot-rand" : ""}" data-einmal="st-warnungen">
+      <header class="st-kachel-kopf"><h3>🔔 Hinweise</h3>${l.length ? `<span class="zahl-punkt ${l.some((w) => w.stufe === "rot") ? "rot-punkt" : "amber-punkt"}">${l.length}</span>` : ""}</header>${inhalt}</section>`;
+  },
+
+  // ---- Fällige Erinnerungen aus dem Notizbuch ----
+  _stErinnerungHtml() {
+    const l = this._nbFaellig();
+    if (!l.length) return "";
+    const heute = this._nbHeute();
+    return this._stKachel("st-erinnerung", { aktion: "st-zu", ziel: "notiz", nb: "erinnerung" }, "⏰ Erinnerungen", `<div class="st-liste">${l.slice(0, 4).map((e) => `
+      <div class="st-zeile"><button class="nb-haken" data-aktion="st-erledigt" data-id="${esc(e.id)}" aria-label="Erledigt: ${esc(e.text)}"></button>
+        <span class="st-zeile-text"><strong>${esc(e.text)}</strong><small class="${e.faellig < heute ? "rot" : "amber"}">${e.faellig < heute ? `überfällig seit ${this._nbDatum(e.faellig)}` : "heute fällig"}</small></span></div>`).join("")}</div>
+      ${l.length > 4 ? `<small class="leise">und ${l.length - 4} weitere</small>` : ""}`, `<span class="zahl-punkt amber-punkt">${l.length}</span>`);
+  },
+
+  // ---- Geladene Rolle ----
+  _stGeladenHtml() {
+    const r = this._drGeladen();
+    if (!r) return this._stKachel("st-geladen", { aktion: "st-zu", ziel: "drucker" }, "🧵 Geladen", `<div class="st-rolle"><span class="dr-fil-leer">∅</span><span><strong>Kein Filament geladen</strong><small class="leise">Im Drucker-Bereich wählen</small></span></div>`);
+    const p = prozent(r);
+    return this._stKachel("st-geladen", { aktion: "oeffnen-filament", id: r.id }, "🧵 Geladen", `<div class="st-rolle">${spuleSvg(r)}
+      <span><strong>${esc(r.name)}</strong><small class="leise">${esc(r.hersteller)} · ${esc(sorteName(r))}</small>
+        <span class="st-gramm ${r.rest_g == null ? "leise" : p <= 10 ? "rot" : p <= 20 ? "amber" : "mint"}">${r.rest_g == null ? "nicht gewogen" : `${zahl(r.rest_g)} g übrig`}</span></span></div>`);
+  },
+
+  // ---- Warteschlange: die nächsten drei ----
+  _stSchlangeHtml() {
+    const l = this._wsBestand();
+    const text = { ok: ["reicht", "mint"], knapp: ["knapp", "amber"], fehlt: ["reicht nicht", "rot"], ungewogen: ["nicht gewogen", "amber"], unbekannt: ["?", "leise"], ohne: ["keine Rolle", "amber"] };
+    const inhalt = l.length ? `<ol class="st-schlange">${l.slice(0, 3).map((x) => { const [t, f] = text[x.stufe] || ["", "leise"];
+      return `<li><span class="st-nr">${l.indexOf(x) + 1}</span><span class="st-zeile-text"><strong>${esc(x.a.name)}</strong><small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${x.r ? ` · ${esc(x.r.name)}` : ""}</small></span><span class="pille ${f}">${t}</span></li>`; }).join("")}</ol>
+      ${l.length > 3 ? `<small class="leise">und ${l.length - 3} weitere</small>` : ""}`
+      : `<p class="leise klein">Nichts geplant. Aufträge kommen aus dem 3D-Viewer oder der Bibliothek.</p>`;
+    return this._stKachel("st-schlange-k", { aktion: "st-zu", ziel: "werkstatt", tab: "schlange" }, "📋 Warteschlange", inhalt, l.length ? `<span class="zahl-punkt">${l.length}</span>` : "");
+  },
+
+  // ---- Wenig Filament ----
+  _stWenigHtml() {
+    const l = this._daten.rollen.filter((r) => r.rest_g != null && r.rest_g < FAST_LEER_G).sort((a, b) => a.rest_g - b.rest_g);
+    const inhalt = l.length ? `<div class="st-rollen">${l.slice(0, 4).map((r) => `<button class="st-rollen-zeile" data-aktion="oeffnen-filament" data-id="${esc(r.id)}">
+        <span class="farbtupfer" style="background:${r.hex === "transparent" ? "transparent" : esc(r.hex)}"></span><span class="st-zeile-text"><strong>${esc(r.name)}</strong><small class="leise">${esc(r.hersteller)}</small></span>
+        <span class="${r.rest_g < FAST_LEER_G / 3 ? "rot" : "amber"} st-g">${zahl(r.rest_g)} g</span></button>`).join("")}</div>
+      ${l.length > 4 ? `<small class="leise">und ${l.length - 4} weitere</small>` : ""}`
+      : `<p class="leise klein">Alle gewogenen Rollen haben mehr als ${FAST_LEER_G} g.</p>`;
+    return this._stKachel("st-wenig", { aktion: "st-zu", ziel: "filament", status: "leer" }, "🪫 Fast leer", inhalt, l.length ? `<span class="zahl-punkt amber-punkt">${l.length}</span>` : "");
+  },
+
+  // ---- Letzte Drucke mit Foto ----
+  _stLetzteHtml() {
+    if (!this._drVerlauf) return this._stKachel("st-letzte", { aktion: "st-zu", ziel: "werkstatt", tab: "bibliothek" }, "📸 Letzte Drucke", `<p class="leise klein">Lade Druckverlauf …</p>`);
+    const l = this._buAlle().filter((d) => d.status !== "laeuft").slice(0, 3);
+    if (this._drFotos === undefined) setTimeout(() => this._drFotosLaden(), 0);
+    const inhalt = l.length ? `<div class="st-fotos">${l.map((d) => {
+      const f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+      const g = this._buExtra(d.uid).gebucht;
+      const fehl = (g && g.ergebnis === "fehl") || d.status === "failed";
+      return `<button class="st-foto" data-aktion="zum-druck" data-uid="${esc(d.uid)}" title="${esc(d.name)}">
+        <span class="st-foto-bild" data-foto="${esc(f || "")}">${foto ? `<img src="${esc(foto)}" alt="" loading="lazy">` : "🧊"}</span>
+        <strong>${esc(d.name)}</strong><small class="${fehl ? "rot" : "leise"}">${fehl ? "Fehldruck · " : ""}${esc((d.zeit || "").split(" ")[0])}</small></button>`; }).join("")}</div>`
+      : `<p class="leise klein">Noch keine Drucke aufgezeichnet.</p>`;
+    return this._stKachel("st-letzte", { aktion: "st-zu", ziel: "werkstatt", tab: "bibliothek" }, "📸 Letzte Drucke", inhalt);
+  },
+
+  // ---- Raumklima (nur wenn ein Bereich es liefert) ----
+  _stKlimaHtml() {
+    const k = this._stVersuch(() => this._raumklima?.());
+    if (!k || (k.temp == null && k.feuchte == null)) return "";
+    const w = stHinweise(k.warnungen, { stufe: "amber" });
+    const feuchtFarbe = k.feuchte == null ? "" : k.feuchte > 60 ? "rot" : k.feuchte > 45 ? "amber" : "mint";
+    return this._stKachel("st-klima", { aktion: "st-zu", ziel: "drucker" }, "🌡️ Raumklima", `<div class="st-werte st-gross">
+      <div><span>Temperatur</span><strong>${k.temp == null ? "–" : `${zahl(Number(k.temp), 1)} °C`}</strong></div>
+      <div><span>Luftfeuchte</span><strong class="${feuchtFarbe}">${k.feuchte == null ? "–" : `${zahl(Number(k.feuchte))} %`}</strong></div></div>
+      ${w.length ? `<small class="amber">${esc(w[0].text)}</small>` : `<small class="leise">Gut für offenes Filament.</small>`}`);
+  },
+
+  // ---- Einkaufsliste ----
+  _stEinkaufHtml() {
+    const l = this._wsEinkauf();
+    const dringend = l.filter((x) => x.dringend).length;
+    return this._stKachel("st-einkauf", { aktion: "st-zu", ziel: "werkstatt", tab: "einkauf" }, "🛒 Einkaufsliste", `<div class="st-zahl"><strong class="${dringend ? "rot" : l.length ? "amber" : "mint"}">${l.length}</strong>
+      <span class="leise">${l.length ? `${l.length === 1 ? "Eintrag" : "Einträge"}${dringend ? `, ${dringend} dringend` : ""}` : "Nichts nachzukaufen"}</span></div>
+      ${l.length ? `<small class="leise st-kurz">${esc(l.slice(0, 3).map((x) => x.titel).join(" · "))}</small>` : ""}`);
+  },
+
+  // ---- Wartung ----
+  _stWartungHtml() {
+    const l = this._wsWartung();
+    const faellig = l.filter((x) => x.faellig);
+    const naechste = l.find((x) => !x.neu && !x.faellig);
+    return this._stKachel("st-wartung", { aktion: "st-zu", ziel: "werkstatt", tab: "wartung" }, "🔧 Wartung", `<div class="st-zahl"><strong class="${faellig.length ? "amber" : "mint"}">${faellig.length || "✓"}</strong>
+      <span class="leise">${faellig.length ? `${faellig.length === 1 ? "Aufgabe" : "Aufgaben"} fällig` : "Nichts fällig"}</span></div>
+      <small class="leise st-kurz">${faellig.length ? esc(faellig.map((x) => x.a.name).join(" · ")) : naechste ? `Als Nächstes: ${esc(naechste.a.name)} (${zahl(Math.min(100, naechste.anteil * 100))} %)` : "Wartung erfassen: Werkstatt › Wartung"}</small>`);
+  },
+
+  // ---- Offene Shop-Aufträge (wenn der Shop sie führt) ----
+  _stShopHtml() {
+    const a = this._daten.shop && this._daten.shop.auftraege;
+    if (!Array.isArray(a)) return "";
+    const fertig = (x) => x && (x.erledigt || x.bezahlt && x.versendet || ["erledigt", "fertig", "versendet", "abgeschlossen", "storniert"].includes(x.status));
+    const offen = a.filter((x) => !fertig(x));
+    return this._stKachel("st-shop", { aktion: "st-zu", ziel: "shop" }, "🛍️ Aufträge", `<div class="st-zahl"><strong class="${offen.length ? "amber" : "mint"}">${offen.length}</strong><span class="leise">${offen.length === 1 ? "offener Auftrag" : "offene Aufträge"}</span></div>
+      ${offen.length ? `<small class="leise st-kurz">${esc(offen.slice(0, 3).map((x) => x.name || x.titel || x.kunde || "Auftrag").join(" · "))}</small>` : ""}`);
+  },
+
+  // ---- Ereignisse ----
+  _stKlick(a, el) {
+    switch (a) {
+      case "st-zu": {
+        if (!this._schliessen()) return;
+        const ziel = el.dataset.ziel;
+        this._ansicht = ziel;
+        this._sucheOffen = false; this._mehrOffen = false; this._filterAuf = false;
+        if (ziel === "werkstatt") {
+          this._wsZustand().tab = el.dataset.tab || "schlange";
+          if (["bibliothek", "fehl"].includes(this._ws.tab)) this._wsFotos();
+        }
+        if (ziel === "filament" && el.dataset.status) { this._f = { sorte: "", hersteller: "", farbe: "", status: el.dataset.status }; this._suche = ""; }
+        if (ziel === "notiz") { const n = this._nbZustand(); n.quelle = el.dataset.nb || "alle"; n.edit = null; }
+        // Neue Ansicht oben beginnen, nicht an der Scrollstelle der Übersicht
+        this._zeichnen();
+        { const h = this.shadowRoot.querySelector(".haupt"); if (h) h.scrollTop = 0; }
+        return;
+      }
+      case "st-erledigt": {
+        const e = (this._daten.erinnerungen || []).find((x) => x.id === el.dataset.id);
+        if (!e) return;
+        e.erledigt = true; e.erledigt_am = new Date().toISOString();
+        this._speichern();
+        this._toast(`Erledigt: ${e.text}`);
+        return;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+};
+
+// ============================================================================
+// Shop: Preisrechner, Produkte, Aufträge, Kleinunternehmer-Grenze, Düsenvergleich
+// ============================================================================
+const ShopAnsicht = {
+  _shHtml() { return `<div class="karte"><h2>Shop</h2><p class="leise">Kommt gleich.</p></div>`; },
+  _shKlick(a, el) { this._zeichnen(); },
+};
+
+// ============================================================================
+// Notizbuch: alle Notizen an einem Ort (Rollen, Fehldrucke, Drucke) plus eigene Einträge und Erinnerungen
+// ============================================================================
+// Gesammelte Notizen bleiben an ihrem Ursprung gespeichert, Bearbeiten hier ändert das Original:
+//   Filament   rolle.notiz
+//   Drucke     daten.drucke[uid].kommentar (Fehldruck: zusätzlich die Antworten aus daten.drucke[uid].fehl)
+//   Wartung    daten.wartung.notizen[aufgabeId]
+// Eigene Einträge:  daten.notizen     = [{ id, titel, text, tags: [], link: { art: "rolle"|"druck"|"modell", id }, am, geaendert }]
+// Erinnerungen:     daten.erinnerungen = [{ id, text, faellig: "JJJJ-MM-TT", erledigt, erledigt_am, link, am }]
+const NB_QUELLEN = [
+  { id: "alle", name: "Alle", icon: "📓" },
+  { id: "eigen", name: "Eigene", icon: "✍️" },
+  { id: "filament", name: "Filament", icon: "🧵" },
+  { id: "fehl", name: "Fehldrucke", icon: "💥" },
+  { id: "druck", name: "Drucke", icon: "🖨️" },
+  { id: "wartung", name: "Wartung", icon: "🔧" },
+  { id: "erinnerung", name: "Erinnerungen", icon: "⏰" },
+];
+
+const NotizAnsicht = {
+  _nbZustand() {
+    if (!this._nb) this._nb = { quelle: "alle", suche: "", edit: null };
+    return this._nb;
+  },
+  // Datum als JJJJ-MM-TT in Ortszeit
+  _nbHeute(plusTage = 0) {
+    const d = new Date(Date.now() + plusTage * 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  },
+  _nbDatum(tag) {
+    if (!tag) return "";
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(tag) ? new Date(`${tag}T12:00:00`) : new Date(tag);
+    return isNaN(d) ? "" : d.toLocaleDateString("de-DE", { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+  },
+  // Offene Erinnerungen, die heute oder früher fällig sind (für die Startseite)
+  _nbFaellig() {
+    const heute = this._nbHeute();
+    return (this._daten.erinnerungen || []).filter((e) => !e.erledigt && e.faellig && e.faellig <= heute).sort((a, b) => a.faellig.localeCompare(b.faellig));
+  },
+
+  // Ziel einer Verknüpfung als Knopf-Attribute
+  _nbLinkZiel(l) {
+    if (!l || !l.art) return null;
+    if (l.art === "rolle") {
+      const r = this._daten.rollen.find((x) => x.id === l.id);
+      return r ? { attr: `data-aktion="oeffnen-filament" data-id="${esc(r.id)}"`, text: r.name, icon: "🧵" } : null;
+    }
+    if (l.art === "druck") {
+      const d = this._buAlle().find((x) => x.uid === l.id);
+      const x = this._buExtra(l.id);
+      const name = (d && d.name) || x.name || (x.hand && x.hand.name);
+      return name || this._drVerlauf ? { attr: `data-aktion="zum-druck" data-uid="${esc(l.id)}"`, text: name || "Druck", icon: "🖨️" } : null;
+    }
+    if (l.art === "modell") return { attr: `data-aktion="nb-modell" data-id="${esc(l.id)}"`, text: l.id, icon: "🧊" };
+    if (l.art === "wartung") return { attr: `data-aktion="such-werkstatt" data-tab="wartung"`, text: "Wartung", icon: "🔧" };
+    return null;
+  },
+
+  // Alle Notizen aus allen Quellen in einer Form
+  _nbAlle() {
+    const d = this._daten, l = [];
+    for (const n of d.notizen || []) {
+      l.push({ key: `eigen:${n.id}`, quelle: "eigen", titel: n.titel || "Ohne Titel", text: n.text || "", tags: n.tags || [], link: n.link, am: n.geaendert || n.am, loeschbar: true });
+    }
+    for (const e of d.erinnerungen || []) {
+      l.push({ key: `erinnerung:${e.id}`, quelle: "erinnerung", titel: e.text, text: "", tags: [], link: e.link, am: e.am, erinnerung: e, loeschbar: true });
+    }
+    for (const r of d.rollen) {
+      if (!(r.notiz || "").trim()) continue;
+      l.push({ key: `rolle:${r.id}`, quelle: "filament", titel: r.name, unter: `${r.hersteller} · ${sorteName(r)}`, text: r.notiz, tags: [], link: { art: "rolle", id: r.id }, am: r.gewogen_am || r.angelegt_am, hex: r.hex });
+    }
+    const verlauf = new Map(this._buAlle().map((x) => [x.uid, x]));
+    for (const [uid, x] of Object.entries(d.drucke || {})) {
+      const fehl = !!x.fehl || (x.gebucht && x.gebucht.ergebnis === "fehl");
+      if (!(x.kommentar || "").trim() && !x.fehl) continue;
+      const v = verlauf.get(uid);
+      const name = (v && v.name) || x.name || (x.hand && x.hand.name) || "Druck";
+      const rolle = x.gebucht && d.rollen.find((r) => r.id === x.gebucht.rolle);
+      l.push({ key: `druck:${uid}`, quelle: fehl ? "fehl" : "druck", titel: name, unter: [v && v.zeit, rolle && rolle.name].filter(Boolean).join(" · "),
+        text: x.kommentar || "", tags: [], link: { art: "druck", id: uid }, am: (v && v.start) || (x.gebucht && x.gebucht.am) || x.start, fehl: x.fehl });
+    }
+    const wn = (d.wartung && d.wartung.notizen) || {};
+    for (const a of WARTUNG_AUFGABEN) {
+      l.push({ key: `wartung:${a.id}`, quelle: "wartung", titel: a.name, unter: `alle ${a.alle_h} h oder ${a.alle_tage} Tage`, text: wn[a.id] || "", tags: [], link: { art: "wartung" },
+        am: (((d.wartung && d.wartung.aufgaben) || {})[a.id] || {}).am, leerErlaubt: true });
+    }
+    return l;
+  },
+  _nbGefiltert() {
+    const z = this._nbZustand();
+    let l = this._nbAlle();
+    // Leere Wartungsnotizen nur im Wartungs-Filter (zum Anlegen), sonst stören sie
+    if (z.quelle !== "wartung") l = l.filter((x) => !x.leerErlaubt || x.text.trim());
+    if (z.quelle !== "alle") l = l.filter((x) => x.quelle === z.quelle);
+    const q = z.suche.trim().replace(/^#/, "");
+    if (q) l = l.filter((x) => suchPunkte(q, `${x.titel} ${x.unter || ""} ${x.text} ${x.tags.join(" ")} ${this._nbFehlText(x.fehl)}`) > 0);
+    // Offene Erinnerungen zuerst (nach Fälligkeit), dann Neuestes, erledigte am Ende
+    const rang = (x) => (x.erinnerung ? (x.erinnerung.erledigt ? 2 : 0) : 1);
+    return l.sort((a, b) => rang(a) - rang(b)
+      || (rang(a) === 0 ? (a.erinnerung.faellig || "9").localeCompare(b.erinnerung.faellig || "9") : 0)
+      || String(b.am || "").localeCompare(String(a.am || "")));
+  },
+  _nbFehlText(f) {
+    if (!f) return "";
+    return [(FEHL_FRAGEN.wann.find((w) => w.id === f.wann) || {}).name, ...(f.ursachen || []).map((id) => (fehlerbild(id) || {}).name)].filter(Boolean).join(" ");
+  },
+  _nbZaehlen() {
+    const l = this._nbAlle().filter((x) => !x.leerErlaubt || x.text.trim());
+    const z = { alle: l.length };
+    for (const x of l) z[x.quelle] = (z[x.quelle] || 0) + 1;
+    z.erinnerung = (this._daten.erinnerungen || []).filter((e) => !e.erledigt).length;
+    return z;
+  },
+
+  _nbHtml() {
+    const z = this._nbZustand();
+    const n = this._nbZaehlen();
+    const faellig = this._nbFaellig().length;
+    return `<div class="nb-seite">
+      <div class="nb-kopf">
+        <div><h2>📓 Notizbuch</h2><p class="leise">Alle Notizen an einem Ort. Änderungen landen dort, wo die Notiz herkommt.</p></div>
+        <div class="nb-knoepfe"><button class="knopf leise" data-aktion="nb-neu" data-art="erinnerung">⏰ Erinnerung</button><button class="knopf" data-aktion="nb-neu" data-art="eigen">＋ Notiz</button></div>
+      </div>
+      <div class="nb-werkzeug">
+        <div class="chips nb-chips" role="tablist">${NB_QUELLEN.map((q) => `<button class="chip ${z.quelle === q.id ? "an" : ""}" data-aktion="nb-quelle" data-id="${q.id}" role="tab" aria-selected="${z.quelle === q.id}">${q.icon} ${q.name}${n[q.id] ? ` <span class="zahl-punkt ${q.id === "erinnerung" && faellig ? "amber-punkt" : ""}">${q.id === "erinnerung" && faellig ? faellig : n[q.id]}</span>` : ""}</button>`).join("")}</div>
+        <input class="such-feld" data-nb="suche" type="search" value="${esc(z.suche)}" placeholder="Notizen durchsuchen …" aria-label="Notizen durchsuchen" autocomplete="off">
+      </div>
+      <div id="nb-liste" class="nb-liste wechsel-rein" data-einmal="nb-${z.quelle}">${this._nbListeHtml()}</div></div>`;
+  },
+  _nbListeHtml() {
+    const z = this._nbZustand();
+    const l = this._nbGefiltert();
+    const neu = z.edit && z.edit.key.endsWith(":neu") ? this._nbEditorHtml(z.edit) : "";
+    if (!l.length && !neu) {
+      const q = NB_QUELLEN.find((x) => x.id === z.quelle);
+      return `<div class="leer-karte dr-karte nb-leer"><span class="gross-icon">${z.suche ? "🔍" : q.icon}</span><strong>${z.suche ? `Nichts gefunden für „${esc(z.suche)}“` : "Hier ist noch nichts"}</strong>
+        <span class="leise">${z.suche ? "Andere Wörter oder einen anderen Filter probieren." : z.quelle === "erinnerung" ? "Erinnerungen an dich selbst, z. B. „Düse prüfen“, erscheinen am Fälligkeitstag auf der Startseite." : "Notizen zu Rollen, Drucken und Wartung tauchen hier automatisch auf."}</span></div>`;
+    }
+    return neu + l.map((x) => (z.edit && z.edit.key === x.key ? this._nbEditorHtml(z.edit) : this._nbKarteHtml(x))).join("");
+  },
+
+  _nbKarteHtml(x) {
+    const q = NB_QUELLEN.find((y) => y.id === x.quelle);
+    const ziel = this._nbLinkZiel(x.link);
+    const k = esc(x.key);
+    if (x.erinnerung) {
+      const e = x.erinnerung, heute = this._nbHeute();
+      const stand = e.erledigt ? ["erledigt", "leise"] : !e.faellig ? ["ohne Datum", "leise"] : e.faellig < heute ? [`überfällig seit ${this._nbDatum(e.faellig)}`, "rot"] : e.faellig === heute ? ["heute", "amber"] : [`fällig ${this._nbDatum(e.faellig)}`, "mint"];
+      return `<article class="nb-karte nb-erinnerung ${e.erledigt ? "erledigt" : ""} ${stand[1]}-rand" data-einmal="nb-${k}">
+        <button class="nb-haken ${e.erledigt ? "an" : ""}" data-aktion="nb-erledigt" data-key="${k}" aria-label="${e.erledigt ? "Wieder öffnen" : "Erledigt"}">${e.erledigt ? "✓" : ""}</button>
+        <div class="nb-inhalt"><strong class="nb-titel">${esc(e.text)}</strong>
+          <div class="nb-meta"><span class="pille ${stand[1]}">⏰ ${esc(stand[0])}</span>${ziel ? `<button class="chip nb-link" ${ziel.attr}>${ziel.icon} ${esc(ziel.text)} ›</button>` : ""}</div></div>
+        <div class="nb-aktionen"><button class="rund" data-aktion="nb-bearbeiten" data-key="${k}" aria-label="Bearbeiten">✎</button><button class="rund" data-aktion="nb-loeschen" data-key="${k}" aria-label="Löschen">🗑</button></div>
+      </article>`;
+    }
+    const f = x.fehl;
+    const antworten = f ? [
+      f.wann && ["Wann", (FEHL_FRAGEN.wann.find((w) => w.id === f.wann) || {}).name],
+      f.bilder && f.bilder.length && ["Aussehen", f.bilder.map((id) => (fehlerbild(id) || {}).name).filter(Boolean).join(", ")],
+      ...FEHL_FRAGEN.extra.filter((q2) => f.extra && f.extra[q2.id]).map((q2) => [q2.frage, f.extra[q2.id] === "?" ? "weiß nicht" : f.extra[q2.id]]),
+      f.ursachen && f.ursachen.length && ["Ursachen", f.ursachen.map((id) => (fehlerbild(id) || {}).name).filter(Boolean).join(", ")],
+      f.geaendert && f.geaendert.length && ["Geändert", f.geaendert.join(", ")],
+    ].filter((y) => y && y[1]) : [];
+    return `<article class="nb-karte q-${x.quelle}" data-einmal="nb-${k}">
+      <header class="nb-karte-kopf"><span class="nb-quelle">${x.hex ? `<span class="farbtupfer klein-tupfer" style="background:${x.hex === "transparent" ? "transparent" : esc(x.hex)}"></span>` : q.icon} ${q.name}</span>
+        ${x.am ? `<small class="leise">${esc(this._nbDatum(x.am))}</small>` : ""}</header>
+      <strong class="nb-titel">${esc(x.titel)}</strong>${x.unter ? `<small class="leise nb-unter">${esc(x.unter)}</small>` : ""}
+      ${x.text.trim() ? `<p class="nb-text">${esc(x.text)}</p>` : x.leerErlaubt || x.fehl ? `<p class="nb-text leise">${x.fehl ? "Noch kein Kommentar." : "Noch keine Notiz."}</p>` : ""}
+      ${antworten.length ? `<dl class="nb-antworten">${antworten.map(([a, b]) => `<div><dt>${esc(a)}</dt><dd>${esc(b)}</dd></div>`).join("")}</dl>` : ""}
+      ${x.tags.length ? `<div class="nb-tags">${x.tags.map((t) => `<button class="nb-tag" data-aktion="nb-tag" data-id="${esc(t)}">#${esc(t)}</button>`).join("")}</div>` : ""}
+      <footer class="nb-fuss">${ziel ? `<button class="chip nb-link" ${ziel.attr}>${ziel.icon} ${esc(ziel.text)} ›</button>` : "<span></span>"}
+        <span class="nb-aktionen"><button class="rund" data-aktion="nb-bearbeiten" data-key="${k}" aria-label="Bearbeiten">✎</button>${x.loeschbar ? `<button class="rund" data-aktion="nb-loeschen" data-key="${k}" aria-label="Löschen">🗑</button>` : ""}</span></footer>
+    </article>`;
+  },
+
+  // ---- Bearbeiten (direkt in der Liste) ----
+  _nbEditorHtml(e) {
+    const art = e.key.split(":")[0];
+    const eigen = art === "eigen", erinnerung = art === "erinnerung";
+    const titel = { eigen: e.key.endsWith(":neu") ? "Neue Notiz" : "Notiz bearbeiten", erinnerung: e.key.endsWith(":neu") ? "Neue Erinnerung" : "Erinnerung bearbeiten",
+      rolle: `Notiz zu ${e.titel}`, druck: `Kommentar zu ${e.titel}`, wartung: `Wartungsnotiz: ${e.titel}` }[art];
+    let vorschlaege = "";
+    if (erinnerung && e.key.endsWith(":neu")) {
+      // Wartungsaufgaben als Vorschlag, mit dem Tag, an dem sie fällig werden
+      const auf = (this._daten.wartung && this._daten.wartung.aufgaben) || {};
+      const l = this._wsWartung().slice(0, 3).map((w) => {
+        const z = auf[w.a.id];
+        const tag = z && z.am ? new Date(new Date(z.am).getTime() + w.a.alle_tage * 86400000) : null;
+        const iso = !tag || w.faellig ? this._nbHeute() : `${tag.getFullYear()}-${String(tag.getMonth() + 1).padStart(2, "0")}-${String(tag.getDate()).padStart(2, "0")}`;
+        return `<button class="chip" data-aktion="nb-vorschlag" data-id="${esc(w.a.name)}" data-tag="${iso}">🔧 ${esc(w.a.name)}</button>`;
+      });
+      vorschlaege = `<div class="nb-vorschlaege"><small class="leise">Vorschläge aus der Wartung</small><div class="chips">${l.join("")}</div></div>`;
+    }
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const drucke = this._buAlle().slice(0, 40);
+    const modelle = this._drVerlauf ? this._wsModelle().slice(0, 40) : [];
+    const lw = e.link && e.link.art ? `${e.link.art}:${e.link.id || ""}` : "";
+    const opt = (v, t) => `<option value="${esc(v)}" ${v === lw ? "selected" : ""}>${esc(t)}</option>`;
+    const linkWahl = eigen || erinnerung ? `<label class="auswahl breit-auswahl nb-linkwahl"><span>Verknüpfen mit</span><select data-nb="link">
+        <option value="" ${lw ? "" : "selected"}>Nichts verknüpft</option>
+        <optgroup label="Rollen">${rollen.map((r) => opt(`rolle:${r.id}`, `${r.name} · ${r.hersteller}`)).join("")}</optgroup>
+        ${modelle.length ? `<optgroup label="Modelle">${modelle.map((m) => opt(`modell:${m.name}`, m.name)).join("")}</optgroup>` : ""}
+        ${drucke.length ? `<optgroup label="Drucke">${drucke.map((d) => opt(`druck:${d.uid}`, `${d.name}${d.zeit ? ` · ${d.zeit}` : ""}`)).join("")}</optgroup>` : ""}
+        ${erinnerung ? `<optgroup label="Werkstatt">${opt("wartung:", "Wartungsplan")}</optgroup>` : ""}
+      </select></label>` : "";
+    return `<article class="nb-karte nb-edit" data-einmal="nb-edit-${esc(e.key)}">
+      <strong class="nb-titel">${esc(titel)}</strong>
+      ${eigen ? `<input class="text" data-nb="titel" value="${esc(e.titel)}" placeholder="Titel" maxlength="120">` : ""}
+      ${erinnerung ? `<input class="text" data-nb="titel" value="${esc(e.titel)}" placeholder="Woran soll ich dich erinnern?" maxlength="160">${vorschlaege}
+        <label class="feld nb-datum"><span>Fällig am</span><input type="date" data-nb="faellig" value="${esc(e.faellig || "")}"></label>
+        <div class="chips nb-schnell">${[["Heute", 0], ["Morgen", 1], ["In 1 Woche", 7], ["In 1 Monat", 30]].map(([t, n]) => `<button class="chip ${e.faellig === this._nbHeute(n) ? "an" : ""}" data-aktion="nb-tag-in" data-id="${n}">${t}</button>`).join("")}</div>`
+        : `<textarea data-nb="text" rows="${eigen ? 6 : 5}" maxlength="4000" placeholder="${eigen ? "Was willst du festhalten?" : "Notiz …"}">${esc(e.text)}</textarea>`}
+      ${eigen ? `<input class="text" data-nb="tags" value="${esc(e.tags)}" placeholder="Schlagworte, mit Komma getrennt (z. B. petg, tipp)">` : ""}
+      ${linkWahl}
+      ${art === "druck" && e.fehl ? `<small class="leise">Die Antworten aus dem Fehldruck-Fragebogen bleiben erhalten.</small>` : ""}
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="nb-abbrechen">Abbrechen</button><button class="knopf" data-aktion="nb-speichern">Speichern</button></div>
+    </article>`;
+  },
+
+  _nbBearbeiten(key) {
+    const x = this._nbAlle().find((y) => y.key === key);
+    if (!x) return;
+    const e = x.erinnerung;
+    this._nbZustand().edit = { key, titel: x.titel, text: x.text, tags: x.tags.join(", "), link: x.link || null, faellig: e ? e.faellig || "" : "", fehl: !!x.fehl };
+  },
+
+  _nbSpeichern() {
+    const z = this._nbZustand(), e = z.edit;
+    if (!e) return;
+    const [art, ...rest] = e.key.split(":");
+    const id = rest.join(":");
+    const d = this._daten, jetzt = new Date().toISOString();
+    const text = (e.text || "").trim();
+    if (art === "eigen") {
+      const tags = [...new Set((e.tags || "").split(",").map((t) => t.trim().replace(/^#/, "")).filter(Boolean))];
+      const titel = (e.titel || "").trim();
+      if (!titel && !text) { this._toast("Bitte einen Titel oder Text eingeben."); return; }
+      d.notizen = d.notizen || [];
+      if (id === "neu") d.notizen.unshift({ id: `n-${Date.now().toString(36)}`, titel, text, tags, link: e.link || null, am: jetzt, geaendert: jetzt });
+      else { const n = d.notizen.find((x) => x.id === id); if (n) Object.assign(n, { titel, text, tags, link: e.link || null, geaendert: jetzt }); }
+    } else if (art === "erinnerung") {
+      const titel = (e.titel || "").trim();
+      if (!titel) { this._toast("Woran soll ich dich erinnern?"); return; }
+      d.erinnerungen = d.erinnerungen || [];
+      if (id === "neu") d.erinnerungen.push({ id: `e-${Date.now().toString(36)}`, text: titel, faellig: e.faellig || "", erledigt: false, link: e.link || null, am: jetzt });
+      else { const n = d.erinnerungen.find((x) => x.id === id); if (n) Object.assign(n, { text: titel, faellig: e.faellig || "", link: e.link || null }); }
+    } else if (art === "rolle") {
+      const r = d.rollen.find((x) => x.id === id);
+      if (r) r.notiz = text;
+    } else if (art === "druck") {
+      d.drucke = d.drucke || {};
+      d.drucke[id] = { ...(d.drucke[id] || {}), kommentar: text };
+    } else if (art === "wartung") {
+      const n = { ...((d.wartung && d.wartung.notizen) || {}) };
+      if (text) n[id] = text; else delete n[id];
+      d.wartung = { ...d.wartung, notizen: n };
+    }
+    z.edit = null;
+    this._speichern();
+    this._toast(art === "erinnerung" ? "Erinnerung gespeichert." : art === "eigen" ? "Notiz gespeichert." : "Gespeichert, auch beim Original.");
+  },
+
+  _nbListeNeu() {
+    const box = this.shadowRoot.getElementById("nb-liste");
+    if (box) box.innerHTML = this._nbListeHtml();
+  },
+  _nbFokus() {
+    setTimeout(() => {
+      const i = this.shadowRoot.querySelector('.nb-edit [data-nb="titel"], .nb-edit [data-nb="text"]');
+      if (i) { i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (e) { /* Datumsfeld */ } }
+    }, 0);
+  },
+
+  _nbKlick(a, el) {
+    const z = this._nbZustand();
+    switch (a) {
+      case "nb-quelle": z.quelle = el.dataset.id; break;
+      case "nb-neu": {
+        const art = el.dataset.art;
+        if (this._ansicht !== "notiz") { if (!this._schliessen()) return; this._ansicht = "notiz"; }
+        z.edit = { key: `${art}:neu`, titel: "", text: "", tags: "", link: null, faellig: art === "erinnerung" ? this._nbHeute(1) : "" };
+        if (z.quelle !== "alle" && z.quelle !== art) z.quelle = art;
+        z.suche = "";
+        this._zeichnen(); this._nbFokus();
+        return;
+      }
+      case "nb-bearbeiten": this._nbBearbeiten(el.dataset.key); this._zeichnen(); this._nbFokus(); return;
+      case "nb-abbrechen": z.edit = null; break;
+      case "nb-speichern": this._nbSpeichern(); return;
+      case "nb-loeschen": {
+        const [art, id] = el.dataset.key.split(":");
+        const liste = art === "eigen" ? this._daten.notizen : this._daten.erinnerungen;
+        const i = (liste || []).findIndex((x) => x.id === id);
+        if (i < 0) return;
+        if (!confirm(art === "eigen" ? "Diese Notiz löschen?" : "Diese Erinnerung löschen?")) return;
+        liste.splice(i, 1);
+        this._speichern();
+        this._toast("Gelöscht.");
+        return;
+      }
+      case "nb-erledigt": {
+        const id = el.dataset.key.split(":")[1];
+        const e = (this._daten.erinnerungen || []).find((x) => x.id === id);
+        if (!e) return;
+        e.erledigt = !e.erledigt;
+        if (e.erledigt) e.erledigt_am = new Date().toISOString(); else delete e.erledigt_am;
+        this._speichern();
+        break;
+      }
+      case "nb-tag": z.suche = el.dataset.id; break;
+      case "nb-tag-in": if (z.edit) z.edit.faellig = this._nbHeute(Number(el.dataset.id)); break;
+      case "nb-vorschlag": if (z.edit) { z.edit.titel = el.dataset.id; z.edit.faellig = el.dataset.tag; z.edit.link = { art: "wartung" }; } break;
+      case "nb-modell": {
+        if (!this._schliessen()) return;
+        this._ansicht = "werkstatt";
+        const w = this._wsZustand();
+        w.tab = "bibliothek"; w.suche = el.dataset.id;
+        this._wsFotos();
+        break;
+      }
+      default: return;
+    }
+    this._zeichnen();
+  },
+
+  // Tippen: nur den Entwurf merken bzw. die Liste filtern, nicht alles neu zeichnen
+  _nbEingabe(t) {
+    const k = t.dataset && t.dataset.nb;
+    if (!k) return false;
+    const z = this._nbZustand();
+    if (k === "suche") {
+      z.suche = t.value;
+      clearTimeout(this._nbSuchTimer);
+      this._nbSuchTimer = setTimeout(() => this._nbListeNeu(), 80);
+    } else if (z.edit && ["titel", "text", "tags", "faellig"].includes(k)) {
+      z.edit[k] = t.value;
+      if (k === "faellig") this.shadowRoot.querySelectorAll('[data-aktion="nb-tag-in"]').forEach((c) => c.classList.toggle("an", this._nbHeute(Number(c.dataset.id)) === t.value));
+    }
+    return true;
+  },
+  _nbAenderung(t) {
+    const k = t.dataset && t.dataset.nb;
+    if (!k) return false;
+    const z = this._nbZustand();
+    if (k === "link" && z.edit) {
+      const v = t.value, i = v.indexOf(":");
+      z.edit.link = v ? { art: v.slice(0, i), id: v.slice(i + 1) } : null;
+      this._zeichnen();
+    }
+    return true;
+  },
+};
 // ---------------------------------------------------------------------------
 // Die Seite selbst: ein Web-Component, das Home Assistant als Panel lädt.
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.11.2";
+const VERSION = "0.12.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
 const DRUCKER_WICHTIG = ["status", "name", "gewicht", "laenge", "duese_ziel", "bett_ziel", "start", "fortschritt", "duese_mm", "duese", "bett"];
 
 const NAVIGATION = [
+  { id: "start", name: "Start", icon: "🏠" },
   { id: "filament", name: "Filament", icon: "🧵" },
   { id: "inventar", name: "Inventar", icon: "🔩" },
   { id: "drucker", name: "Drucker", icon: "🖨️" },
   { id: "modelle", name: "3D-Modelle", kurz: "3D", icon: "🧊" },
   { id: "werkstatt", name: "Werkstatt", icon: "🧰" },
   { id: "hilfe", name: "Hilfe", icon: "💡" },
-  { id: "nerd", name: "Nerd", icon: "🤓" },
-  { id: "system", name: "System", icon: "⚙️" },
+  { id: "notiz", name: "Notizbuch", kurz: "Notizen", icon: "📓" },
+  { id: "nerd", name: "Nerd", icon: "🤓", nurIcon: true },
+  { id: "system", name: "System", icon: "⚙️", nurIcon: true },
 ];
 // Handy: diese Bereiche unten, der Rest im „Mehr“-Menü
-const NAV_UNTEN = ["filament", "inventar", "drucker", "modelle"];
+const NAV_UNTEN = ["start", "filament", "inventar", "drucker", "modelle"];
 
 const STATUS = [
   { id: "offen", name: "Nicht probiert" },
@@ -7329,7 +9615,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     } catch (e) { this._stilFest = false; }
     this._daten = null;
     this._fehler = null;
-    this._ansicht = "filament";
+    // Startansicht: Übersicht (Tests können per window.__fwStartAnsicht eine andere wählen)
+    this._ansicht = window.__fwStartAnsicht || "start";
     this._f = { sorte: "", hersteller: "", farbe: "", status: "" };
     this._sort = "material";
     this._suche = "";
@@ -7362,7 +9649,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const erstes = !this._hass;
     this._hass = hass;
     if (erstes) this._laden();
-    else { this._drHassNeu(); this._buHassNeu(); }
+    else { this._drHassNeu(); this._buHassNeu(); this._stHassNeu(); }
   }
   set narrow(n) {
     if (this._narrow !== !!n) { this._narrow = !!n; this._zeichnen(); }
@@ -7655,6 +9942,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("hi-")) { this._hiKlick(a, el); return; }
     if (a.startsWith("ws-")) { this._wsKlick(a, el); return; }
     if (a.startsWith("ne-")) { this._neKlick(a, el); return; }
+    if (a.startsWith("st-")) { this._stKlick(a, el); return; }
+    if (a.startsWith("sh-")) { this._shKlick(a, el); return; }
+    if (a.startsWith("nb-")) { this._nbKlick(a, el); return; }
     if (this._exKlick(a, el)) return;
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
@@ -7916,7 +10206,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._modEingabe(t)) return;
     if (this._buEingabe(t)) return;
     if (this._drEingabe(t)) return;
-    if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (this._ksEingabe(t) || this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (this._nbEingabe(t)) return;
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
       clearTimeout(this._suchTimer);
@@ -7953,6 +10244,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._buAenderung(t)) return;
     if (this._drAenderung(t)) return;
     if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
+    if (this._nbAenderung(t)) return;
     if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
@@ -8513,8 +10805,9 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 
   _navHtml(lage) {
-    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}">
-        <span class="nav-icon">${n.icon}</span><span class="nav-name">${lage === "unten" && n.kurz ? n.kurz : n.name}</span></button>`;
+    // Oben ist wenig Platz: Kurznamen, Nerd und System nur als Symbol (Name als Tooltip)
+    const punkt = (n) => `<button class="nav-punkt ${this._ansicht === n.id ? "aktiv" : ""} ${lage === "oben" && n.nurIcon ? "nur-icon" : ""}" data-aktion="ansicht" data-id="${n.id}" title="${n.name}" aria-label="${n.name}">
+        <span class="nav-icon">${n.icon}</span>${lage === "oben" && n.nurIcon ? "" : `<span class="nav-name">${n.kurz || n.name}</span>`}</button>`;
     if (lage === "oben") return `<nav class="nav nav-oben">${NAVIGATION.map(punkt).join("")}</nav>`;
     const mehrAktiv = !NAV_UNTEN.includes(this._ansicht);
     const mehrIcon = mehrAktiv ? (NAVIGATION.find((n) => n.id === this._ansicht) || {}).icon || "☰" : "☰";
@@ -8535,6 +10828,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._ansicht === "hilfe") return this._hiHtml();
     if (this._ansicht === "werkstatt") return this._wsHtml();
     if (this._ansicht === "nerd") return this._neHtml();
+    if (this._ansicht === "start") return this._stHtml();
+    if (this._ansicht === "shop") return this._shHtml();
+    if (this._ansicht === "notiz") return this._nbHtml();
     return this._filamentHtml();
   }
 
@@ -8980,7 +11276,7 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 }
 
-Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht);
+Object.assign(FilamentWerkstattPanel.prototype, InventarAnsicht, DruckerAnsicht, ModellAnsicht, BuchenAnsicht, HilfeAnsicht, WerkstattAnsicht, NerdAnsicht, ExtrasAnsicht, StartAnsicht, ShopAnsicht, NotizAnsicht, KunststoffAnsicht);
 
 if (!customElements.get("filament-werkstatt-panel")) {
   customElements.define("filament-werkstatt-panel", FilamentWerkstattPanel);

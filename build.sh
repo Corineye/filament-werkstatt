@@ -10,7 +10,7 @@ ZIEL=custom_components/filament_werkstatt/frontend
 mkdir -p "$ZIEL"
 {
   echo "// Filament-Werkstatt – automatisch aus src/ gebaut (sh build.sh). Nicht direkt bearbeiten."
-  cat src/daten.js src/inventar-daten.js src/wissen.js src/stil.js src/inventar.js src/drucker.js src/buchen.js src/hilfe.js src/werkstatt.js src/nerd.js src/extras.js src/stl.js src/modelle.js src/panel.js
+  cat src/daten.js src/inventar-daten.js src/wissen.js src/stil.js src/inventar.js src/drucker.js src/buchen.js src/hilfe.js src/werkstatt.js src/nerd.js src/extras.js src/stl.js src/modelle.js src/kunststoffe.js src/start.js src/shop.js src/notiz.js src/panel.js
 } > "$ZIEL/filament-werkstatt-kern.js"
 VERSION=$(sed -n 's/^const VERSION = "\(.*\)";$/\1/p' src/panel.js)
 echo "export const VERSION = \"$VERSION\";" > "$ZIEL/filament-werkstatt-version.js"
