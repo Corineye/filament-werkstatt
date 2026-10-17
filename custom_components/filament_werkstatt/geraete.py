@@ -54,6 +54,11 @@ DRUCKER_SCHLUESSEL: dict[str, list[tuple[str, str]]] = {
     "f_kopf": [("fan", "cooling_fan")],
     "f_bauteil": [("fan", "aux_fan")],
     "f_raum": [("fan", "chamber_fan")],
+    # Druck steuern
+    "pause": [("button", "pause")],
+    "fortsetzen": [("button", "resume")],
+    "stopp": [("button", "stop")],
+    "tempo_wahl": [("select", "printing_speed")],
 }
 
 
