@@ -1,10 +1,46 @@
 // ---------------------------------------------------------------------------
 // Querschnitt: globale Suche mit Querverweisen, Sicherung (wöchentliche
-// Erinnerung, Herunterladen, Einspielen), Bambu-Studio-Profil, „Mehr“-Menü am Handy
+// Erinnerung, Herunterladen, Einspielen, nächtliche Sicherung auf dem HA-Rechner),
+// Update-Prüfung, Bambu-Studio-Profil, „Mehr“-Menü am Handy
 // ---------------------------------------------------------------------------
 
 const SICHERUNG_TAGE = 7;
 const IMPORT_MAX_BYTES = 20 * 1048576;
+// Automatische Sicherung gilt als „läuft“, wenn die letzte höchstens so alt ist
+const SICHERUNG_AUTO_TAGE = 2;
+const SICHERUNG_AUTO_ZEIGEN = 5;
+// Fallback der Update-Prüfung ohne HACS: Versionsnummer direkt aus GitHub
+const UPDATE_MANIFEST = "https://raw.githubusercontent.com/Corineye/filament-werkstatt/main/custom_components/filament_werkstatt/manifest.json";
+
+// Versionsnummern vergleichen: 1 = a neuer, -1 = b neuer, 0 = gleich
+function versionVergleich(a, b) {
+  const teile = (v) => String(v || "").trim().replace(/^v/i, "").split(/[.\-+]/).map((x) => parseInt(x, 10) || 0);
+  const x = teile(a), y = teile(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+// „heute“, „gestern“ oder „Mo., 12.10.“
+function tagText(iso) {
+  const d = new Date(iso), h = new Date();
+  const tag = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((tag(h) - tag(d)) / 86400000);
+  if (diff === 0) return "heute";
+  if (diff === 1) return "gestern";
+  return d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+}
+const uhrzeitText = (iso) => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+
+// Versionshinweise (Markdown von GitHub) schlicht darstellen: Überschriften, fett, Listen
+function kleinMarkdown(md) {
+  return esc(String(md || "").trim().slice(0, 6000))
+    .replace(/^#{1,6}\s*(.+)$/gm, "<strong>$1</strong>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/^\s*[-*]\s+/gm, "• ");
+}
 
 // Filament-Profil für Bambu Studio (Datei › Importieren › Konfiguration importieren)
 function bambuProfil(r) {
@@ -25,7 +61,7 @@ function bambuProfil(r) {
     compatible_printers: ["Bambu Lab P1S 0.4 nozzle"],
   };
   if (w("k") != null) { p.pressure_advance = s(w("k")); p.enable_pressure_advance = ["1"]; }
-  if (r.preis_kg) p.filament_cost = s(r.preis_kg);
+  p.filament_cost = s(Math.round(preisProGramm(r).wert * 100000) / 100);   // €/kg, ohne eigenen Preis voreingestellt
   // Betttemperatur für die gewählte Platte (die anderen bleiben vom Basisprofil)
   const plattenKey = /textured|pei/i.test(platte) ? "textured_plate_temp" : /engineer/i.test(platte) ? "eng_plate_temp" : /cool/i.test(platte) ? "cool_plate_temp" : "hot_plate_temp";
   if (bett != null) { p[plattenKey] = s(bett); p[`${plattenKey}_initial_layer`] = s(bett); }
@@ -104,6 +140,9 @@ const ExtrasAnsicht = {
   _sicherungFaellig() {
     const e = this._daten && this._daten.einstellungen;
     if (!e || this._ansicht === "system") return false;
+    // Sichert Home Assistant jede Nacht selbst, braucht es keine Erinnerung zum Herunterladen
+    if (this._autoSich === undefined) { this._autoSichLaden(); return false; }
+    if (this._autoSichAktiv()) return false;
     const seit = tageSeit(e.sicherung_am || e.sicherung_start), spaeter = tageSeit(e.sicherung_spaeter);
     return (seit == null || seit >= SICHERUNG_TAGE) && (spaeter == null || spaeter >= 2);
   },
@@ -176,10 +215,184 @@ const ExtrasAnsicht = {
   _sicherungKarteHtml() {
     const e = this._daten ? this._daten.einstellungen : null;
     return `<div class="karte system oben-abstand"><h2>Sicherung</h2>
-      <p class="leise">Die Daten liegen in Home Assistant und sind damit in dessen Backups. Zusätzlich kannst du eine Datei herunterladen und später wieder einspielen.</p>
-      ${e ? `<p class="klein">Letzte Sicherung: ${e.sicherung_am ? new Date(e.sicherung_am).toLocaleString("de-DE") : "noch keine"}</p>` : ""}
-      <div class="knopf-reihe"><button class="knopf" data-aktion="sich-laden" ${e ? "" : "disabled"}>💾 Herunterladen</button>
+      <p class="leise">Die Daten liegen in Home Assistant und sind damit in dessen Backups. Jede Nacht legt Home Assistant zusätzlich eine Kopie im Medienordner ab. Außerdem kannst du eine Datei herunterladen und später wieder einspielen.</p>
+      ${this._autoSichHtml()}
+      <h3 class="sich-unter">Datei auf diesem Gerät</h3>
+      ${e ? `<p class="klein">Letzter Download: ${e.sicherung_am ? new Date(e.sicherung_am).toLocaleString("de-DE") : "noch keiner"}</p>` : ""}
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="sich-laden" ${e ? "" : "disabled"}>💾 Herunterladen</button>
         <label class="knopf leise datei-knopf">📂 Einspielen<input type="file" accept=".json,application/json" data-sys="import" hidden></label></div></div>`;
+  },
+
+  // ---- Automatische Sicherung im Medienordner (Integration, jede Nacht 03:00) ----
+  async _autoSichLaden() {
+    if (this._autoSichLaedt || !this._hass) return;
+    this._autoSichLaedt = true;
+    try {
+      this._autoSich = await this._hass.callWS({ type: "filament_werkstatt/sicherungen" });
+    } catch (e) {
+      this._autoSich = null;   // ältere Integration: nur Herunterladen
+    }
+    this._autoSichLaedt = false;
+    if (!this._modus && !this._dialog) this._zeichnen();
+  },
+  _autoSichAktiv() {
+    const s = this._autoSich;
+    if (!s || !s.automatisch || !s.liste || !s.liste.length) return false;
+    const alter = tageSeit(s.liste[0].zeit);
+    return alter != null && alter <= SICHERUNG_AUTO_TAGE;
+  },
+  _autoSichHtml() {
+    const s = this._autoSich;
+    if (s === undefined) {
+      this._autoSichLaden();
+      return `<div class="sich-auto"><div class="sich-auto-kopf"><span class="dot"></span><strong>Automatische Sicherung</strong> <span class="leise">wird geprüft …</span></div></div>`;
+    }
+    if (!s) {
+      return `<div class="sich-auto"><div class="sich-auto-kopf"><span class="dot aus"></span><strong>Automatische Sicherung:</strong> <span class="leise">nicht verfügbar</span></div>
+        <p class="klein leise">Die Integration ist zu alt oder nicht geladen. Herunterladen geht trotzdem.</p></div>`;
+    }
+    const l = s.liste || [], neu = l[0], aktiv = this._autoSichAktiv();
+    const status = !s.automatisch ? "aus, die Integration ist nicht geladen"
+      : neu ? `letzte ${tagText(neu.zeit)} ${uhrzeitText(neu.zeit)} · ${l.length} gespeichert`
+      : `noch keine, die erste kommt um ${esc(s.uhrzeit)}`;
+    const zeigen = this._autoSichAlle ? l : l.slice(0, SICHERUNG_AUTO_ZEIGEN);
+    const tagName = (iso) => {
+      const t = tagText(iso), datum = new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", ...(this._mobil ? {} : { year: "numeric" }) });
+      return t === "heute" || t === "gestern" ? `${t[0].toUpperCase()}${t.slice(1)}, ${datum}` : datum;
+    };
+    return `<div class="sich-auto">
+      <div class="sich-auto-kopf"><span class="dot ${aktiv ? "mint" : s.automatisch ? "amber" : "aus"}"></span><strong>Automatische Sicherung:</strong> <span>${status}</span></div>
+      <p class="klein leise">Jede Nacht um ${esc(s.uhrzeit)} im Medienordner unter „${esc(s.ordner)}“, die neuesten ${s.behalten} bleiben.${neu && !aktiv && s.automatisch ? " Die letzte ist älter als zwei Tage. War der Rechner aus?" : ""}</p>
+      ${l.length ? `<div class="sich-liste">${zeigen.map((e) => `<div class="sich-zeile${e.kaputt ? " kaputt" : ""}">
+          <div class="sich-text"><strong>${tagName(e.zeit)}</strong>
+            <small class="leise">${uhrzeitText(e.zeit)} Uhr · ${e.kaputt ? "beschädigt" : `${zahl(e.rollen)} Rollen · ${zahl(e.inventar || 0)} Teile`} · ${zahl(e.groesse / 1024)} KB</small></div>
+          <button class="knopf leise klein-knopf" data-aktion="sich-auto-wieder" data-id="${esc(e.datei)}" ${e.kaputt ? "disabled" : ""}>Wiederherstellen</button></div>`).join("")}</div>` : ""}
+      <div class="knopf-reihe"><button class="knopf" data-aktion="sich-auto-jetzt" ${this._autoSichLaeuft || !this._daten ? "disabled" : ""}>${this._autoSichLaeuft ? "Sichert …" : "☁️ Jetzt sichern"}</button>
+        ${l.length > SICHERUNG_AUTO_ZEIGEN ? `<button class="knopf leise" data-aktion="sich-auto-alle">${this._autoSichAlle ? "Weniger zeigen" : `Alle ${l.length} zeigen`}</button>` : ""}</div></div>`;
+  },
+  async _autoSichJetzt() {
+    if (this._autoSichLaeuft) return;
+    this._autoSichLaeuft = true;
+    this._zeichnen();
+    try {
+      // Erst offene Änderungen speichern, sonst sichert Home Assistant den alten Stand
+      if (this._ungespeichert) { clearTimeout(this._speicherTimer); await this._speichernJetzt(); }
+      this._autoSich = await this._hass.callWS({ type: "filament_werkstatt/sicherung_jetzt" });
+      this._autoSichLaeuft = false;
+      this._toast("Gesichert: Die Kopie liegt jetzt im Medienordner von Home Assistant.");
+    } catch (e) {
+      this._autoSichLaeuft = false;
+      this._toast(`Sichern fehlgeschlagen: ${e.message || e}`);
+    }
+  },
+  // Wiederherstellen über denselben Weg wie „Einspielen“ (Rückfrage, Zwischenspeicher)
+  async _autoSichWieder(datei) {
+    try {
+      const r = await this._hass.callWS({ type: "filament_werkstatt/sicherung_lesen", datei });
+      const e = ((this._autoSich && this._autoSich.liste) || []).find((x) => x.datei === datei);
+      this._import = { daten: sicherungPruefen(r.daten), name: `Automatische Sicherung vom ${e ? new Date(e.zeit).toLocaleString("de-DE") : datei.slice(0, 10)}` };
+      this._dialog = "sich-import";
+    } catch (e) {
+      this._toast(`Sicherung nicht lesbar: ${e.message || e}`);
+      return;
+    }
+    this._zeichnen();
+  },
+
+  // ---- Nach Updates suchen (HACS-Update-Entität, sonst GitHub) ----
+  async _updateSuchen() {
+    const u = { laeuft: true };
+    this._upd = u;
+    this._zeichnen();
+    const hass = this._hass;
+    let info = { version: VERSION, entity_id: null };
+    try { info = { ...info, ...(await hass.callWS({ type: "filament_werkstatt/update" })) }; } catch (e) { /* ältere Integration: GitHub */ }
+    try {
+      const eid = info.entity_id;
+      if (eid && hass.states[eid]) {
+        u.quelle = "hacs"; u.entity = eid;
+        // HACS fragt GitHub sonst nur alle paar Stunden: jetzt neu prüfen lassen
+        try { await hass.callService("homeassistant", "update_entity", { entity_id: eid }); } catch (e) { /* dann der letzte bekannte Stand */ }
+        await new Promise((r) => setTimeout(r, 600));
+        const a = (this._hass.states[eid] || hass.states[eid]).attributes || {};
+        u.installiert = a.installed_version || info.version;
+        u.neueste = a.latest_version || u.installiert;
+        u.zusammenfassung = a.release_summary || "";
+        u.url = a.release_url || "";
+        if (versionVergleich(u.neueste, u.installiert) > 0) {
+          try { u.notizen = await this._hass.callWS({ type: "update/release_notes", entity_id: eid }); } catch (e) { /* ohne Notizen */ }
+        }
+      } else {
+        u.quelle = "github";
+        const r = await fetch(`${UPDATE_MANIFEST}?t=${Date.now()}`, { cache: "no-store" });
+        if (!r.ok) throw new Error(`GitHub antwortet mit ${r.status}`);
+        u.installiert = info.version;
+        u.neueste = (await r.json()).version;
+        if (!u.neueste) throw new Error("Keine Versionsnummer auf GitHub gefunden");
+        u.url = "https://github.com/Corineye/filament-werkstatt/releases";
+      }
+      u.neuer = versionVergleich(u.neueste, u.installiert) > 0;
+    } catch (e) {
+      u.fehler = e.message || String(e);
+    }
+    u.laeuft = false;
+    u.am = new Date().toISOString();
+    if (this._upd === u) this._zeichnen();
+  },
+  async _updateInstallieren() {
+    const u = this._upd;
+    if (!u || !u.entity || u.installiert_laeuft) return;
+    if (!confirm(`Version ${u.neueste} jetzt über HACS installieren? Danach muss Home Assistant neu starten.`)) return;
+    u.installiert_laeuft = true; u.fehler = null;
+    this._zeichnen();
+    try {
+      await this._hass.callService("update", "install", { entity_id: u.entity });
+      u.neustart = true; u.installiert = u.neueste; u.neuer = false;
+    } catch (e) {
+      u.fehler = `Installieren fehlgeschlagen: ${e.message || e}`;
+    }
+    u.installiert_laeuft = false;
+    this._zeichnen();
+  },
+  async _haNeustart() {
+    if (!confirm("Home Assistant jetzt neu starten? Für ein bis zwei Minuten ist dann nichts erreichbar.")) return;
+    const u = this._upd || (this._upd = {});
+    try {
+      await this._hass.callService("homeassistant", "restart", {});
+    } catch (e) {
+      // Beim Neustart reißt die Verbindung oft ab, das ist kein Fehler. Fehlende Rechte schon.
+      if (/unauthori|admin/i.test(`${e.code || ""} ${e.message || ""}`)) { this._toast("Neu starten dürfen nur Administratoren."); return; }
+    }
+    u.neustart_laeuft = true;
+    this._zeichnen();
+  },
+  _updateKarteHtml() {
+    const u = this._upd;
+    // Installierte Version neuer als die laufende Seite: schon heruntergeladen, Neustart fehlt
+    const neustart = !!(u && (u.neustart || (u.installiert && !u.neuer && versionVergleich(u.installiert, VERSION) > 0)));
+    let inhalt = "";
+    if (u && u.neustart_laeuft) {
+      inhalt = `<div class="hinweis mint">🔄 Home Assistant startet neu … Danach die Seite neu laden.</div>`;
+    } else if (u && !u.laeuft && !u.fehler && u.neueste) {
+      const status = neustart ? `<span class="pille amber">Neustart nötig</span>` : u.neuer ? `<span class="pille amber">Update verfügbar</span>` : `<span class="pille mint">Aktuell</span>`;
+      inhalt = `<div class="info-liste upd-liste">
+          <div class="info-zeile"><span>Installiert</span><strong>${esc(u.installiert)}</strong></div>
+          <div class="info-zeile"><span>Neueste Version</span><strong>${esc(u.neueste)} ${status}</strong></div>
+          <div class="info-zeile"><span>Geprüft über</span><strong>${u.quelle === "hacs" ? "HACS" : "GitHub"}</strong></div></div>
+        ${u.neuer && (u.zusammenfassung || u.notizen) ? `<div class="upd-notizen">${u.zusammenfassung ? `<p><strong>${esc(u.zusammenfassung)}</strong></p>` : ""}${u.notizen ? `<div class="upd-md">${kleinMarkdown(u.notizen)}</div>` : ""}</div>` : ""}
+        ${u.neuer && u.url ? `<p class="klein"><a class="upd-link" href="${esc(u.url)}" target="_blank" rel="noopener">Änderungen auf GitHub ansehen ↗</a></p>` : ""}
+        ${u.neuer && u.quelle !== "hacs" ? `<div class="hinweis">Keine HACS-Update-Entität gefunden. So aktualisierst du: in HACS „Filament-Werkstatt“ öffnen, „Herunterladen“ wählen und danach Home Assistant neu starten.</div>` : ""}
+        ${neustart ? `<div class="hinweis amber">Version ${esc(u.installiert)} ist installiert. Damit sie aktiv wird, muss Home Assistant neu starten.</div>` : ""}`;
+    }
+    if (u && u.fehler) inhalt += `<div class="hinweis amber">${esc(u.fehler)}</div>`;
+    const knoepfe = [];
+    if (!u || !u.neustart_laeuft) knoepfe.push(`<button class="knopf ${u && (u.neuer || neustart) ? "leise" : ""}" data-aktion="upd-suchen" ${u && (u.laeuft || u.installiert_laeuft) ? "disabled" : ""}>${u && u.laeuft ? "Sucht …" : "🔎 Nach Updates suchen"}</button>`);
+    if (u && u.neuer && u.quelle === "hacs" && !neustart) knoepfe.push(`<button class="knopf amber" data-aktion="upd-installieren" ${u.installiert_laeuft ? "disabled" : ""}>${u.installiert_laeuft ? "Wird installiert …" : "⬇️ Jetzt aktualisieren"}</button>`);
+    if (neustart && !u.neustart_laeuft) knoepfe.push(`<button class="knopf amber" data-aktion="upd-neustart">🔄 Home Assistant neu starten</button>`);
+    return `<div class="karte system oben-abstand upd-karte"><h2>Updates</h2>
+      <p class="leise">Diese Seite läuft mit Version ${VERSION}.${u && u.am && !u.laeuft ? ` Zuletzt geprüft um ${uhrzeitText(u.am)} Uhr.` : " Prüft über HACS (sonst direkt bei GitHub), ob es eine neuere Version gibt."}</p>
+      ${inhalt}
+      <div class="knopf-reihe">${knoepfe.join("")}</div></div>`;
   },
 
   // ---- Neue Version erkennen (nach einem HACS-Update) ----
@@ -246,6 +459,12 @@ const ExtrasAnsicht = {
       case "sich-laden": this._sicherungLaden(); return true;
       case "sich-spaeter": this._daten.einstellungen.sicherung_spaeter = new Date().toISOString(); this._speichern(); break;
       case "sich-import-ok": this._importAusfuehren(); return true;
+      case "sich-auto-jetzt": this._autoSichJetzt(); return true;
+      case "sich-auto-wieder": this._autoSichWieder(el.dataset.id); return true;
+      case "sich-auto-alle": this._autoSichAlle = !this._autoSichAlle; break;
+      case "upd-suchen": this._updateSuchen(); return true;
+      case "upd-installieren": this._updateInstallieren(); return true;
+      case "upd-neustart": this._haNeustart(); return true;
       case "profil-export": {
         const r = this._rolle();
         if (!r) return true;

@@ -8,13 +8,17 @@
           "drucker": "Drucker (Bambu Lab)",
           "steckdose": "Steckdose vor dem Drucker",
           "liste": "Bestehende Druckliste",
+          "raum_temp": "Raumtemperatur",
+          "raum_feuchte": "Luftfeuchtigkeit im Raum",
           "protokoll": "Drucke automatisch protokollieren"
         },
         "data_description": {
           "drucker": "Aus der Bambu-Lab-Integration. Leer lassen, wenn es keinen gibt.",
           "steckdose": "Optional. Damit kann die Seite den Drucker ein- und ausschalten und die Stromkosten berechnen.",
           "liste": "Optional. Leer lassen, dann legt die Integration eine eigene Liste „3D-Drucke“ an.",
-          "protokoll": "Trägt jeden Druck mit Gewicht, Temperaturen und Endfoto in die Liste ein."
+          "protokoll": "Trägt jeden Druck mit Gewicht, Temperaturen und Endfoto in die Liste ein.",
+          "raum_temp": "Optional. Temperatursensor im Raum des Druckers, für Drucker- und Startseite.",
+          "raum_feuchte": "Optional. Feuchtesensor im Raum des Druckers. Hilft zu sehen, wann Filament trocknen sollte."
         }
       }
     },
@@ -30,10 +34,14 @@
           "drucker": "Drucker (Bambu Lab)",
           "steckdose": "Steckdose vor dem Drucker",
           "liste": "Bestehende Druckliste",
+          "raum_temp": "Raumtemperatur",
+          "raum_feuchte": "Luftfeuchtigkeit im Raum",
           "protokoll": "Drucke automatisch protokollieren"
         },
         "data_description": {
-          "liste": "Leer lassen, dann nutzt die Integration ihre eigene Liste „3D-Drucke“."
+          "liste": "Leer lassen, dann nutzt die Integration ihre eigene Liste „3D-Drucke“.",
+          "raum_temp": "Optional. Temperatursensor im Raum des Druckers, für Drucker- und Startseite.",
+          "raum_feuchte": "Optional. Feuchtesensor im Raum des Druckers. Hilft zu sehen, wann Filament trocknen sollte."
         }
       }
     }

@@ -8,13 +8,17 @@
           "drucker": "Printer (Bambu Lab)",
           "steckdose": "Smart plug powering the printer",
           "liste": "Existing print list",
+          "raum_temp": "Room temperature",
+          "raum_feuchte": "Room humidity",
           "protokoll": "Log prints automatically"
         },
         "data_description": {
           "drucker": "From the Bambu Lab integration. Leave empty if you have none.",
           "steckdose": "Optional. Lets the page switch the printer and calculate energy costs.",
           "liste": "Optional. Leave empty and the integration creates its own list “3D-Drucke”.",
-          "protokoll": "Adds every print with weight, temperatures and a final photo to the list."
+          "protokoll": "Adds every print with weight, temperatures and a final photo to the list.",
+          "raum_temp": "Optional. Temperature sensor in the printer's room, shown on the printer and start page.",
+          "raum_feuchte": "Optional. Humidity sensor in the printer's room. Helps to see when filament should be dried."
         }
       }
     },
@@ -30,10 +34,14 @@
           "drucker": "Printer (Bambu Lab)",
           "steckdose": "Smart plug powering the printer",
           "liste": "Existing print list",
+          "raum_temp": "Room temperature",
+          "raum_feuchte": "Room humidity",
           "protokoll": "Log prints automatically"
         },
         "data_description": {
-          "liste": "Leave empty to use the integration's own list “3D-Drucke”."
+          "liste": "Leave empty to use the integration's own list “3D-Drucke”.",
+          "raum_temp": "Optional. Temperature sensor in the printer's room, shown on the printer and start page.",
+          "raum_feuchte": "Optional. Humidity sensor in the printer's room. Helps to see when filament should be dried."
         }
       }
     }

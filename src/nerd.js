@@ -39,7 +39,7 @@ const NerdAnsicht = {
     const inhalt = { abgleich: () => this._neAbgleichHtml(), werte: () => this._neWerteHtml(), gesundheit: () => this._neGesundheitHtml() }[n.tab] || (() => this._neStatistikHtml());
     return `<div class="ne-seite">
       <div class="chips unter-tabs">${NE_TABS.map(([id, t]) => `<button class="chip ${n.tab === id ? "an" : ""}" data-aktion="ne-tab" data-id="${id}">${t}</button>`).join("")}</div>
-      <div class="wechsel-rein" data-einmal="ne-${n.tab}">${inhalt()}</div></div>`;
+      <div class="wechsel-rein" data-einmal="ne-${n.tab}">${inhalt()}${n.tab === "statistik" && this._shopNerdHtml ? this._shopNerdHtml() : ""}</div></div>`;
   },
 
   // Ein Datensatz je Druck: Ergebnis, Material, Rolle, Zeitpunkte
@@ -161,7 +161,7 @@ const NerdAnsicht = {
     let g = 0, druck_g = 0, fix_g = 0, n = 0;
     for (const x of Object.values(this._daten.drucke || {})) {
       const b = x.gebucht;
-      if (b && b.rolle === r.id && b.am > ab) { g += b.g; druck_g += b.druck_g || 0; fix_g += b.fix_g || 0; n++; }
+      if (b && b.rolle === r.id && b.am > ab) { g += b.g; druck_g += b.slicer_g != null ? b.slicer_g : (b.druck_g || 0) / (b.korr || 1); fix_g += b.fix_g || 0; n++; }
       if (b && b.wechsel && b.wechsel.rolle === r.id && b.am > ab) { g += b.wechsel.g; fix_g += b.wechsel.g; }
     }
     return { g, druck_g, fix_g, n };
@@ -170,25 +170,14 @@ const NerdAnsicht = {
     const n = this._ne, d = this._daten;
     const r = this._neRolle();
     if (!r || n.abWert == null) { this._toast("Bitte zuerst das Gewicht von der Waage einstellen."); return; }
-    const seit = this._neGebuchtSeit(r);
     const netto = Math.max(0, n.abWert - this._neSpuleG(r));
-    const echt = r.rest_g + seit.g - netto;
-    let faktor = seit.druck_g > 0 ? (echt - seit.fix_g) / seit.druck_g : null;
-    if (faktor != null && (faktor < 0.5 || faktor > 1.6)) {
-      this._toast(`Faktor ${zahl(faktor, 2)} ist unplausibel (Spulengewicht oder Waage prüfen). Gewicht übernommen, Faktor nicht gelernt.`);
-      faktor = null;
-    }
-    d.abgleich = [...(d.abgleich || []), { am: new Date().toISOString(), rolle: r.id, name: r.name, material: r.material, gebucht: seit.g, echt, faktor: faktor || 1 }].slice(-60);
-    if (faktor != null) {
-      // Mittel der letzten Abgleiche dieses Materials, vorsichtig begrenzt
-      const f = d.abgleich.filter((v) => v.material === r.material && v.faktor).slice(-5).map((v) => v.faktor);
-      d.einstellungen.korrektur = { ...d.einstellungen.korrektur, [r.material]: Math.min(1.3, Math.max(0.7, f.reduce((s, v) => s + v, 0) / f.length)) };
-    }
+    // Lernt wie beim Wiegen im Rollen-Detail: Faktor je Rolle und je Material (buchen.js)
+    const gelernt = this._wiegungLernen(r, netto);
     r.rest_g = netto;
     r.gewogen_am = new Date().toISOString();
     n.abWert = null;
     this._speichern();
-    if (faktor != null) this._toast(`${r.name}: ${zahl(netto)} g übernommen, Faktor für ${r.material} jetzt ${zahl(d.einstellungen.korrektur[r.material], 3)}.`);
+    this._toast(`${r.name}: ${zahl(netto)} g übernommen.${gelernt}`);
   },
 
   // ---- Eigene Werte gegen Vorschläge ----
@@ -281,7 +270,7 @@ const NerdAnsicht = {
         return;
       }
       case "ne-abgleich": this._neAbgleichen(); break;
-      case "ne-korr-weg": this._daten.einstellungen.korrektur = {}; this._speichern(); this._toast("Korrekturfaktoren zurückgesetzt."); return;
+      case "ne-korr-weg": this._daten.einstellungen.korrektur = {}; this._daten.einstellungen.korrektur_n = {}; this._daten.rollen.forEach((r) => delete r.korrektur); this._speichern(); this._toast("Korrekturfaktoren zurückgesetzt."); return;
       case "ne-heiz": this._neHeizLaden(); return;
       default: return;
     }
