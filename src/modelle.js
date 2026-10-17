@@ -1486,9 +1486,10 @@ const ModellAnsicht = {
         m.duese = Number(el.dataset.id);
         const [lo, hi, std] = SCHICHT_BEREICH[m.duese] || [0.08, 0.28, 0.2];
         if (m.schicht_h < lo || m.schicht_h > hi) m.schicht_h = std;
+        if (m.tab !== "schichten" && m.duenn && m.duenn.dicke) this._modDuennAuswerten();   // Wandstärke-Grenze hängt an der Düse
         this._zeichnen();
         if (m.tab === "schichten") this._modSchichtenStarten();
-        else if (m.duenn && m.duenn.dicke) { this._modDuennAuswerten(); this._modSzene(); }   // Wandstärke-Grenze hängt an der Düse
+        else if (m.duenn && m.duenn.dicke) this._modSzene();
         return;
       }
       case "mod-stuetzen": m.stuetzen = el.dataset.id; this._zeichnen(); this._modSzene(); return;

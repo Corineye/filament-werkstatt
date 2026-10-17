@@ -2874,6 +2874,8 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
   background: rgba(8,12,11,.9); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 -10px 24px rgba(0,0,0,.35); }
 .mobil .mod-fuss.dock .knopf { min-height: 44px; }
 .mobil .mod-raster { padding-bottom: var(--mod-fuss-h, 0px); }
+/* Handy: die Seite wächst mit dem Inhalt, sonst geht der Platz unter der Leiste verloren */
+.mobil .ansicht-rein.voll { height: auto; }
 /* Vier Reiter passen nebeneinander */
 .mod-tabs { gap: 0; padding: 4px 8px 0; overflow-x: auto; scrollbar-width: none; }
 .mod-tabs .tab { flex: 1 0 auto; padding: 10px 9px; font-size: 13.5px; white-space: nowrap; text-align: center; }
@@ -9339,9 +9341,10 @@ const ModellAnsicht = {
         m.duese = Number(el.dataset.id);
         const [lo, hi, std] = SCHICHT_BEREICH[m.duese] || [0.08, 0.28, 0.2];
         if (m.schicht_h < lo || m.schicht_h > hi) m.schicht_h = std;
+        if (m.tab !== "schichten" && m.duenn && m.duenn.dicke) this._modDuennAuswerten();   // Wandstärke-Grenze hängt an der Düse
         this._zeichnen();
         if (m.tab === "schichten") this._modSchichtenStarten();
-        else if (m.duenn && m.duenn.dicke) { this._modDuennAuswerten(); this._modSzene(); }   // Wandstärke-Grenze hängt an der Düse
+        else if (m.duenn && m.duenn.dicke) this._modSzene();
         return;
       }
       case "mod-stuetzen": m.stuetzen = el.dataset.id; this._zeichnen(); this._modSzene(); return;
