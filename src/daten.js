@@ -224,6 +224,7 @@ const EINSTELLUNGEN_STANDARD = {
   mindest_g: 250,        // Einkaufsliste: unter dieser Menge je Farbe + Material nachkaufen
   mindest_material_g: 500,
   korrektur: {},         // Faktor je Material aus dem Abgleich beim Wiegen
+  korrektur_n: {},       // Anzahl Wiegungen, aus denen der Faktor je Material gelernt ist
   sicherung_am: null,
   sicherung_spaeter: null,
   sicherung_start: null, // erste Erinnerung eine Woche nach dem ersten Start
@@ -284,4 +285,47 @@ function farbfamilie(rolle) {
   if (h < 260) return "Blau";
   if (h < 300) return "Lila";
   return "Rosa";
+}
+
+// ---------------------------------------------------------------------------
+// Preis, Feuchte und Korrektur je Rolle (alles optionale Felder an der Rolle)
+//   preis_kg       eigener Preis pro kg (null = voreingestellt)
+//   kauflink       Link zum Nachkaufen (nur http/https)
+//   bewertung      1–5 Sterne, wie zufrieden ich mit dem Filament bin
+//   geoeffnet_am   Datum (JJJJ-MM-TT), an dem die Rolle aus der Tüte kam
+//   getrocknet_am  Datum des letzten Trocknens
+//   korrektur      { f, n } gelernter Faktor aus Wiegungen dieser Rolle
+// ---------------------------------------------------------------------------
+
+// Rollen ohne eigenen Preis rechnen mit 19,99 € je Rolle (bezogen auf die Spulengröße,
+// 1 kg → knapp 2 ct/g), damit überall Kosten entstehen.
+const PREIS_STANDARD_ROLLE = 19.99;
+function preisProGramm(rolle) {
+  if (rolle && rolle.preis_kg > 0) return { wert: rolle.preis_kg / 1000, voreingestellt: false };
+  const nenn = (rolle && rolle.nenn_g) || 1000;
+  return { wert: PREIS_STANDARD_ROLLE / nenn, voreingestellt: true };
+}
+
+// Wie lange eine offene Rolle ungefähr trocken genug bleibt (Tage, normale Raumluft
+// um 40–60 % rF). Richtwerte aus Herstellerangaben (Bambu Lab, Polymaker, Prusa):
+//   PLA nimmt langsam Wasser auf (≈ 2 Monate), PETG/ABS/ASA etwa einen Monat,
+//   TPU und PC deutlich schneller (≈ 2 Wochen), Nylon (PA) und PVA schon nach Tagen.
+const FEUCHTE_TAGE = { PLA: 60, PETG: 30, ABS: 30, ASA: 30, HIPS: 30, TPU: 14, PC: 14, PA: 7, PVA: 7, BVOH: 7 };
+const FEUCHTE_STANDARD_TAGE = 30;
+function feuchteTage(material) {
+  const m = String(material || "").toUpperCase();
+  if (FEUCHTE_TAGE[m]) return FEUCHTE_TAGE[m];
+  // PA-CF, PA12, PETG-CF … nach dem Grundmaterial
+  const basis = Object.keys(FEUCHTE_TAGE).find((k) => m.startsWith(k));
+  return basis ? FEUCHTE_TAGE[basis] : FEUCHTE_STANDARD_TAGE;
+}
+
+// Korrekturfaktor aus Wiegungen: Grenzen und ab welcher Abweichung eine Wiegung nicht zählt
+const KORREKTUR_MIN = 0.8;
+const KORREKTUR_MAX = 1.25;
+const KORREKTUR_UNPLAUSIBEL = [0.5, 1.6];
+// Gleitender Mittelwert: die ersten Wiegungen zählen gleich, danach wiegt jede neue ein Fünftel
+function korrekturMitteln(alt, n, neu) {
+  const f = alt && n ? alt + (neu - alt) / Math.min(n + 1, 5) : neu;
+  return Math.min(KORREKTUR_MAX, Math.max(KORREKTUR_MIN, f));
 }
