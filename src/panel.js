@@ -131,7 +131,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     const erstes = !this._hass;
     this._hass = hass;
     if (erstes) this._laden();
-    else { this._drHassNeu(); this._buHassNeu(); }
+    else { this._drHassNeu(); this._buHassNeu(); this._stHassNeu(); }
   }
   set narrow(n) {
     if (this._narrow !== !!n) { this._narrow = !!n; this._zeichnen(); }
@@ -689,6 +689,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._buEingabe(t)) return;
     if (this._drEingabe(t)) return;
     if (this._ksEingabe(t) || this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (this._nbEingabe(t)) return;
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
       clearTimeout(this._suchTimer);
@@ -725,6 +726,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._buAenderung(t)) return;
     if (this._drAenderung(t)) return;
     if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
+    if (this._nbAenderung(t)) return;
     if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
