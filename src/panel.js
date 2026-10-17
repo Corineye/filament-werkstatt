@@ -689,6 +689,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._buEingabe(t)) return;
     if (this._drEingabe(t)) return;
     if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
+    if (this._shEingabe(t)) return;
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
       clearTimeout(this._suchTimer);
@@ -725,6 +726,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._buAenderung(t)) return;
     if (this._drAenderung(t)) return;
     if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
+    if (this._shAenderung(t)) return;
     if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
@@ -1697,6 +1699,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
     if (this._dialog === "dr-temp") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-t"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-t">${this._drTempDialogHtml()}</div>`;
     if (this._dialog === "dr-luefter") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-l"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-l">${this._drLuefterDialogHtml()}</div>`;
+    if (this._dialog.startsWith("sh-")) return this._shDialogHtml();
     if (this._dialog === "dr-druck") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr"></div><div class="dialog" role="dialog" data-einmal="dialog-dr">${this._drDialogHtml()}</div>`;
     const r = this._rolle();
     let inhalt = "";
