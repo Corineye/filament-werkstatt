@@ -3993,7 +3993,7 @@ const BuchenAnsicht = {
 // Hilfe: P1S-Zeichnung mit Bereichen, Sovol-Trockner, Fehlerbilder, Kalibrierung
 // ---------------------------------------------------------------------------
 
-const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"], ["kunststoffe", "🧪 Kunststoffe"], ["konstruktion", "📐 Konstruktion"], ["lexikon", "📖 Slicer-Lexikon"], ["platten", "🟫 Druckplatten"], ["codes", "⚠️ Fehlercodes"]];
+const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"], ["kunststoffe", "🧪 Kunststoffe"], ["codes", "⚠️ Fehlercodes"]];
 // Welche Rollenwerte zu welchem Bereich der Zeichnung gehören
 const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "max_vol"], luefter: ["luefter_min", "luefter_max"],
   riemen: ["v_aussen", "v_innen", "v_fuellung"], bett: ["bett"], spule: ["tr_temp", "tr_dauer"] };
@@ -9536,7 +9536,6 @@ const NAVIGATION = [
   { id: "modelle", name: "3D-Modelle", kurz: "3D", icon: "🧊" },
   { id: "werkstatt", name: "Werkstatt", icon: "🧰" },
   { id: "hilfe", name: "Hilfe", icon: "💡" },
-  { id: "shop", name: "Shop", icon: "🛒" },
   { id: "notiz", name: "Notizbuch", kurz: "Notizen", icon: "📓" },
   { id: "nerd", name: "Nerd", icon: "🤓", nurIcon: true },
   { id: "system", name: "System", icon: "⚙️", nurIcon: true },
