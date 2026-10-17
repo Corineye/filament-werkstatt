@@ -16,6 +16,7 @@ const NAVIGATION = [
   { id: "drucker", name: "Drucker", icon: "🖨️" },
   { id: "modelle", name: "3D-Modelle", kurz: "3D", icon: "🧊" },
   { id: "werkstatt", name: "Werkstatt", icon: "🧰" },
+  { id: "shop", name: "Shop", icon: "🛍️" },
   { id: "hilfe", name: "Hilfe", icon: "💡" },
   { id: "notiz", name: "Notizbuch", kurz: "Notizen", icon: "📓" },
   { id: "nerd", name: "Nerd", icon: "🤓", nurIcon: true },
