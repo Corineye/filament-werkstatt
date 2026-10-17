@@ -1454,4 +1454,231 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
 .mobil .nb-werkzeug .such-feld { max-width: none; }
 .mobil .nb-chips { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 2px 16px; scrollbar-width: none; }
 .mobil .nb-chips::-webkit-scrollbar { display: none; }
+
+/* ==== 3D-Modelle: Werkzeuge (Auflegen, Beste Lage, Messen, Wandstärke, Skalieren), angedockte Warteschlange (v0.12) ==== */
+/* Handy: Warteschlange als feste Leiste direkt über der unteren Navigation, der Inhalt endet darüber */
+.mobil .mod-fuss.dock { position: absolute; left: 0; right: 0; bottom: var(--mod-nav-h, 64px); z-index: 2; margin: 0; padding: 8px 16px; border: none; border-top: 1px solid var(--rand); border-radius: 0;
+  background: rgba(8,12,11,.9); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 -10px 24px rgba(0,0,0,.35); }
+.mobil .mod-fuss.dock .knopf { min-height: 44px; }
+.mobil .mod-raster { padding-bottom: var(--mod-fuss-h, 0px); }
+/* Handy: die Seite wächst mit dem Inhalt, sonst geht der Platz unter der Leiste verloren */
+.mobil .ansicht-rein.voll { height: auto; }
+/* Vier Reiter passen nebeneinander */
+.mod-tabs { gap: 0; padding: 4px 8px 0; overflow-x: auto; scrollbar-width: none; }
+.mod-tabs .tab { flex: 1 0 auto; padding: 10px 9px; font-size: 13.5px; white-space: nowrap; text-align: center; }
+.mobil .mod-tabs .tab { font-size: 13px; padding: 10px 6px; }
+/* Werkzeug-Liste (ohne Auswahl) und Leiste zum Wechseln */
+.mod-wz-einleitung { margin: 0 0 12px; font-size: 13px; }
+.mod-wz-liste { display: grid; gap: 8px; }
+.mod-wz-zeile { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 10px 12px 10px 10px; border-radius: 14px; background: rgba(0,0,0,.18); border: 1px solid var(--rand);
+  transition: border-color .15s, background .15s, transform .15s; animation: ansicht-rein .3s cubic-bezier(.2,.8,.2,1) both; }
+.mod-wz-zeile:nth-child(2) { animation-delay: .03s; } .mod-wz-zeile:nth-child(3) { animation-delay: .06s; } .mod-wz-zeile:nth-child(4) { animation-delay: .09s; } .mod-wz-zeile:nth-child(5) { animation-delay: .12s; }
+.mod-wz-zeile:hover, .mod-wz-zeile:focus-visible { border-color: rgba(62,230,168,.45); background: var(--mint-weich); outline: none; }
+.mod-wz-zeile:active { transform: scale(.985); }
+.mod-wz-zeile > .mod-ico { width: 22px; height: 22px; padding: 9px; border-radius: 12px; color: var(--mint); background: rgba(62,230,168,.1); border: 1px solid rgba(62,230,168,.22); }
+.mod-wz-zeile > span:not(.mod-wz-pfeil) { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.mod-wz-zeile strong { font-size: 14px; }
+.mod-wz-zeile small { font-size: 12px; color: var(--leise); }
+.mod-wz-pfeil { color: var(--leise); font-size: 22px; line-height: 1; }
+.mod-wz-leiste { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; padding: 4px; margin-bottom: 14px; border-radius: 16px; background: rgba(0,0,0,.28); border: 1px solid var(--rand); }
+.mod-wz { display: grid; justify-items: center; gap: 4px; padding: 8px 2px 6px; border-radius: 12px; color: var(--leise); font-size: 11px; font-weight: 600; transition: color .15s, background .15s, box-shadow .15s; }
+.mod-wz .mod-ico { width: 22px; height: 22px; }
+.mod-wz span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod-wz:hover { color: var(--text); background: var(--flaeche-hover); }
+.mod-wz.an { color: var(--mint); background: var(--mint-weich); box-shadow: inset 0 0 0 1px rgba(62,230,168,.45); }
+.mod-wz-karte { animation: ansicht-rein .22s ease; }
+.mod-wz-karte h3 { margin-top: 0; }
+.mod-wz-aktiv { display: flex; align-items: center; gap: 10px; }
+.mod-wz-puls { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--mint); animation: wz-puls 1.6s ease-out infinite; }
+@keyframes wz-puls { 0% { box-shadow: 0 0 0 0 rgba(62,230,168,.6); } 100% { box-shadow: 0 0 0 10px rgba(62,230,168,0); } }
+/* Hinweis im 3D-Bild, solange Antippen erwartet wird */
+.mod-wz-hinweis { background: rgba(10,30,24,.82); border-color: rgba(62,230,168,.5); color: #c6f6e3; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.mod-wz-hinweis .mod-ico { width: 18px; height: 18px; color: var(--mint); }
+.mobil .mod-wz-hinweis { top: auto; bottom: 34px; justify-content: center; flex-wrap: wrap; row-gap: 6px; }
+/* Beste Lage: Vergleich als Balken */
+.mod-vergleich { display: grid; gap: 8px; margin: 12px 0 6px; }
+.mod-v-zeile { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.mod-v-zeile > span { color: var(--leise); }
+.mod-v-zeile strong { min-width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+.mod-balken { height: 10px; border-radius: 5px; background: rgba(255,255,255,.06); overflow: hidden; }
+.mod-balken i { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg, #ffb547, #ff6b6b); transition: width .45s cubic-bezier(.2,.8,.2,1); }
+.mod-v-zeile.vorschlag .mod-balken i { background: linear-gradient(90deg, #22b884, var(--mint)); }
+.mod-v-zeile.vorschlag strong { color: var(--mint); }
+.mod-v-text { color: var(--leise); margin: 0 0 4px; }
+.mod-lage-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.mod-lage-chips .chip { display: grid; gap: 1px; padding: 6px 8px; border-radius: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.mod-lage-chips .chip strong { font-size: 13px; }
+.mod-lage-chips .chip small { font-size: 10.5px; color: var(--leise); }
+/* Messen */
+.mod-mess { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.mod-mess-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.mod-mess-linie { stroke: var(--gelb); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 7 5; filter: drop-shadow(0 0 4px rgba(255,213,74,.55)); animation: mess-laufen .9s linear infinite; }
+@keyframes mess-laufen { to { stroke-dashoffset: -12; } }
+.mod-mess-punkt { fill: var(--gelb); stroke: #1b1503; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(255,213,74,.8)); }
+.mod-mess-text { position: absolute; left: 0; top: 0; padding: 4px 10px; border-radius: 9px; background: var(--gelb); color: #1b1503; font-weight: 800; font-size: 14px;
+  white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 4px rgba(255,213,74,.16), 0 6px 18px rgba(0,0,0,.5); }
+.mod-mess-schritte { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 12px; }
+.mod-mess-schritte span { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; background: rgba(0,0,0,.2); border: 1px solid var(--rand); font-size: 13px; color: var(--leise); transition: color .2s, border-color .2s; }
+.mod-mess-schritte i { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 2px solid currentColor; font-style: normal; font-size: 12px; font-weight: 800; }
+.mod-mess-schritte .jetzt { color: var(--gelb); border-color: rgba(255,213,74,.5); }
+.mod-mess-schritte .fertig { color: var(--mint); border-color: rgba(62,230,168,.4); }
+.mod-mess-schritte .fertig i { background: var(--mint); border-color: var(--mint); color: #062018; }
+.mod-mess-ergebnis { display: grid; justify-items: center; gap: 6px; padding: 16px 12px; border-radius: 16px; border: 1px solid rgba(255,213,74,.35);
+  background: radial-gradient(260px 120px at 50% 0%, rgba(255,213,74,.12), transparent 70%), rgba(0,0,0,.22); animation: ansicht-rein .25s ease; }
+.mod-mess-ergebnis strong { font-size: 30px; color: var(--gelb); font-variant-numeric: tabular-nums; }
+.mod-mess-achsen { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.mod-mess-achsen span { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.05); font-size: 12px; font-weight: 800; }
+.mod-mess-achsen b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.mod-mess-achsen .a-x { color: #ff6b6b; }
+.mod-mess-achsen .a-y { color: #4fe08a; }
+.mod-mess-achsen .a-z { color: #5cc8ff; }
+/* Wandstärke und Skalieren */
+.mod-duenn-hinweis .mini { display: inline-block; margin: 6px 0 0; }
+.mod-skala-felder input { font-size: 15px; -moz-appearance: textfield; }
+.mod-skala-felder input::-webkit-inner-spin-button, .mod-skala-felder input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.mod-skala-schnell { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 2px 0 6px; }
+.mod-skala-schnell .chip { padding: 6px 0; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.mod-skala-loecher .hinweis { margin: 10px 0 4px; }
+.mod-skala-loch { display: flex; gap: 10px; align-items: center; margin: 6px 0; padding: 8px 10px; border-radius: 12px; font-size: 13px; background: rgba(0,0,0,.18); border: 1px solid var(--rand); }
+.mod-skala-loch.schlecht { border-color: rgba(255,181,71,.5); background: rgba(255,181,71,.08); color: #ffd59a; }
+.mod-skala-loch.gut .mod-nr { border-color: var(--mint); color: var(--mint); }
+.mod-skala-loecher .mini { margin: 4px 0 0; }
+/* ---- Hilfe v0.12: Trockner mit zwei Plätzen, Konstruktion, Slicer-Lexikon, Druckplatten ---- */
+.hinweis.rot { color: #ffc2c2; background: rgba(255,107,107,.1); border-color: rgba(255,107,107,.35); }
+.pl-jetzt { color: var(--mint); }
+/* Aufklappbare Einträge */
+.hi-eintrag { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); backdrop-filter: blur(10px); transition: border-color .2s, background .2s, box-shadow .2s; min-width: 0; }
+.hi-eintrag:hover { border-color: rgba(62,230,168,.35); background: var(--flaeche-hover); }
+.hi-eintrag.auf { border-color: rgba(62,230,168,.45); box-shadow: 0 8px 28px rgba(0,0,0,.25), inset 0 0 0 1px rgba(62,230,168,.08); }
+.hi-eintrag-kopf { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; text-align: left; border-radius: 16px; }
+.hi-eintrag-kopf:focus-visible { outline: 2px solid rgba(62,230,168,.6); outline-offset: -2px; }
+.hi-pfeil { margin-left: auto; flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: var(--leise); font-size: 18px; transition: transform .22s ease, color .2s, background .2s; }
+.hi-eintrag.auf .hi-pfeil { transform: rotate(90deg); color: var(--mint); background: var(--mint-weich); }
+.hi-eintrag-text { display: none; padding: 0 14px 14px; }
+.hi-eintrag.auf .hi-eintrag-text { display: block; }
+/* Trockner: zwei Plätze */
+.hi-kombi-wahl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hi-kombi-wahl .breit-auswahl { margin: 0; }
+.hi-kombi-erg { margin-top: 14px; }
+.hi-kombi-hinweis { margin-bottom: 8px; }
+.hi-kombi-leer { margin: 6px 0 0; }
+.hi-laeufe { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); margin-top: 6px; }
+.hi-laeufe:not(.zwei) .hi-lauf { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 4px 18px; align-items: center; }
+.hi-laeufe:not(.zwei) .hi-lauf h4 { grid-column: 1 / -1; }
+.hi-laeufe:not(.zwei) .hi-lauf-schritte { grid-template-columns: 1fr 1fr; margin: 0; }
+.mobil .hi-laeufe:not(.zwei) .hi-lauf { grid-template-columns: 1fr; }
+.mobil .hi-laeufe:not(.zwei) .hi-lauf-schritte { margin-top: 10px; }
+.hi-laeufe.zwei { grid-template-columns: 1fr 1fr; }
+.hi-lauf { padding: 12px; border-radius: 16px; background: rgba(0,0,0,.22); border: 1px solid var(--rand); animation: hi-lauf-rein .3s ease both; }
+@keyframes hi-lauf-rein { from { opacity: 0; transform: translateY(6px); } }
+.hi-lauf h4 { margin: 0 0 8px; font-size: 14px; color: var(--mint); }
+.tr-kombi-bild { width: 100%; max-width: 400px; height: auto; display: block; margin: 0 auto; }
+.tr-kombi-name { fill: var(--leise); font-size: 10px; letter-spacing: .4px; }
+.tr-kombi-nr { fill: #ffb547; font-size: 13px; font-weight: 700; }
+.tr-kombi-leer { fill: var(--leise); font-size: 13px; }
+.hi-lauf-schritte { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; counter-reset: schritt; }
+.hi-lauf-schritte li { counter-increment: schritt; display: grid; gap: 2px; padding: 8px 10px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); font-size: 12px; min-width: 0; }
+.hi-lauf-schritte li span { color: var(--leise); }
+.hi-lauf-schritte li span::before { content: counter(schritt) ". "; color: var(--mint); font-weight: 700; }
+.hi-lauf-schritte strong { color: var(--amber); font-size: 15px; overflow-wrap: anywhere; }
+.hi-lauf-schritte small { font-size: 11px; }
+.hi-laeufe.zwei .hi-lauf-schritte { grid-template-columns: 1fr 1fr; }
+.mobil .hi-kombi-wahl, .mobil .hi-laeufe.zwei { grid-template-columns: 1fr; }
+.mobil .hi-lauf-schritte { grid-template-columns: 1fr 1fr; }
+/* Konstruktion */
+.kn-rechner { margin-bottom: 16px; align-items: stretch; }
+.kn-karte .chips { margin: 4px 0 10px; }
+.kn-karte .chip { padding: 6px 12px; }
+.kn-da { font-style: normal; color: var(--mint); font-size: 9px; vertical-align: 2px; }
+.kn-stufen .info-zeile { padding: 8px 14px; }
+.kn-stufen .kn-empf { background: var(--mint-weich); }
+.kn-stufen .kn-empf strong { color: var(--mint); }
+.kn-regler { margin: 14px 0 8px; }
+.kn-erg .hinweis { margin: 0; }
+.kn-erg strong { color: inherit; }
+.kn-einsatz-erg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.kn-gross { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--mint-weich); border: 1px solid rgba(62,230,168,.3); }
+.kn-gross span { font-size: 12px; color: var(--leise); }
+.kn-gross strong { font-size: 26px; color: var(--mint); line-height: 1.1; }
+.kn-gross small { font-size: 11px; }
+.kn-karte .info-liste .info-zeile { padding: 9px 14px; }
+.kn-karte > p.klein { margin: 10px 0 0; }
+.kn-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; align-items: start; }
+.mobil .kn-raster { grid-template-columns: 1fr; }
+.kn-bild { width: 96px; height: auto; flex: none; border-radius: 10px; background: rgba(0,0,0,.3); }
+.mobil .kn-bild { width: 84px; }
+.kn-kopf-text { display: grid; gap: 2px; min-width: 0; }
+.kn-kopf-text small { font-size: 12px; }
+.kn-punkte { margin-top: 4px; }
+.kn-werte { margin-top: 12px; }
+.kn-werte .info-zeile { padding: 8px 12px; font-size: 13px; }
+.kn-werte strong { color: var(--amber); text-align: right; }
+.kn-tab-titel { margin: 12px 0 6px; }
+.kn-tabelle { margin-top: 12px; border: 1px solid var(--rand); border-radius: 12px; overflow: hidden; font-size: 13px; }
+.kn-tz { display: grid; grid-template-columns: 1.3fr repeat(calc(var(--spalten) - 1), 1fr); gap: 6px; padding: 7px 12px; border-bottom: 1px solid var(--rand); align-items: center; }
+.kn-tz:last-child { border-bottom: none; }
+.kn-tz span { color: var(--amber); font-variant-numeric: tabular-nums; }
+.kn-tk { background: rgba(0,0,0,.25); }
+.kn-tk span { color: var(--leise); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+.mobil .kn-tz { padding: 7px 10px; font-size: 12px; }
+/* Slicer-Lexikon */
+.lex-werkzeug { display: flex; margin-bottom: 12px; }
+.lex-werkzeug .suche { max-width: 520px; }
+.lex-gruppen .chip small { margin-left: 6px; font-size: 11px; color: var(--leise); }
+.lex-gruppen .chip.an small { color: var(--mint); }
+.lex-gruppe { margin-bottom: 18px; }
+.lex-gruppe-titel { margin: 4px 0 10px; font-size: 15px; }
+.lex-gruppe-titel small { font-weight: 400; }
+.lex-liste { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px; align-items: start; }
+.mobil .lex-liste { grid-template-columns: 1fr; }
+.lex-eintrag .hi-eintrag-kopf { flex-wrap: wrap; row-gap: 2px; padding: 11px 14px; }
+.lex-name { display: grid; gap: 1px; min-width: 0; flex: 1 1 180px; }
+.lex-name small { color: var(--leise); font-size: 12px; }
+.lex-name small::before { content: "("; } .lex-name small::after { content: ")"; }
+.lex-ab { order: 3; flex-basis: 100%; font-size: 11px; color: var(--mint); opacity: .8; }
+.lex-eintrag .hi-pfeil { order: 2; }
+.lex-text { margin: 0; display: grid; gap: 4px; font-size: 14px; line-height: 1.45; }
+.lex-text dt { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); margin-top: 6px; }
+.lex-text dd { margin: 0; }
+.lex-text dd.lex-werte { color: var(--amber); }
+.lex-anzahl { margin: 0 0 8px; }
+/* Druckplatten */
+.pl-matrix { display: grid; gap: 4px; }
+.pl-zeile { display: grid; grid-template-columns: minmax(56px, .8fr) repeat(5, minmax(0, 1fr)); gap: 4px; align-items: stretch; border-radius: 12px; transition: background .2s; }
+.pl-zeile.deine { background: rgba(62,230,168,.07); box-shadow: inset 0 0 0 1px rgba(62,230,168,.3); }
+.pl-mat { display: flex; align-items: center; padding-left: 10px; font-size: 14px; }
+.pl-zeile.deine .pl-mat { color: var(--mint); }
+.pl-spalte { padding: 8px 4px; border-radius: 10px; font-size: 12px; font-weight: 600; color: var(--leise); text-align: center; line-height: 1.2; border: 1px solid transparent; hyphens: manual; }
+.pl-spalte:hover { color: var(--text); background: var(--flaeche-hover); }
+.pl-spalte.an { color: var(--mint); border-color: rgba(62,230,168,.45); background: var(--mint-weich); }
+.pl-spalte.drin::after { content: " ●"; color: var(--mint); font-size: 9px; vertical-align: 1px; }
+.pl-zelle { display: grid; place-items: center; gap: 0; padding: 7px 2px; border-radius: 10px; background: rgba(255,255,255,.03); border: 1px solid var(--rand); transition: transform .15s, border-color .15s; min-width: 0; }
+.pl-zelle:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.2); }
+.pl-zelle b { font-size: 15px; line-height: 1.1; }
+.pl-zelle small { font-size: 11px; color: var(--leise); font-variant-numeric: tabular-nums; }
+.pl-zelle.ok { background: rgba(62,230,168,.10); border-color: rgba(62,230,168,.28); }
+.pl-zelle.ok b { color: var(--mint); }
+.pl-zelle.kleber { background: var(--amber-weich); border-color: rgba(255,181,71,.3); }
+.pl-zelle.kleber b { color: var(--amber); font-size: 12px; font-weight: 600; }
+.pl-zelle.nein b { color: rgba(255,107,107,.75); }
+.pl-zelle.nein { opacity: .7; }
+.pl-zelle.spalte { box-shadow: 0 0 0 1px rgba(62,230,168,.5); }
+.pl-legende { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 12px 0 4px; font-size: 12px; color: var(--leise); }
+.pl-legende b { font-weight: 700; margin-right: 4px; }
+.pl-legende .ok { color: var(--mint); } .pl-legende .kleber { color: var(--amber); } .pl-legende .nein { color: var(--rot); }
+.pl-detail-kopf { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.pl-detail-kopf h2 { font-size: 18px; }
+.pl-detail-kopf p { margin: 4px 0 0; font-size: 14px; }
+.pl-bild { width: 120px; height: auto; flex: none; border-radius: 12px; background: rgba(0,0,0,.3); }
+.pl-wahl .chip { padding: 6px 12px; }
+.mobil .pl-karte { padding: 14px 10px; }
+.mobil .pl-zeile { grid-template-columns: 46px repeat(5, minmax(0, 1fr)); gap: 3px; }
+.mobil .pl-mat { padding-left: 4px; font-size: 12px; }
+.mobil .pl-spalte { font-size: 10px; padding: 6px 1px; }
+.mobil .pl-zelle { padding: 6px 1px; }
+.mobil .pl-zelle.kleber b { font-size: 9.5px; }
+.mobil .pl-zelle small { font-size: 9.5px; }
+.mobil .pl-detail-kopf { flex-direction: column; align-items: flex-start; }
+.mobil .pl-bild { width: 110px; }
+@media (prefers-reduced-motion: reduce) { .hi-lauf { animation: none; } .hi-pfeil, .pl-zelle { transition: none; } }
 `;

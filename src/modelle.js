@@ -535,7 +535,21 @@ const MOD_ICON = {
   orbit: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><ellipse cx="12" cy="12" rx="9.6" ry="4.3" transform="rotate(-28 12 12)"/><ellipse cx="12" cy="12" rx="4.3" ry="9.6" transform="rotate(-28 12 12)" opacity=".45"/><circle cx="12" cy="12" r="2.4" class="voll"/><path d="M17.6 4.3l2.9.6-.9 2.8"/></svg>`,
   orbitEin: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><ellipse cx="12" cy="16" rx="9.4" ry="3.6"/><path d="M12 3v13" stroke-dasharray="2 2"/><circle cx="12" cy="16" r="2.2" class="voll"/><path d="M18.4 11.6l2.6 1.6-2.4 1.8"/></svg>`,
   haus: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M4 11.5L12 4.5l8 7"/><path d="M6.5 10v9h11v-9"/><path d="M10.5 19v-5h3v5"/></svg>`,
+  // Werkzeuge (v0.12)
+  flaeche: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M7 4.5l7-1.5 4 5-7 1.5z" opacity=".5"/><path d="M12 10.5v6.5"/><path d="M9.2 14.4L12 17.2l2.8-2.8"/><path d="M3 20.5h18"/><path d="M7 20.5l1.6-2.2h6.8l1.6 2.2" class="voll" opacity=".55"/></svg>`,
+  lage: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M3 20.5h18"/><path d="M5 20.5v-6h6v6"/><path d="M13 20.5l3.5-7 3.5 7" opacity=".5"/><path d="M16 3.5l1 2.3 2.4.3-1.8 1.6.5 2.4-2.1-1.3-2.1 1.3.5-2.4-1.8-1.6 2.4-.3z" class="voll"/></svg>`,
+  messen: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M3.5 16.5L16.5 3.5l4 4-13 13z"/><path d="M7 13l1.8 1.8M9.6 10.4l1.2 1.2M12.2 7.8l1.8 1.8M14.8 5.2l1.2 1.2"/></svg>`,
+  waende: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M4 20V6l4-2v16"/><path d="M16 20V4l4 2v14"/><path d="M8 12h8" stroke-dasharray="2 2"/><path d="M9.5 10.5L8 12l1.5 1.5M14.5 10.5L16 12l-1.5 1.5"/></svg>`,
+  skala: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><rect x="4" y="11" width="9" height="9" rx="1.5" opacity=".55"/><path d="M4 7V4h3M17 4h3v3M20 17v3h-3"/><path d="M11 13l9-9"/><path d="M15 4h5v5"/></svg>`,
 };
+const MOD_WERKZEUGE = [
+  { id: "flaeche", name: "Auflegen", titel: "Auf Fläche legen", text: "Fläche antippen, sie kommt flach aufs Bett" },
+  { id: "lage", name: "Beste Lage", titel: "Beste Lage finden", text: "Lage mit den wenigsten Stützen" },
+  { id: "messen", name: "Messen", titel: "Abstand messen", text: "Zwei Punkte antippen" },
+  { id: "waende", name: "Wände", titel: "Wandstärke prüfen", text: "Zu dünne Stellen für die Düse" },
+  { id: "skala", name: "Skalieren", titel: "Skalieren", text: "In Prozent oder auf ein Maß" },
+];
+const MOD_WAND_PROBEN = 40000;   // höchstens so viele Strahlen für die Wandstärke (große Modelle: Stichprobe)
 const SCHICHT_BEREICH = { 0.2: [0.06, 0.14, 0.1], 0.4: [0.08, 0.28, 0.2], 0.6: [0.18, 0.42, 0.3], 0.8: [0.24, 0.56, 0.4] };
 
 const MOD_MAX_BYTES = 200 * 1048576;      // größere Dateien bringen Handys zum Absturz
@@ -548,7 +562,7 @@ const ModellAnsicht = {
     if (!m) return this._modLeerHtml();
     if (m.laedt) return `<div class="dr-karte mod-laden"><span class="dreher"></span><div><h2>${esc(m.name)}</h2><p class="leise">${esc(m.laedt)}</p></div></div>`;
     const tabs = m.art === "stl"
-      ? [["uebersicht", "Übersicht"], ["loecher", `Löcher${m.loecher ? ` (${m.loecher.length})` : ""}`], ["schichten", "Schichten"]]
+      ? [["uebersicht", "Übersicht"], ["loecher", `Löcher${m.loecher ? ` (${m.loecher.length})` : ""}`], ["schichten", "Schichten"], ["werkzeuge", "Werkzeuge"]]
       : [["uebersicht", "Übersicht"], ["schichten", "Schichten"]];
     return `<div class="mod-raster">
       <div class="mod-huelle">
@@ -556,6 +570,7 @@ const ModellAnsicht = {
       <div class="mod-buehne-karte dr-karte">
         <div id="mod-buehne" class="mod-buehne"></div>
         <div id="mod-marker" class="mod-marker"></div>
+        <div id="mod-mess" class="mod-mess" aria-hidden="true"></div>
         <div class="mod-leiste">
           <span class="mod-name" title="${esc(m.name)}">${m.art === "stl" ? "🧊" : "🧾"} ${esc(m.name)}</span>
           <button class="chip" data-aktion="mod-ansicht" data-id="iso">3D</button>
@@ -574,12 +589,13 @@ const ModellAnsicht = {
           <span id="mod-schicht-text" class="mod-schicht-text">${this._modSchichtText()}</span>
         </div>` : ""}
         ${m.markieren ? `<div class="mod-markier-hinweis" data-einmal="mod-markier">🎯 Tippe auf die Stelle, an der das Loch beginnt <button class="mini" data-aktion="mod-markieren">Abbrechen</button></div>` : ""}
+        ${this._modWzHinweisHtml()}
         <p class="mod-hilfe leise">${this._mobil ? "Ein Finger dreht um die berührte Stelle · zwei Finger zoomen und schieben" : "Ziehen dreht um die Stelle unter dem Zeiger · Rechtsklick oder Shift schiebt · Mausrad zoomt"}</p>
       </div>
       </div>
       <aside class="mod-seite dr-karte">
         <div class="tabs mod-tabs">${tabs.map(([id, n]) => `<button class="tab ${m.tab === id ? "an" : ""}" data-aktion="mod-tab" data-id="${id}">${n}</button>`).join("")}</div>
-        <div class="mod-inhalt">${m.tab === "loecher" ? this._modLoecherHtml() : m.tab === "schichten" ? this._modSchichtenHtml() : this._modUebersichtHtml()}</div>
+        <div class="mod-inhalt">${this._modInhaltHtml()}</div>
         <div class="mod-fuss"><button class="knopf breit mod-ws" data-aktion="ws-aus-modell">＋ In die Warteschlange</button></div>
       </aside>
     </div>`;
@@ -993,7 +1009,8 @@ const ModellAnsicht = {
     const rolle = this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => b.rest_g - a.rest_g)[0];
     const muster = this._modMusterId || this._modEinstellung("muster");
     return { tab: "uebersicht", fuellung: 15, waende: 2, duese: 0.4, schicht_h: 0.2, stuetzen: "keine", eingesetzt: {}, rolleId: this._modRolleId || (rolle && rolle.id),
-      muster: FUELLMUSTER.some((x) => x.id === muster) ? muster : "grid", drehEigen: false, drehWerte: [0, 0, 0], drehFeld: 2 };
+      muster: FUELLMUSTER.some((x) => x.id === muster) ? muster : "grid", drehEigen: false, drehWerte: [0, 0, 0], drehFeld: 2,
+      werkzeug: null, skala: 100, messPunkte: [] };
   },
   // Speicher für „Zuletzt geöffnet“: auf dem Server, wenn die Integration da ist
   _modSpeicher() {
@@ -1071,6 +1088,9 @@ const ModellAnsicht = {
     m.ueber = ueberhaenge(m.v);
     m.loecher = null; m.eingesetzt = {}; m.lochAuswahl = null; m.geloescht = [];
     m.schichten = null; m.schichtZahl = 0; m.schichtGewicht = null;
+    // Werkzeuge: Ergebnisse gelten nur für die alte Geometrie; „Rückgängig“ nur für die letzte Werkzeug-Änderung
+    m.messPunkte = []; m.duenn = null; m.bvh = null; m.lage = null; m.skala = 100; m.skalaHinweise = null;
+    m.rueck = m.rueckNeu || null; m.rueckNeu = null;
     const id = (m.id = (m.id || 0) + 1);
     setTimeout(() => {
       if (this._mod !== m || m.id !== id) return;
@@ -1108,7 +1128,7 @@ const ModellAnsicht = {
     if (!this._buehne) {
       this._buehne = new Buehne();
       if (!this._buehne.ok) { ort.innerHTML = `<div class="dr-kamera-leer">Dieser Browser kann kein WebGL.</div>`; return; }
-      this._buehne.nachZeichnen = () => { this._modMarkerSetzen(); this._modWuerfelNachfuehren(); };
+      this._buehne.nachZeichnen = () => { this._modMarkerSetzen(); this._modWuerfelNachfuehren(); this._modMessSetzen(); };
       this._buehne.antippen = (strahl) => this._modAntippen(strahl);
       this._buehne.treffen = (strahl) => this._modTreffen(strahl);
       this._buehne.setzeOrbitArt(this._modOrbitArt);
@@ -1126,6 +1146,8 @@ const ModellAnsicht = {
     this._modRo.disconnect();
     this._modRo.observe(ort);
     this._modMarker();
+    this._modMess();
+    this._modFussAndocken();
     this._buehne.neu();
   },
 
@@ -1136,19 +1158,21 @@ const ModellAnsicht = {
     if (m.art === "stl") {
       const farbe = new Float32Array(m.v.length);
       const ueber = m.tab === "schichten" && m.stuetzen !== "keine" ? m.ueber.markiert : null;
+      const duenn = m.tab === "werkzeuge" && m.werkzeug === "waende" && m.duenn && m.duenn.markiert;   // zu dünne Wände rot
       for (let t = 0; t < m.v.length / 9; t++) {
-        const f = ueber && ueber[t] ? [1, 0.45, 0.3] : [0.24, 0.86, 0.64];
+        const f = ueber && ueber[t] ? [1, 0.45, 0.3] : duenn && duenn[t] ? [1, 0.25, 0.3] : [0.24, 0.86, 0.64];
         for (let k = 0; k < 9; k += 3) { farbe[t * 9 + k] = f[0]; farbe[t * 9 + k + 1] = f[1]; farbe[t * 9 + k + 2] = f[2]; }
       }
       b.mesh("modell", m.v, farbe);
       this._modGrundriss();
       Object.entries(m.eingesetzt).forEach(([nr, id]) => this._modTeilZeigen(Number(nr), id, false));
       if (m.tab === "schichten") this._modSchichtenStarten();
-      if (m.drehWerte && m.drehWerte.some((x) => Number(x))) setTimeout(() => this._modDrehVorschau(), 0);
+      if ((m.drehWerte && m.drehWerte.some((x) => Number(x))) || this._modSkalaVorschau() !== 1 || this._modLageVorschau()) setTimeout(() => this._modDrehVorschau(), 0);
     } else {
       this._modGcodeLinien();
     }
     this._modSchichtAnzeigen();
+    this._modMess();
   },
 
   _modGrundriss() {
@@ -1164,7 +1188,7 @@ const ModellAnsicht = {
   _modMarker() {
     const box = this.shadowRoot.getElementById("mod-marker");
     const m = this._mod;
-    if (!box || !m || m.art !== "stl" || !m.loecher || m.tab === "schichten") { if (box) box.innerHTML = ""; return; }
+    if (!box || !m || m.art !== "stl" || !m.loecher || m.tab === "schichten" || m.tab === "werkzeuge") { if (box) box.innerHTML = ""; return; }
     box.innerHTML = m.loecher.map((l) => `<button class="mod-pin ${m.lochAuswahl === l.nr ? "an" : ""} ${m.eingesetzt[l.nr] ? "drin" : ""}" data-aktion="mod-loch" data-nr="${l.nr}" data-pin="${l.nr}">${l.nr}</button>`).join("");
     this._modMarkerSetzen();
   },
@@ -1362,7 +1386,11 @@ const ModellAnsicht = {
 
   _modSeiteNeu() {
     const box = this.shadowRoot.querySelector(".mod-inhalt");
-    if (box) { const sc = box.scrollTop; box.innerHTML = this._mod.tab === "loecher" ? this._modLoecherHtml() : this._mod.tab === "schichten" ? this._modSchichtenHtml() : this._modUebersichtHtml(); box.scrollTop = sc; this._auswahlenBauen(); }
+    if (box) {
+      const sc = box.scrollTop, schonDa = new Set([...box.querySelectorAll("[data-einmal]")].map((x) => x.dataset.einmal));
+      box.innerHTML = this._modInhaltHtml(); box.scrollTop = sc; this._auswahlenBauen();
+      box.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });   // nicht erneut einblenden
+    }
     const tab = this.shadowRoot.querySelector('[data-aktion="mod-tab"][data-id="loecher"]');
     if (tab && this._mod.loecher) tab.textContent = `Löcher (${this._mod.loecher.length})`;
   },
@@ -1371,6 +1399,7 @@ const ModellAnsicht = {
   _modKlick(a, el) {
     const m = this._mod;
     if (!["mod-orbit-menue", "mod-orbit-art", "mod-wuerfel-ziehen"].includes(a)) this._modMenueZu();
+    if (a.startsWith("mod-wz")) { if (m && m.art === "stl" && !m.laedt) this._modWzKlick(a, el); return; }
     switch (a) {
       case "mod-ansicht": if (this._buehne) this._buehne.ansicht(el.dataset.id, m && m.grenzen, true); return;
       case "mod-orbit-menue": this._modOrbitMenue = !this._modOrbitMenue; break;
@@ -1419,6 +1448,8 @@ const ModellAnsicht = {
       case "mod-schliessen": this._mod = null; if (this._buehne) for (const n of [...this._buehne.objekte.keys()]) if (!n.startsWith("bett")) this._buehne.weg(n); break;
       case "mod-tab":
         m.tab = el.dataset.id;
+        if (m.tab !== "werkzeuge") this._modWzVerlassen();
+        else if (m.drehWerte.some((x) => Number(x))) m.drehWerte = [0, 0, 0];   // offene Winkel-Vorschau würde Antippen und Messen verfälschen
         this._zeichnen();
         this._modSzene();
         return;
@@ -1455,7 +1486,10 @@ const ModellAnsicht = {
         m.duese = Number(el.dataset.id);
         const [lo, hi, std] = SCHICHT_BEREICH[m.duese] || [0.08, 0.28, 0.2];
         if (m.schicht_h < lo || m.schicht_h > hi) m.schicht_h = std;
-        this._zeichnen(); this._modSchichtenStarten();
+        if (m.tab !== "schichten" && m.duenn && m.duenn.dicke) this._modDuennAuswerten();   // Wandstärke-Grenze hängt an der Düse
+        this._zeichnen();
+        if (m.tab === "schichten") this._modSchichtenStarten();
+        else if (m.duenn && m.duenn.dicke) this._modSzene();
         return;
       }
       case "mod-stuetzen": m.stuetzen = el.dataset.id; this._zeichnen(); this._modSzene(); return;
@@ -1494,6 +1528,7 @@ const ModellAnsicht = {
   // Loch von Hand: Strahl gegen alle Dreiecke (Möller–Trumbore), nächster Treffer zählt
   _modAntippen(strahl) {
     const m = this._mod;
+    if (m && m.art === "stl" && m.tab === "werkzeuge" && ["flaeche", "messen"].includes(m.werkzeug)) { this._modWzAntippen(strahl); return; }
     if (!m || !m.markieren || m.art !== "stl") return;
     const o = strahl.von, d = strahl.richtung;
     const h = strahlTreffer(m.v, o, d);
@@ -1523,11 +1558,13 @@ const ModellAnsicht = {
   _modDrehVorschau() {
     const m = this._mod, b = this._buehne;
     if (!m || !b || m.art !== "stl") return;
-    const aktiv = m.drehWerte && m.drehWerte.some((x) => Number(x));
+    const lage = this._modLageVorschau(), s = this._modSkalaVorschau();
+    const dreh = !lage && m.drehWerte && m.drehWerte.some((x) => Number(x));
+    const aktiv = dreh || !!lage || s !== 1;
     const c = [0, 1, 2].map((i) => (m.grenzen.min[i] + m.grenzen.max[i]) / 2);
-    const R = aktiv ? drehMatrix(m.drehWerte) : null;
-    const mat = aktiv ? M4.drehungUm(R, c) : M4.eins();
-    if (aktiv) {
+    const R = dreh ? drehMatrix(m.drehWerte) : null;
+    let mat = lage ? this._modLageMatrix(lage.R).mat : dreh ? M4.drehungUm(R, c) : M4.eins();
+    if (dreh) {
       // Wie beim Anwenden: der tiefste Punkt liegt immer auf dem Druckbett
       const v = m.v;
       let unten = Infinity;
@@ -1537,6 +1574,8 @@ const ModellAnsicht = {
       }
       mat[14] = -unten - (R[6] * c[0] + R[7] * c[1] + R[8] * c[2]);
     }
+    // Skalieren um die Mitte der Grundfläche (das Modell steht immer mittig auf dem Bett, z = 0 bleibt unten)
+    if (s !== 1) mat = M4.mal([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, c[0] * (1 - s), c[1] * (1 - s), 0, 1], mat);
     b.setze("modell", { m: mat });
     b.setze("grundriss", { sichtbar: !aktiv });
     for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: !aktiv && m.tab !== "schichten" });
@@ -1563,6 +1602,7 @@ const ModellAnsicht = {
     if (!k || !this._mod) return false;
     const m = this._mod;
     if (k === "schicht") { this._modSchichtSetzen(Number(t.value)); return true; }
+    if (k === "skala" || k === "skala-mm") { this._modSkalaEingabe(t, k); return true; }
     if (k === "dreh-grad") {
       const i = Number(t.dataset.achse), w = Number(String(t.value).replace(",", "."));
       m.drehFeld = i;
@@ -1602,6 +1642,8 @@ const ModellAnsicht = {
     if (!m) return false;
     if (k === "rolle") { m.rolleId = this._modRolleId = t.value; this._zeichnen(); return true; }
     if (k === "dreh-grad") return true;
+    if (k === "skala") return true;
+    if (k === "skala-mm") { this._modSkalaAnzeigen(); return true; }   // Felder auf die gerundeten Werte bringen
     if (k === "muster") {
       if (!FUELLMUSTER.some((x) => x.id === t.value)) return true;
       m.muster = this._modMusterId = t.value;
@@ -1618,5 +1660,487 @@ const ModellAnsicht = {
     }
     if (["fuellung", "waende", "schicht_h"].includes(k) && m.tab === "schichten" && m.art === "stl") { this._modSchichtenStarten(); this._modSeiteNeu(); return true; }
     return ["fuellung", "waende", "schicht_h", "schicht"].includes(k);
+  },
+
+  // ==== Werkzeuge (v0.12): Auf Fläche legen, Beste Lage, Messen, Wandstärke, Skalieren ====
+  _modInhaltHtml() {
+    const m = this._mod;
+    if (m.tab === "loecher") return this._modLoecherHtml();
+    if (m.tab === "schichten") return this._modSchichtenHtml();
+    if (m.tab === "werkzeuge" && m.art === "stl") return this._modWerkzeugeHtml();
+    return this._modUebersichtHtml();
+  },
+
+  // Ohne Auswahl: Liste mit Erklärung. Mit Auswahl: kleine Werkzeugleiste zum Wechseln und darunter das Werkzeug.
+  _modWerkzeugeHtml() {
+    const m = this._mod, w = m.werkzeug;
+    if (!w) return `<p class="leise mod-wz-einleitung">Ausrichten, messen und die Größe ändern. Werkzeuge, die ein Antippen brauchen, arbeiten direkt im 3D-Bild.</p>
+      <div class="mod-wz-liste">${MOD_WERKZEUGE.map((x) => `<button class="mod-wz-zeile" data-aktion="mod-wz" data-id="${x.id}">${MOD_ICON[x.id]}
+        <span><strong>${x.titel}</strong><small>${x.text}</small></span><span class="mod-wz-pfeil" aria-hidden="true">›</span></button>`).join("")}</div>`;
+    // Nach einer Änderung der Geometrie sind alte Ergebnisse weg: neu rechnen, sobald das Werkzeug zu sehen ist
+    if (w === "lage" && !m.lage) this._modLageStarten();
+    if (w === "waende" && !m.duenn) this._modWaendeStarten();
+    const leiste = `<div class="mod-wz-leiste" role="toolbar" aria-label="Werkzeuge">${MOD_WERKZEUGE.map((x) => `<button class="mod-wz ${w === x.id ? "an" : ""}" data-aktion="mod-wz" data-id="${x.id}" aria-pressed="${w === x.id}" title="${esc(x.titel)}">${MOD_ICON[x.id]}<span>${x.name}</span></button>`).join("")}</div>`;
+    const inhalt = { flaeche: this._modWzFlaecheHtml, lage: this._modWzLageHtml, messen: this._modWzMessenHtml, waende: this._modWzWaendeHtml, skala: this._modWzSkalaHtml }[w].call(this);
+    return `${leiste}<div class="mod-wz-karte" data-einmal="mod-wz-${w}">${inhalt}</div>`;
+  },
+
+  _modWzRueckHtml() {
+    const r = this._mod.rueck;
+    return r ? `<button class="knopf leise breit oben-abstand" data-aktion="mod-wz-rueck">↺ Rückgängig: ${esc(r.text)}</button>` : "";
+  },
+
+  // Hinweis im 3D-Bild, solange ein Werkzeug auf Antippen wartet
+  _modWzHinweisHtml() {
+    const m = this._mod;
+    if (!m || m.art !== "stl" || m.tab !== "werkzeuge") return "";
+    if (m.werkzeug === "flaeche") return `<div class="mod-markier-hinweis mod-wz-hinweis" data-einmal="mod-wz-h-flaeche">${MOD_ICON.flaeche}<span>Tippe auf die Fläche, die aufs Bett soll</span><button class="mini" data-aktion="mod-wz" data-id="flaeche">Fertig</button></div>`;
+    if (m.werkzeug === "messen") {
+      const n = (m.messPunkte || []).length;
+      return `<div class="mod-markier-hinweis mod-wz-hinweis" data-einmal="mod-wz-h-messen">${MOD_ICON.messen}<span>${n === 0 ? "Ersten Punkt antippen" : n === 1 ? "Jetzt den zweiten Punkt antippen" : "Neuer Tipp beginnt eine neue Messung"}</span>${n ? `<button class="mini" data-aktion="mod-wz-mess-weg">Löschen</button>` : ""}<button class="mini" data-aktion="mod-wz" data-id="messen">Fertig</button></div>`;
+    }
+    return "";
+  },
+
+  _modWzFlaecheHtml() {
+    return `<h3>Auf Fläche legen</h3>
+      <p class="leise">Tippe im 3D-Bild auf eine Fläche. Das Teil dreht sich so, dass genau diese Fläche flach auf dem Druckbett liegt.</p>
+      <div class="hinweis mint mod-wz-aktiv"><span class="mod-wz-puls"></span>Bereit: tippe auf das Modell. Ziehen dreht weiter die Ansicht.</div>
+      <p class="leise klein">Große, ebene Flächen unten haften am besten und brauchen keine Stützen. Mit dem Würfel (UNTEN) siehst du, was gerade aufliegt.</p>
+      ${this._modWzRueckHtml()}`;
+  },
+
+  _modWzLageHtml() {
+    const m = this._mod, l = m.lage;
+    if (!l || l.laeuft) return `<h3>Beste Lage finden</h3><div class="mod-laden-klein" id="mod-lage-status"><span class="dreher klein"></span> Vergleiche ${l && l.anzahl ? `${l.anzahl} Lagen` : "Lagen"} … ${zahl((l ? l.fortschritt : 0) * 100)} %</div>`;
+    const a = l.aktuell, w = l.liste[l.wahl], best = l.liste[0];
+    if (!w) return `<h3>Beste Lage finden</h3><div class="hinweis">Keine andere Lage gefunden.</div>`;
+    const cm = (x) => `${zahl(x / 100, 1)} cm²`;
+    const schonGut = best.flaeche >= a.flaeche - 50;   // weniger als 0,5 cm² besser: nicht der Rede wert
+    const max = Math.max(a.flaeche, w.flaeche, 1);
+    const balken = (x) => `<div class="mod-balken"><i style="width: ${Math.max(x.flaeche > 0 ? 3 : 0, (x.flaeche / max) * 100).toFixed(1)}%"></i></div>`;
+    const weniger = a.flaeche > 0 ? Math.round(((a.flaeche - w.flaeche) / a.flaeche) * 100) : 0;
+    return `<h3>Beste Lage finden</h3>
+      ${schonGut ? `<div class="hinweis mint">✓ Die jetzige Lage braucht schon am wenigsten Stützen (${cm(a.flaeche)}).</div>`
+        : `<div class="hinweis mint">★ Vorschlag: etwa ${cm(best.flaeche)} statt ${cm(a.flaeche)} Stützfläche.</div>`}
+      <div class="mod-vergleich">
+        <div class="mod-v-zeile"><span>Jetzt</span>${balken(a)}<strong>${cm(a.flaeche)}</strong></div>
+        <div class="mod-v-zeile vorschlag"><span>${l.wahl === 0 ? (schonGut ? "Nächstbeste" : "Vorschlag") : `Lage ${l.wahl + 1}`}</span>${balken(w)}<strong>${cm(w.flaeche)}</strong></div>
+      </div>
+      <p class="klein mod-v-text">${weniger > 0 ? `${weniger} % weniger Stützfläche` : weniger < 0 ? `${-weniger} % mehr Stützfläche` : "Gleich viel Stützfläche"} · Höhe ${zahl(a.hoehe, 1)} → ${zahl(w.hoehe, 1)} mm</p>
+      <div class="r-kopf oben-abstand"><span>Weitere Lagen</span><span class="leise klein">antippen = Vorschau</span></div>
+      <div class="mod-lage-chips">${l.liste.map((x, i) => `<button class="chip ${i === l.wahl ? "an" : ""}" data-aktion="mod-wz-lage-wahl" data-i="${i}"><strong>${i === 0 ? "★ " : ""}${cm(x.flaeche)}</strong><small>${zahl(x.hoehe, 0)} mm hoch</small></button>`).join("")}</div>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="mod-wz-lage-vorschau">${l.vorschau ? "Vorschau aus" : "Vorschau"}</button><button class="knopf" data-aktion="mod-wz-lage-anwenden">Übernehmen</button></div>
+      <p class="leise klein">Verglichen werden ${l.anzahl} Lagen: die sechs Seiten und die größten ebenen Flächen. Gezählt wird, was steiler als ${STUETZ_WINKEL}° überhängt.</p>
+      ${this._modWzRueckHtml()}`;
+  },
+
+  _modWzMessenHtml() {
+    const p = this._mod.messPunkte || [];
+    let erg = `<p class="leise">Tippe im 3D-Bild nacheinander auf zwei Stellen des Modells.</p>`;
+    if (p.length === 2) {
+      const d = V3.minus(p[1], p[0]);
+      erg = `<div class="mod-mess-ergebnis"><span class="leise klein">Abstand</span><strong id="mod-mess-wert">${zahl(Math.hypot(d[0], d[1], d[2]), 2)} mm</strong>
+        <div class="mod-mess-achsen">${["X", "Y", "Z"].map((n, i) => `<span class="a-${n.toLowerCase()}">Δ${n}<b>${zahl(Math.abs(d[i]), 2)}</b></span>`).join("")}</div></div>`;
+    }
+    return `<h3>Abstand messen</h3>
+      <div class="mod-mess-schritte"><span class="${p.length >= 1 ? "fertig" : "jetzt"}"><i>1</i>Erster Punkt</span><span class="${p.length >= 2 ? "fertig" : p.length === 1 ? "jetzt" : ""}"><i>2</i>Zweiter Punkt</span></div>
+      ${erg}
+      ${p.length ? `<button class="knopf leise breit oben-abstand" data-aktion="mod-wz-mess-weg">✕ Messung löschen</button>` : ""}
+      <p class="leise klein">Gemessen wird die gerade Strecke zwischen den Punkten auf der Oberfläche, in mm. Ein dritter Tipp beginnt eine neue Messung.</p>`;
+  },
+
+  _modWzWaendeHtml() {
+    const m = this._mod, d = m.duenn;
+    const duesen = [...new Set(this._daten.inventar.filter((t) => t.kat === "duese" && (t.menge == null || t.menge > 0)).map((t) => t.groesse))].sort();
+    const linie = 1.125 * m.duese, grenze = 2 * linie;
+    let erg;
+    if (!d || d.laeuft) erg = `<div class="mod-laden-klein"><span class="dreher klein"></span> Messe Wandstärken … ${zahl((d ? d.fortschritt : 0) * 100)} %</div>`;
+    else if (!d.gemessen) erg = `<div class="hinweis">Keine Wand messbar. Ist das Modell geschlossen (wasserdicht)?</div>`;
+    else if (d.anzahl) erg = `<div class="hinweis rot-hinweis mod-duenn-hinweis">⚠️ ${zahl(d.anzahl)} von ${zahl(d.gemessen)} Messstellen sind dünner als ${zahl(grenze, 2)} mm, zusammen etwa ${zahl(d.flaeche / 100, d.flaeche < 100 ? 2 : 1)} cm². Dünnste Stelle: ${zahl(d.min, 2)} mm.
+        <button class="mini" data-aktion="mod-wz-waende-zeigen">Zeigen</button></div>
+      <div class="mod-legende"><span><i style="background: #ff4052"></i>zu dünn für die ${zahl(m.duese, 1)}-mm-Düse</span></div>`;
+    else erg = `<div class="hinweis mint">✓ Alle gemessenen Wände sind mindestens ${zahl(grenze, 2)} mm dick. Dünnste Stelle: ${zahl(d.min, 2)} mm.</div>`;
+    return `<h3>Wandstärke prüfen</h3>
+      <div class="r-kopf"><span>Düse</span><span class="leise klein">aus deinem Inventar</span></div>
+      <div class="chips">${(duesen.length ? duesen : [0.4]).map((x) => `<button class="chip ${m.duese === x ? "an" : ""}" data-aktion="mod-duese" data-id="${x}">${zahl(x, 1)} mm</button>`).join("")}</div>
+      <p class="leise klein">Eine Linie ist etwa ${zahl(linie, 2)} mm breit. Damit eine Wand sauber druckt, braucht sie mindestens zwei Linien, also ${zahl(grenze, 2)} mm.</p>
+      <div id="mod-waende-status">${erg}</div>
+      ${d && !d.laeuft && d.stichprobe ? `<p class="leise klein">Großes Modell: geprüft wurde eine Stichprobe von ${zahl(d.proben)} Stellen.</p>` : ""}
+      <p class="leise klein">Gemessen wird von der Oberfläche gerade nach innen bis zur anderen Seite der Wand. Feine Spitzen und Kanten können auch als dünn auffallen.</p>`;
+  },
+
+  _modWzSkalaHtml() {
+    const m = this._mod, s = m.skala / 100, g = m.grenzen.groesse;
+    return `<h3>Skalieren</h3>
+      ${this._modReglerHtml("skala", "Größe", Math.round(m.skala), 10, 400, 1, "%")}
+      <div class="chips mod-skala-schnell">${[50, 80, 120, 150, 200].map((p) => `<button class="chip ${Math.abs(m.skala - p) < 1e-6 ? "an" : ""}" data-aktion="mod-wz-skala-setzen" data-p="${p}">${p} %</button>`).join("")}</div>
+      <div class="r-kopf oben-abstand"><span>Oder auf ein Maß</span><span class="leise klein">ein Feld reicht, der Rest geht mit</span></div>
+      <div class="mod-dreh-felder mod-skala-felder">${["X", "Y", "Z"].map((a, i) => `<label class="mod-dreh-feld a-${a.toLowerCase()}"><span>${a}</span>
+        <input type="number" inputmode="decimal" step="0.1" min="0.1" value="${+(g[i] * s).toFixed(2)}" data-mod="skala-mm" data-achse="${i}" id="mod-skala-${i}" aria-label="${a} in mm"><small>mm</small></label>`).join("")}</div>
+      <div id="mod-skala-info">${this._modSkalaInfoHtml()}</div>
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="mod-wz-skala-setzen" data-p="100">Zurücksetzen</button><button class="knopf" data-aktion="mod-wz-skala-anwenden">Anwenden</button></div>
+      ${this._modSkalaHinweiseHtml()}
+      ${this._modWzRueckHtml()}`;
+  },
+
+  _modSkalaInfoHtml() {
+    const m = this._mod, s = m.skala / 100, g = m.grenzen.groesse.map((x) => x * s);
+    const zuGross = g.some((x) => x > BETT_MM + 0.01);
+    const rolle = this._modRolle(), dichte = materialInfo(rolle ? rolle.material : "PLA").dichte;
+    const opt = { duese: m.duese, waende: m.waende, fuellung: m.fuellung };
+    const alt = gewichtSchaetzen(m.kenn, dichte, opt).gramm;
+    const neu = gewichtSchaetzen({ volumen: m.kenn.volumen * s ** 3, flaeche: m.kenn.flaeche * s * s, dreiecke: m.kenn.dreiecke }, dichte, opt).gramm;
+    const gr = (x) => `${zahl(x, x < 10 ? 1 : 0)} g`;
+    const loch = s !== 1 ? this._modSkalaLochHinweise(m.loecher || [], m.eingesetzt || {}, s).filter((h) => !h.passt) : [];
+    return `<div class="info-liste oben-abstand">
+        <div class="info-zeile"><span>Maße</span><strong class="${zuGross ? "rot" : ""}">${g.map((x) => zahl(x, 1)).join(" × ")} mm</strong></div>
+        <div class="info-zeile"><span>Gewicht (geschätzt)</span><strong>${s === 1 ? `≈ ${gr(alt)}` : `≈ ${gr(alt)} → ${gr(neu)}`}</strong></div>
+      </div>
+      ${zuGross ? `<div class="hinweis rot-hinweis">✕ So groß passt es nicht mehr auf das Druckbett (256 mm).</div>` : ""}
+      ${loch.length ? `<div class="mod-skala-loecher"><div class="hinweis amber">⚠️ In dieser Größe ${loch.length === 1 ? "passt 1 Loch" : `passen ${loch.length} Löcher`} nicht mehr zum Teil:</div>${this._modSkalaLochZeilen(loch)}</div>` : ""}`;
+  },
+
+  // Für jedes Loch mit eingesetztem oder vorgeschlagenem Teil: passt es nach dem Skalieren mit Faktor f noch?
+  _modSkalaLochHinweise(loecher, eingesetzt, f) {
+    const inv = this._daten.inventar, liste = [];
+    for (const l of loecher) {
+      const id = eingesetzt[l.nr];
+      const teil = id ? inv.find((t) => t.id === id) : (teileFuerLoch(l, inv)[0] || {}).teil;
+      if (!teil) continue;
+      const neu = { ...l, durchmesser: l.durchmesser * f, tiefe: l.tiefe * f };
+      const passt = teileFuerLoch(neu, [teil]).length > 0;
+      // Passt es nicht mehr, vielleicht ein anderes Teil derselben Art (z. B. M2- statt M3-Einsatz)
+      const statt = passt ? null : (teileFuerLoch(neu, inv).find((x) => x.teil.kat === teil.kat) || {}).teil || null;
+      liste.push({ nr: l.nr, alt: l.durchmesser, neu: neu.durchmesser, teil, eingesetzt: !!id, passt, statt });
+    }
+    return liste;
+  },
+  _modZu(t) { return t.kat === "schraube" ? "zur" : "zum"; },
+  _modTeilKurz(t) {
+    const z = (x) => Number(x).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    if (t.kat === "einsatz") return `${t.gewinde}-Einsatz`;
+    if (t.kat === "schraube") return `${t.gewinde}-Schraube`;
+    if (t.kat === "magnet") return `Magnet Ø ${z(t.durchmesser)} × ${z(t.dicke)} mm`;
+    return kategorie(t.kat).einzahl;
+  },
+  _modLochText(h) {
+    return `Loch ${h.nr}: Ø ${zahl(h.alt, 2)} → ${zahl(h.neu, 2)} mm, ${h.passt ? "passt weiter" : "passt nicht mehr"} ${this._modZu(h.teil)} ${this._modTeilKurz(h.teil)}${h.statt ? ` (dafür ${this._modZu(h.statt)} ${this._modTeilKurz(h.statt)})` : ""}`;
+  },
+  _modSkalaLochZeilen(liste) {
+    return liste.map((x) => `<div class="mod-skala-loch ${x.passt ? "gut" : "schlecht"}"><span class="mod-nr">${x.nr}</span><span>${esc(this._modLochText(x))}${x.eingesetzt ? ` <small class="leise">· war eingesetzt</small>` : ""}</span></div>`).join("");
+  },
+  _modSkalaHinweiseHtml() {
+    const h = this._mod.skalaHinweise;
+    if (!h || !h.liste.length) return "";
+    return `<div class="mod-skala-loecher oben-abstand"><div class="r-kopf"><span>Löcher nach dem Skalieren auf ${zahl(h.prozent, Number.isInteger(h.prozent) ? 0 : 1)} %</span></div>
+      ${this._modSkalaLochZeilen(h.liste)}
+      <button class="mini mint-rand" data-aktion="mod-tab" data-id="loecher">Zu den Löchern</button></div>`;
+  },
+
+  // Schieber oder Maßfelder geändert: Vorschau und Anzeigen nachführen (ohne Neuzeichnen, damit das Ziehen weitergeht)
+  _modSkalaEingabe(t, k) {
+    const m = this._mod;
+    if (k === "skala") m.skala = Math.max(10, Math.min(400, Number(t.value) || 100));
+    else {
+      const i = Number(t.dataset.achse), w = Number(String(t.value).replace(",", "."));
+      if (!(w > 0) || !(m.grenzen.groesse[i] > 0)) return;
+      m.skala = Math.max(10, Math.min(400, (w / m.grenzen.groesse[i]) * 100));
+    }
+    this._modSkalaAnzeigen(k === "skala-mm" ? Number(t.dataset.achse) : -1);
+    this._modDrehVorschau();
+  },
+  _modSkalaAnzeigen(ausser = -1) {
+    const root = this.shadowRoot, m = this._mod;
+    if (!m || !m.grenzen) return;
+    const s = m.skala / 100;
+    const w = root.getElementById("mod-wert-skala");
+    if (w) w.textContent = `${zahl(m.skala, Number.isInteger(m.skala) ? 0 : 1)} %`;
+    const r = root.querySelector('input[data-mod="skala"]');
+    if (r && Number(r.value) !== Math.round(m.skala)) r.value = Math.round(m.skala);
+    [0, 1, 2].forEach((i) => { const f = root.getElementById(`mod-skala-${i}`); if (f && i !== ausser) f.value = +(m.grenzen.groesse[i] * s).toFixed(2); });
+    root.querySelectorAll('[data-aktion="mod-wz-skala-setzen"].chip').forEach((c) => c.classList.toggle("an", Math.abs(m.skala - Number(c.dataset.p)) < 1e-6));
+    const info = root.getElementById("mod-skala-info");
+    if (info) info.innerHTML = this._modSkalaInfoHtml();
+  },
+  _modSkalaAnwenden() {
+    const m = this._mod, f = m.skala / 100;
+    if (Math.abs(f - 1) < 1e-6) { this._toast("Erst eine andere Größe wählen."); return; }
+    const hinweise = this._modSkalaLochHinweise(m.loecher || [], m.eingesetzt || {}, f);
+    const prozent = m.skala;
+    m.rueckNeu = { v: m.v.slice(), text: `Skalieren auf ${zahl(prozent, Number.isInteger(prozent) ? 0 : 1)} %` };
+    skalieren(m.v, f);
+    this._modGeometrieNeu();
+    m.skalaHinweise = { prozent, liste: hinweise };
+    this._zeichnen();
+    if (this._buehne) this._buehne.ansicht("iso", m.grenzen, true);
+    const schlecht = hinweise.filter((h) => !h.passt).length;
+    this._toast(`Auf ${zahl(prozent, Number.isInteger(prozent) ? 0 : 1)} % skaliert${schlecht ? `, ${schlecht === 1 ? "1 Loch passt" : `${schlecht} Löcher passen`} nicht mehr zum Teil` : ""}.`);
+  },
+
+  _modSkalaVorschau() {
+    const m = this._mod;
+    return m && m.art === "stl" && m.tab === "werkzeuge" && m.werkzeug === "skala" && m.skala !== 100 ? m.skala / 100 : 1;
+  },
+  _modLageVorschau() {
+    const m = this._mod;
+    return m && m.art === "stl" && m.tab === "werkzeuge" && m.werkzeug === "lage" && m.lage && !m.lage.laeuft && m.lage.vorschau ? m.lage.liste[m.lage.wahl] || null : null;
+  },
+  // Werkzeug oder Reiter verlassen: Vorschauen verwerfen (Schieber zurück auf 100 %)
+  _modWzVerlassen() {
+    const m = this._mod;
+    if (!m) return;
+    m.skala = 100;
+    if (m.lage) m.lage.vorschau = false;
+  },
+
+  _modWzKlick(a, el) {
+    const m = this._mod, b = this._buehne;
+    switch (a) {
+      case "mod-wz": {
+        const neu = m.werkzeug === el.dataset.id ? null : el.dataset.id;
+        this._modWzVerlassen();
+        m.werkzeug = neu; m.tab = "werkzeuge"; m.markieren = false;
+        if (m.drehWerte.some((x) => Number(x))) m.drehWerte = [0, 0, 0];   // eigene Winkel-Vorschau würde das Antippen verfälschen
+        this._zeichnen(); this._modSzene();
+        return;
+      }
+      case "mod-wz-rueck": {
+        if (!m.rueck || m.dreht) return;
+        const text = m.rueck.text;
+        m.v = m.rueck.v;
+        this._modGeometrieNeu();
+        this._zeichnen();
+        if (b) b.ansicht("iso", m.grenzen, true);
+        this._toast(`${text} rückgängig gemacht.`);
+        return;
+      }
+      case "mod-wz-lage-wahl": if (m.lage && m.lage.liste) { m.lage.wahl = Number(el.dataset.i); m.lage.vorschau = true; this._modSeiteNeu(); this._modDrehVorschau(); } return;
+      case "mod-wz-lage-vorschau": if (m.lage && m.lage.liste) { m.lage.vorschau = !m.lage.vorschau; this._modSeiteNeu(); this._modDrehVorschau(); } return;
+      case "mod-wz-lage-anwenden": {
+        const k = m.lage && m.lage.liste && m.lage.liste[m.lage.wahl];
+        if (!k) return;
+        const sofort = m.lage.vorschau;   // die Vorschau zeigt das Ergebnis schon: ohne Animation übernehmen
+        this._modDrehenAnimiert(k.achse, k.winkel, "Beste Lage", `Neue Lage übernommen: etwa ${zahl(k.flaeche / 100, 1)} cm² Stützfläche statt ${zahl(m.lage.aktuell.flaeche / 100, 1)} cm².`, sofort);
+        return;
+      }
+      case "mod-wz-mess-weg": m.messPunkte = []; this._zeichnen(); return;
+      case "mod-wz-waende-zeigen": {
+        const d = m.duenn;
+        if (b && d && d.minPunkt) b.fliegen(V3.mal(b._f(), -1), d.minPunkt, Math.min(b.abstand, 140), true);
+        return;
+      }
+      case "mod-wz-skala-setzen": m.skala = Number(el.dataset.p); this._modSkalaAnzeigen(); this._modDrehVorschau(); return;
+      case "mod-wz-skala-anwenden": this._modSkalaAnwenden(); return;
+      default: return;
+    }
+  },
+
+  // Antippen im 3D-Bild: Messpunkt setzen oder die getroffene Fläche nach unten drehen
+  _modWzAntippen(strahl) {
+    const m = this._mod;
+    if (m.dreht) return;
+    const h = strahlTreffer(m.v, strahl.von, strahl.richtung);
+    if (!h) { this._toast("Da ist kein Modell. Tippe direkt auf die Oberfläche."); return; }
+    const d = strahl.richtung;
+    if (m.werkzeug === "messen") {
+      const p = [0, 1, 2].map((i) => strahl.von[i] + d[i] * h.t);
+      m.messPunkte = m.messPunkte && m.messPunkte.length === 1 ? [m.messPunkte[0], p] : [p];
+      this._zeichnen();
+      return;
+    }
+    // Sichtbare Seite = Außenseite: Normale zur Kamera drehen
+    let n = V3.norm(h.n);
+    if (V3.punkt(n, d) > 0) n = V3.mal(n, -1);
+    const { achse, winkel } = drehungNachUnten(n);
+    if (winkel < 0.0035) { this._toast("Diese Fläche liegt schon unten."); return; }
+    this._modDrehenAnimiert(achse, winkel, "Auf Fläche legen", "Auf die Fläche gelegt. Der tiefste Punkt liegt auf dem Bett.");
+  },
+
+  // Drehung mit Rückgängig übernehmen; vorher sanft in der Ansicht drehen und absenken
+  _modDrehenAnimiert(achse, winkel, text, meldung, sofort = false) {
+    const m = this._mod, b = this._buehne;
+    const R = achsDrehung(achse, winkel);
+    const fertig = () => {
+      m.dreht = false;
+      if (this._mod !== m) return;
+      m.rueckNeu = { v: m.v.slice(), text };
+      m.drehWerte = [0, 0, 0];
+      drehenMit(m.v, R);
+      this._modGeometrieNeu();
+      this._zeichnen();
+      if (this._buehne) this._buehne.ansicht("iso", m.grenzen, true);
+      this._toast(meldung);
+    };
+    if (sofort || !b || !b.objekte.has("modell")) { fertig(); return; }
+    const { shift, c } = this._modLageMatrix(R);
+    m.dreht = true;
+    b.setze("grundriss", { sichtbar: false });
+    for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: false });
+    const start = performance.now(), dauer = 650;
+    b.animieren((t) => {
+      if (this._mod !== m) { m.dreht = false; return false; }
+      const x = Math.max(0, Math.min(1, (t - start) / dauer)), e = x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+      b.setze("modell", { m: M4.mal(M4.verschieben(shift[0] * e, shift[1] * e, shift[2] * e), M4.drehungUm(achsDrehung(achse, winkel * e), c)) });
+      if (x >= 1) { setTimeout(fertig, 0); return false; }
+      return true;
+    });
+  },
+
+  // Matrix für eine Drehung R um die Modellmitte, danach wie aufsBett mittig aufs Bett gestellt
+  _modLageMatrix(R) {
+    const m = this._mod, v = m.v, g = m.grenzen;
+    const c = [0, 1, 2].map((i) => (g.min[i] + g.max[i]) / 2);
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < v.length; i += 3) {
+      const x = v[i] - c[0], y = v[i + 1] - c[1], z = v[i + 2] - c[2];
+      for (let k = 0; k < 3; k++) {
+        const q = R[k * 3] * x + R[k * 3 + 1] * y + R[k * 3 + 2] * z + c[k];
+        if (q < lo[k]) lo[k] = q;
+        if (q > hi[k]) hi[k] = q;
+      }
+    }
+    const shift = [BETT_MM / 2 - (lo[0] + hi[0]) / 2, BETT_MM / 2 - (lo[1] + hi[1]) / 2, -lo[2]];
+    return { mat: M4.mal(M4.verschieben(...shift), M4.drehungUm(R, c)), shift, c };
+  },
+
+  // Beste Lage: jede Kandidaten-Lage nach Stützfläche bewerten, in Häppchen, damit die Seite flüssig bleibt
+  _modLageStarten() {
+    const m = this._mod, id = m.id;
+    m.lage = { laeuft: true, fortschritt: 0, anzahl: 0 };
+    const sichtbar = () => this._ansicht === "modelle" && m.tab === "werkzeuge" && m.werkzeug === "lage";
+    setTimeout(() => {
+      if (this._mod !== m || m.id !== id || !m.lage) return;
+      const v = m.v, kand = lageKandidaten(v), erg = [];
+      m.lage.anzahl = kand.length;
+      const hoeheIn = (u) => {
+        let lo = Infinity, hi = -Infinity;
+        for (let i = 0; i < v.length; i += 3) { const h = -(v[i] * u[0] + v[i + 1] * u[1] + v[i + 2] * u[2]); if (h < lo) lo = h; if (h > hi) hi = h; }
+        return hi - lo;
+      };
+      let k = 0;
+      const schritt = () => {
+        if (this._mod !== m || m.id !== id || !m.lage) return;
+        const t0 = performance.now();
+        while (k < kand.length && performance.now() - t0 < 30) {
+          const u = kand[k++], aktuell = k === 1;   // die erste Richtung (0, 0, −1) ist die jetzige Lage
+          const { achse, winkel } = drehungNachUnten(u);
+          erg.push({ u, aktuell, achse, winkel, R: achsDrehung(achse, winkel),
+            flaeche: aktuell ? m.ueber.flaeche : ueberhaenge(v, u).flaeche, hoehe: aktuell ? m.grenzen.groesse[2] : hoeheIn(u) });
+        }
+        m.lage.fortschritt = k / kand.length;
+        if (k < kand.length) {
+          const st = sichtbar() && this.shadowRoot.getElementById("mod-lage-status");
+          if (st) st.innerHTML = `<span class="dreher klein"></span> Vergleiche ${kand.length} Lagen … ${zahl(m.lage.fortschritt * 100)} %`;
+          setTimeout(schritt, 0);
+          return;
+        }
+        // Wenig Stützen zählt, bei Gleichstand gewinnt die flachere Lage; zu hoch fürs Bett fällt raus
+        // (1 mm Höhe zählt wie 1 mm² Stützfläche: hohe, schmale Lagen kippeln leichter und dauern länger)
+        const wert = (e) => e.flaeche + e.hoehe + (e.hoehe > BETT_MM + 0.01 ? 1e9 : 0);
+        const liste = erg.filter((e) => !e.aktuell).sort((a, b) => wert(a) - wert(b)).slice(0, 4);
+        m.lage = { laeuft: false, fortschritt: 1, anzahl: kand.length, aktuell: erg[0], liste, wahl: 0, vorschau: false };
+        if (sichtbar()) this._modSeiteNeu();
+      };
+      schritt();
+    }, 30);
+  },
+
+  // Wandstärke: Strahlen von der Oberfläche nach innen (BVH, Stichprobe bei großen Modellen, in Häppchen)
+  _modWaendeStarten() {
+    const m = this._mod, id = m.id;
+    m.duenn = { laeuft: true, fortschritt: 0 };
+    const sichtbar = () => this._ansicht === "modelle" && m.tab === "werkzeuge" && m.werkzeug === "waende";
+    setTimeout(() => {
+      if (this._mod !== m || m.id !== id || !m.duenn) return;
+      const v = m.v, n = v.length / 9;
+      const bvh = m.bvh || (m.bvh = bvhBauen(v));
+      // Zeigen die Normalen nach außen? Am Vorzeichen des Volumens erkennbar
+      let vol = 0;
+      for (let i = 0; i < v.length; i += 9) vol += v[i] * (v[i + 4] * v[i + 8] - v[i + 5] * v[i + 7]) - v[i + 1] * (v[i + 3] * v[i + 8] - v[i + 5] * v[i + 6]) + v[i + 2] * (v[i + 3] * v[i + 7] - v[i + 4] * v[i + 6]);
+      const richtung = vol < 0 ? -1 : 1;
+      const abstand = Math.max(1, n / MOD_WAND_PROBEN), proben = [];
+      for (let x = 0; x < n; x += abstand) proben.push(Math.floor(x));
+      const dicke = new Float32Array(n).fill(NaN);
+      let k = 0;
+      const weiter = () => {
+        if (this._mod !== m || m.id !== id || !m.duenn) return;
+        const t0 = performance.now();
+        while (k < proben.length && performance.now() - t0 < 30) { const t = proben[k++]; dicke[t] = wandDicke(bvh, t, richtung); }
+        m.duenn.fortschritt = k / proben.length;
+        if (k < proben.length) { if (sichtbar()) { const st = this.shadowRoot.getElementById("mod-waende-status"); if (st) st.innerHTML = `<div class="mod-laden-klein"><span class="dreher klein"></span> Messe Wandstärken … ${zahl(m.duenn.fortschritt * 100)} %</div>`; } setTimeout(weiter, 0); return; }
+        let probe = 0;
+        for (const t of proben) probe += this._modDreieckFlaeche(t);
+        m.duenn = { laeuft: false, dicke, proben: proben.length, stichprobe: abstand > 1, faktor: probe > 0 ? m.kenn.flaeche / probe : 1 };
+        this._modDuennAuswerten();
+        if (sichtbar()) { this._modSeiteNeu(); this._modSzene(); }
+      };
+      weiter();
+    }, 30);
+  },
+  _modDreieckFlaeche(t) {
+    const v = this._mod.v, i = t * 9;
+    const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2], wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
+    return Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2;
+  },
+  // Gemessene Stärken gegen die Düse prüfen (zwei Linienbreiten, Linie ≈ 1,125 × Düse)
+  _modDuennAuswerten() {
+    const m = this._mod, d = m.duenn;
+    if (!d || !d.dicke) return;
+    const grenze = 2 * 1.125 * m.duese, v = m.v;
+    const markiert = new Uint8Array(d.dicke.length);
+    let anzahl = 0, flaeche = 0, gemessen = 0, min = Infinity, minT = -1;
+    for (let t = 0; t < d.dicke.length; t++) {
+      const x = d.dicke[t];
+      if (!(x >= 0)) continue;   // NaN: nicht gemessen oder nicht messbar
+      gemessen++;
+      if (x < min) { min = x; minT = t; }
+      if (x < grenze) { markiert[t] = 1; anzahl++; flaeche += this._modDreieckFlaeche(t); }
+    }
+    const i = minT * 9;
+    Object.assign(d, { grenze, markiert, anzahl, gemessen, min, flaeche: flaeche * d.faktor,
+      minPunkt: minT >= 0 ? [(v[i] + v[i + 3] + v[i + 6]) / 3, (v[i + 1] + v[i + 4] + v[i + 7]) / 3, (v[i + 2] + v[i + 5] + v[i + 8]) / 3] : null });
+  },
+
+  // Messlinie über dem 3D-Bild (HTML/SVG, bleibt sichtbar, auch wenn sie durchs Teil geht)
+  _modMess() {
+    const box = this.shadowRoot.getElementById("mod-mess"), m = this._mod;
+    if (!box) return;
+    const p = m && m.art === "stl" && m.tab === "werkzeuge" && m.werkzeug === "messen" ? m.messPunkte || [] : [];
+    if (!p.length) { box.innerHTML = ""; return; }
+    const d = p.length === 2 ? Math.hypot(...V3.minus(p[1], p[0])) : null;
+    box.innerHTML = `<svg class="mod-mess-svg">${d != null ? `<line id="mod-mess-l" class="mod-mess-linie"/>` : ""}${p.map((_, i) => `<circle id="mod-mess-p${i}" class="mod-mess-punkt" r="6"/>`).join("")}</svg>
+      ${d != null ? `<div id="mod-mess-text" class="mod-mess-text">${zahl(d, 2)} mm</div>` : ""}`;
+    this._modMessSetzen();
+  },
+  _modMessSetzen() {
+    const m = this._mod, root = this.shadowRoot, b = this._buehne;
+    if (!m || !b || !m.messPunkte || !m.messPunkte.length) return;
+    const box = root.getElementById("mod-mess");
+    if (!box || !box.firstChild) return;
+    const s = m.messPunkte.map((p) => b.projizieren(p));
+    s.forEach((q, i) => {
+      const c = root.getElementById(`mod-mess-p${i}`);
+      if (!c) return;
+      c.style.display = q ? "" : "none";
+      if (q) { c.setAttribute("cx", q[0].toFixed(1)); c.setAttribute("cy", q[1].toFixed(1)); }
+    });
+    const l = root.getElementById("mod-mess-l"), t = root.getElementById("mod-mess-text");
+    if (!l || !s[0] || !s[1]) return;
+    l.setAttribute("x1", s[0][0].toFixed(1)); l.setAttribute("y1", s[0][1].toFixed(1));
+    l.setAttribute("x2", s[1][0].toFixed(1)); l.setAttribute("y2", s[1][1].toFixed(1));
+    if (t) t.style.transform = `translate(${((s[0][0] + s[1][0]) / 2).toFixed(1)}px, ${((s[0][1] + s[1][1]) / 2).toFixed(1)}px) translate(-50%, -140%)`;
+  },
+
+  // Handy: „In die Warteschlange“ als feste Leiste direkt über der unteren Navigation.
+  // Die Leiste wandert dazu aus dem Bildlauf heraus in die App; der Inhalt bekommt unten so viel Platz, wie sie hoch ist.
+  _modFussAndocken() {
+    const root = this.shadowRoot, fuss = root.querySelector(".mod-fuss"), app = root.querySelector(".app");
+    if (!this._mobil || !fuss || !app) return;
+    app.appendChild(fuss);
+    fuss.classList.add("dock");
+    const nav = root.querySelector(".nav-unten");
+    app.style.setProperty("--mod-nav-h", `${nav ? nav.offsetHeight : 64}px`);
+    app.style.setProperty("--mod-fuss-h", `${fuss.offsetHeight}px`);
   },
 };

@@ -861,6 +861,556 @@ function suchPunkte(anfrage, text) {
   }
   return summe;
 }
+
+// ---------------------------------------------------------------------------
+// v0.12 Hilfe: zwei Spulen trocknen, Konstruktion, Slicer-Lexikon, Druckplatten
+// ---------------------------------------------------------------------------
+
+// ---- Trockner mit zwei Plätzen ----
+// Sovol heizt höchstens auf 70 °C. „ideal“ = Wert, den das Material eigentlich bräuchte.
+const TROCKNER_MAX = 70;
+const TROCKNEN_MATERIALIEN = [
+  { id: "PLA", name: "PLA", ...TROCKNEN.PLA },
+  { id: "WOOD", name: "Wood-PLA", ...TROCKNEN.PLA, tr_temp: 45 },
+  { id: "PETG", name: "PETG", ...TROCKNEN.PETG },
+  { id: "TPU", name: "TPU", ...TROCKNEN.TPU },
+  { id: "ASA", name: "ASA", ...TROCKNEN.ASA },
+  { id: "ABS", name: "ABS", ...TROCKNEN.ABS },
+  { id: "PC", name: "PC", ...TROCKNEN.PC },
+  { id: "PA", name: "PA / Nylon", tr_temp: 70, tr_dauer: 12, tr_feuchte: 10, ideal: 80 },
+];
+// Ab mehr als diesem Abstand lohnt sich ein gemeinsamer Lauf nicht mehr
+const TROCKNEN_GRENZE = 15;
+
+// Zwei Plätze zusammenführen. a/b = { name, material, temp, dauer, feuchte, ideal?, id? } oder null.
+// Ergebnis: modus (leer|einzeln|zusammen|getrennt), laeufe [{ temp, dauer, feuchte, material, name, plaetze }], hinweise [{ art, text }]
+function trocknenKombi(a, b) {
+  const hinweise = [];
+  const lauf = (x, plaetze) => ({ temp: Math.min(TROCKNER_MAX, x.temp), dauer: x.dauer, feuchte: x.feuchte, material: x.material, name: x.name, plaetze });
+  const zuHeiss = (x) => {
+    if (x.ideal && x.ideal > TROCKNER_MAX) hinweise.push({ art: "amber", text: `${x.name} bräuchte eigentlich ${x.ideal} °C. Der Sovol schafft nur ${TROCKNER_MAX} °C: lieber etwas länger trocknen und direkt aus dem Trockner drucken.` });
+  };
+  if (!a && !b) return { modus: "leer", laeufe: [], hinweise };
+  if (!a || !b) {
+    const x = a || b;
+    zuHeiss(x);
+    return { modus: "einzeln", laeufe: [lauf(x, [a ? 1 : 2])], hinweise };
+  }
+  zuHeiss(a); zuHeiss(b);
+  if (a.id && a.id === b.id) hinweise.push({ art: "rot", text: "Dieselbe Rolle steht in beiden Plätzen. Wähle für einen Platz eine andere Rolle." });
+  const [kalt, warm] = a.temp <= b.temp ? [a, b] : [b, a];
+  const nr = (x) => (x === a ? 1 : 2);
+  const abstand = warm.temp - kalt.temp;
+  if (abstand > TROCKNEN_GRENZE) {
+    hinweise.push({ art: "rot", text: `${kalt.name} (${kalt.temp} °C) und ${warm.name} (${warm.temp} °C) liegen ${abstand} °C auseinander. Bei ${warm.temp} °C wird ${kalt.name} weich und die Windungen verkleben, bei ${kalt.temp} °C wird ${warm.name} kaum trocken. Besser zwei Läufe nacheinander.` });
+    hinweise.push({ art: "mint", text: "Die zuerst getrocknete Rolle warm in einen Beutel mit Trockenmittel packen, bis die zweite fertig ist." });
+    return { modus: "getrennt", laeufe: [lauf(kalt, [nr(kalt)]), lauf(warm, [nr(warm)])], hinweise };
+  }
+  // Gemeinsam: Temperatur der empfindlicheren Rolle, Zeit der längeren.
+  // Wer unter seinem Richtwert trocknet, braucht etwas länger.
+  const laenger = Math.max(a.dauer, b.dauer);
+  const plus = abstand >= 10 ? 2 : abstand >= 5 ? 1 : 0;
+  if (plus) hinweise.push({ art: "amber", text: `${warm.name} trocknet bei ${kalt.temp} °C, also ${abstand} °C unter seinem Richtwert, darum ${plus} h mehr als die längere Zeit (${zahl(laenger, laenger % 1 ? 1 : 0)} h).${abstand >= 10 ? ` Knistert ${warm.name} sehr stark, lieber getrennt trocknen.` : ""}` });
+  else hinweise.push({ art: "mint", text: "Passt gut zusammen: beide Rollen trocknen fast bei derselben Temperatur." });
+  hinweise.push({ art: "mint", text: `Temperatur der empfindlicheren Rolle (${kalt.name}), Zeit der längeren, Feuchteziel der anspruchsvolleren.` });
+  return { modus: "zusammen", laeufe: [{ temp: Math.min(TROCKNER_MAX, kalt.temp), dauer: laenger + plus, feuchte: Math.min(a.feuchte, b.feuchte), material: kalt.material, name: kalt.name, plaetze: [1, 2] }], hinweise };
+}
+
+// Trockner-Display für ein Ergebnis: gleiche Form wie die große Zeichnung, Spulen in Rollenfarbe.
+// w = Lauf, plaetze = [{ farbe } | null, …], aktiv = Plätze, die in diesem Lauf trocknen, frei = Text für den anderen Platz
+function trocknerKombiSvg(w, plaetze, aktiv, frei = "danach") {
+  const l = 'stroke="#8da49a" stroke-width="1.5" fill="none"';
+  const spule = (cx, p, nr) => {
+    if (!p || !aktiv.includes(nr)) return `<circle cx="${cx}" cy="110" r="54" stroke="#5d726a" stroke-width="1.5" stroke-dasharray="5 5" fill="none"/>
+      <text x="${cx}" y="110" class="tr-kombi-leer" text-anchor="middle" dominant-baseline="central">${p ? frei : "leer"}</text>`;
+    const klar = !p.farbe || p.farbe === "transparent";
+    return `<circle cx="${cx}" cy="110" r="54" stroke="#ffb547" stroke-width="2" fill="rgba(255,181,71,.08)"/>
+      <circle cx="${cx}" cy="110" r="44" fill="${klar ? "#cfe9df" : esc(p.farbe)}" opacity="${klar ? 0.2 : 0.85}" stroke="rgba(255,255,255,.25)"/>
+      <circle cx="${cx}" cy="110" r="14" fill="#0b1210" stroke="#ffb547" stroke-opacity=".6"/>
+      <text x="${cx}" y="110" class="tr-kombi-nr" text-anchor="middle" dominant-baseline="central">${nr}</text>`;
+  };
+  const mat = String(w.material || "").slice(0, 6);
+  const min = Math.round(w.dauer * 60);
+  const zeit = `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+  const werte = [[92, mat, "Material"], [162, `< ${w.feuchte} %`, "Feuchte"], [232, `${w.temp}°`, "Soll"], [296, "--", "Ist"], [360, zeit, "Zeit"]];
+  return `<svg viewBox="0 0 440 290" class="tr-kombi-bild" role="img" aria-label="Trockner-Display: ${esc(mat)}, ${w.temp} Grad, ${zeit} Stunden">
+    <rect x="20" y="20" width="400" height="250" rx="22" ${l}/>
+    <rect x="34" y="32" width="372" height="160" rx="14" stroke="#5cc8ff" stroke-opacity=".4" stroke-width="1.4" fill="rgba(92,200,255,.05)"/>
+    ${spule(130, plaetze[0], 1)}${spule(310, plaetze[1], 2)}
+    <rect x="60" y="206" width="330" height="54" rx="10" fill="rgba(0,0,0,.35)" stroke="#3ee6a8" stroke-opacity=".5"/>
+    ${werte.map(([x, t, n]) => `<text x="${x}" y="225" class="tr-wert" data-kombi="${n}" text-anchor="middle" dominant-baseline="central">${esc(t)}</text>
+      <text x="${x}" y="247" class="tr-kombi-name" text-anchor="middle" dominant-baseline="central">${n}</text>`).join("")}
+  </svg>`;
+}
+
+// ---- Konstruktion: Zeichnungen (120 × 80, gleicher Stil wie die Fehlerbilder) ----
+const KN_M = "#3ee6a8", KN_R = "#ff6b6b", KN_A = "#ffb547", KN_L = "#8da49a", KN_F = "rgba(62,230,168,.16)", KN_D = "#0b1210";
+const knBild = (inhalt) => `<svg viewBox="0 0 120 80" class="kn-bild" aria-hidden="true">${inhalt}</svg>`;
+const knTxt = (x, y, t, farbe = KN_L, groesse = 8) => `<text x="${x}" y="${y}" fill="${farbe}" font-size="${groesse}" font-family="ui-monospace, monospace" text-anchor="middle">${t}</text>`;
+const KN_BETT = `<rect x="0" y="70" width="120" height="10" fill="#2a3330"/>`;
+const KN_BILD = {
+  passungen: knBild(`<rect x="22" y="12" width="76" height="56" rx="6" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.4"/>
+    <circle cx="60" cy="40" r="19" fill="${KN_D}" stroke="${KN_M}" stroke-width="1.2"/><circle cx="60" cy="40" r="15.5" fill="${KN_A}" opacity=".85"/>
+    <path d="M75.5 40 H79" stroke="#fff" stroke-width="1.4"/><path d="M86 26 L79 37" stroke="${KN_L}" stroke-width=".8"/>${knTxt(98, 24, "Spalt", KN_L, 7)}`),
+  tropfen: knBild(`${[18, 26, 34, 42, 50, 58, 66].map((y) => `<path d="M14 ${y} H106" stroke="${KN_M}" stroke-opacity=".2"/>`).join("")}
+    <rect x="14" y="12" width="92" height="58" rx="4" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <path d="M60 22.2 L69.9 32.1 A14 14 0 1 1 50.1 32.1 Z" fill="${KN_D}" stroke="${KN_M}" stroke-width="1.4"/>
+    <circle cx="60" cy="42" r="14" fill="none" stroke="${KN_R}" stroke-dasharray="2 2" opacity=".7"/>${knTxt(86, 28, "45°", KN_A)}${knTxt(110, 78, "Z↑", KN_L, 7)}`),
+  einsaetze: knBild(`<path d="M14 72 H106 V28 H72 V54 H48 V28 H14 Z" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <rect x="51" y="5" width="18" height="18" rx="1.5" fill="${KN_A}"/>${[9, 13, 17, 21].map((y) => `<path d="M51 ${y} l18 -2" stroke="#7a5200" stroke-width="1"/>`).join("")}
+    <path d="M60 25 V30" stroke="${KN_A}" stroke-width="1.2"/><path d="M57 27 l3 3 3 -3" stroke="${KN_A}" fill="none"/>
+    <path d="M48 62 H72" stroke="${KN_L}"/>${knTxt(60, 70, "Ø Loch", KN_L, 7)}<path d="M80 28 V54" stroke="${KN_L}"/><path d="M77 28 H83 M77 54 H83" stroke="${KN_L}"/>${knTxt(94, 44, "L+1", KN_L, 7)}`),
+  schrauben: knBild(`<rect x="16" y="14" width="88" height="22" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/><rect x="16" y="38" width="88" height="34" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <rect x="52" y="14" width="16" height="22" fill="${KN_D}"/><rect x="56.5" y="38" width="7" height="26" fill="${KN_D}"/>
+    <rect x="49" y="4" width="22" height="10" rx="2" fill="${KN_A}"/><rect x="56" y="14" width="8" height="46" fill="${KN_A}" opacity=".9"/>
+    ${[18, 24, 30, 36, 42, 48, 54].map((y) => `<path d="M56 ${y} l8 2" stroke="#7a5200"/>`).join("")}${knTxt(33, 28, "Durchg.", KN_L, 7)}${knTxt(33, 58, "Kern", KN_L, 7)}`),
+  magnete: knBild(`<rect x="14" y="34" width="92" height="38" rx="3" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/><rect x="38" y="34" width="44" height="11" fill="${KN_D}" stroke="${KN_M}"/>
+    <rect x="40" y="10" width="40" height="10" rx="2" fill="#b8c4bf"/><rect x="40" y="10" width="20" height="10" rx="2" fill="${KN_R}" opacity=".85"/>${knTxt(50, 18, "N", "#fff", 7)}${knTxt(70, 18, "S", KN_D, 7)}
+    <path d="M60 23 V30" stroke="${KN_L}"/><path d="M57 27 l3 3 3 -3" stroke="${KN_L}" fill="none"/>${knTxt(98, 28, "+0,15", KN_A, 7)}`),
+  muttern: knBild(`<rect x="14" y="6" width="92" height="60" rx="4" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <polygon points="60,16 77.3,26 77.3,46 60,56 42.7,46 42.7,26" fill="${KN_D}" stroke="${KN_M}" stroke-width="1.2"/>
+    <polygon points="60,19 74.7,27.5 74.7,44.5 60,53 45.3,44.5 45.3,27.5" fill="${KN_A}" opacity=".85"/><circle cx="60" cy="36" r="6" fill="${KN_D}"/>
+    <path d="M42.7 61 H77.3" stroke="${KN_L}"/><path d="M42.7 58 V64 M77.3 58 V64" stroke="${KN_L}"/>${knTxt(60, 76, "SW + 0,2", KN_A, 7)}`),
+  ueberhang: knBild(`${KN_BETT}<path d="M14 70 V40 L44 10 H58 V70 Z" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.4"/>
+    <path d="M66 70 V44 L106 34 V42 L74 70 Z" fill="rgba(255,107,107,.15)" stroke="${KN_R}" stroke-width="1.4"/>
+    <path d="M14 22 V40" stroke="${KN_L}" stroke-dasharray="2 2"/><path d="M14 28 A12 12 0 0 1 22.5 31.5" fill="none" stroke="${KN_A}" stroke-width="1.2"/>
+    ${knTxt(34, 62, "45° ✓", KN_M)}${knTxt(96, 62, "✗", KN_R, 12)}`),
+  bruecken: knBild(`${KN_BETT}<rect x="14" y="26" width="16" height="44" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/><rect x="90" y="26" width="16" height="44" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <rect x="14" y="20" width="92" height="6" fill="${KN_M}" opacity=".85"/><path d="M30 26 Q60 42 90 26" stroke="${KN_R}" stroke-dasharray="3 2" fill="none"/>
+    <path d="M32 56 H88" stroke="${KN_L}"/><path d="M32 53 V59 M88 53 V59" stroke="${KN_L}"/>${knTxt(60, 52, "≤ 20 mm", KN_A)}`),
+  fasen: knBild(`${KN_BETT}<path d="M10 70 V22 H52 V62 L44 70 Z" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.4"/>
+    <path d="M68 70 V22 H110 V58 Q110 70 98 70 Z" fill="rgba(255,107,107,.12)" stroke="${KN_R}" stroke-width="1.4"/>${knTxt(31, 48, "Fase ✓", KN_M)}${knTxt(89, 44, "Radius", KN_R)}${knTxt(89, 56, "✗", KN_R, 10)}`),
+  waende: knBild(`<rect x="10" y="18" width="100" height="44" rx="4" fill="none" stroke="${KN_L}" stroke-dasharray="3 3"/>
+    ${[0, 1, 2].map((i) => `<ellipse cx="${36 + i * 24}" cy="38" rx="12" ry="7" fill="${i === 0 ? KN_A : KN_M}" opacity="${i === 0 ? 0.9 : 0.75}"/>`).join("")}
+    <path d="M24 54 H96" stroke="${KN_L}"/><path d="M24 51 V57 M96 51 V57" stroke="${KN_L}"/>${knTxt(60, 72, "3 × Linienbreite", KN_L, 7)}`),
+  details: knBild(`${KN_BETT}<rect x="14" y="30" width="14" height="40" fill="${KN_M}" opacity=".8"/><rect x="40" y="30" width="7" height="40" fill="${KN_M}" opacity=".8"/>
+    <rect x="62" y="30" width="3.5" height="40" fill="${KN_A}" opacity=".9"/><rect x="84" y="30" width="1.5" height="40" fill="${KN_R}"/>
+    ${knTxt(21, 24, "2", KN_L, 7)}${knTxt(43.5, 24, "1", KN_L, 7)}${knTxt(64, 24, "0,5", KN_A, 7)}${knTxt(85, 24, "0,2", KN_R, 7)}${knTxt(106, 52, "mm", KN_L, 7)}`),
+  schichten: knBild(`${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="30" y="${13 + i * 9}" width="60" height="8" rx="3" fill="${KN_M}" opacity=".7"/>`).join("")}
+    <path d="M16 39 H27 M93 39 H104" stroke="${KN_M}" stroke-width="2"/><path d="M20 35 l-4 4 4 4 M100 35 l4 4 -4 4" stroke="${KN_M}" stroke-width="2" fill="none"/>
+    <path d="M60 2 V10 M60 69 V77" stroke="${KN_R}" stroke-width="2"/><path d="M56 6 l4 -4 4 4 M56 73 l4 4 4 -4" stroke="${KN_R}" stroke-width="2" fill="none"/>
+    <path d="M34 39.5 l7 -2 7 2 7 -2 7 2" stroke="${KN_R}" stroke-width="1.4" fill="none"/>`),
+  ausrichtung: knBild(`${KN_BETT}<path d="M8 70 V58 H48 V70 Z M8 58 V36 H18 V58" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.3"/>
+    ${knTxt(34, 46, "✓", KN_M, 12)}<path d="M70 70 H80 V18 H70 Z M80 70 H106 V60 H80" fill="rgba(255,107,107,.12)" stroke="${KN_R}" stroke-width="1.3"/>
+    ${[28, 36, 44, 52].map((y) => `<path d="M70 ${y} H80" stroke="${KN_R}" stroke-opacity=".5"/>`).join("")}${knTxt(96, 44, "✗", KN_R, 12)}`),
+  schnapp: knBild(`<rect x="10" y="50" width="40" height="22" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <path d="M40 50 V18 L48 12 H52 V50 Z" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/><path d="M48 12 L58 18 L52 24 Z" fill="${KN_M}" opacity=".8"/>
+    <path d="M52 50 q0 -4 4 -4" stroke="${KN_A}" stroke-width="1.4" fill="none"/>${knTxt(88, 30, "L ≥ 5 × t", KN_A)}${knTxt(88, 44, "liegend", KN_L, 7)}${knTxt(88, 54, "drucken", KN_L, 7)}`),
+  gewinde: knBild(`<rect x="34" y="8" width="52" height="12" rx="2" fill="${KN_A}"/>
+    <path d="M42 20 ${[0, 1, 2, 3, 4, 5, 6].map((i) => `L36 ${24 + i * 7} L42 ${27.5 + i * 7}`).join(" ")} L42 72 H78 ${[6, 5, 4, 3, 2, 1, 0].map((i) => `L78 ${27.5 + i * 7} L84 ${24 + i * 7}`).join(" ")} L78 20 Z" fill="${KN_A}" opacity=".8"/>
+    ${knTxt(104, 48, "≥ M8", KN_M, 8)}`),
+  warping: knBild(`${KN_BETT}<rect x="24" y="18" width="72" height="44" rx="8" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.4"/>
+    ${[[24, 18], [96, 18], [24, 62], [96, 62]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="9" fill="rgba(255,181,71,.12)" stroke="${KN_A}" stroke-width="1.2"/>`).join("")}${knTxt(60, 44, "R ≥ 3", KN_M)}`),
+};
+
+// Konstruktionstipps für FDM (Werte für den P1S mit 0,4-mm-Düse, gut kalibriert).
+// werte: [Bezeichnung, Wert]; dyn: Tabelle wird aus Corins Inventar berechnet (hilfe.js)
+const KN_GRUPPEN = [["alle", "Alle"], ["passung", "Passungen & Löcher"], ["verbindung", "Verbinden"], ["geometrie", "Form & Überhänge"], ["festigkeit", "Festigkeit & Ausrichtung"]];
+const KONSTRUKTION = [
+  { id: "passungen", g: "passung", titel: "Passungen und Toleranzen", kurz: "Wie viel Spalt zwei Teile brauchen",
+    punkte: ["Der Spalt gilt pro Seite: eine Welle mit 10 mm Ø braucht für eine Schiebepassung ein Loch mit 10,3–10,4 mm.",
+      "Senkrechte Löcher drucken etwa 0,1–0,2 mm zu klein, weil die Düse in Kurven nach innen drückt. Dafür gibt es in Bambu Studio die X-Y-Loch-Kompensation.",
+      "Einmal einen Toleranztest (Stufen 0,1 / 0,2 / 0,3 mm) mit deinem Material drucken, dann kennst du deine Werte.",
+      "PETG und TPU brauchen etwas mehr Spalt als PLA, weil sie weicher fließen und leicht Fäden ziehen."],
+    werte: [["Presspassung (hält ohne Kleber)", "0 – 0,05 mm"], ["Feste Passung (mit Druck fügen)", "0,1 mm"], ["Schiebepassung (läuft leicht)", "0,15 – 0,2 mm"],
+      ["Spielpassung (locker, Deckel)", "0,3 mm"], ["Print-in-Place (Scharnier im Druck)", "0,3 – 0,5 mm"], ["Senkrechter Spalt (Z)", "≥ 1 Schichthöhe, besser 2"]] },
+  { id: "tropfen", g: "passung", titel: "Liegende Löcher: Tropfenform", kurz: "Waagrechte Löcher ohne Stützen",
+    punkte: ["Ein liegendes Loch hat oben einen flachen Überhang, der durchhängt. Ab etwa 5–6 mm Ø wird es oben unrund.",
+      "Lösung: die Oberseite als 45°-Spitze ausführen (Tropfen) oder oben flach abschneiden, sodass eine kurze Brücke entsteht.",
+      "Die Spitze zeigt immer nach oben (+Z), also bei der Konstruktion die spätere Druckrichtung beachten.",
+      "Für Achsen und Schrauben ist die Tropfenspitze egal: sie liegen unten und an den Seiten an."],
+    werte: [["Bis Ø 5 mm", "rund geht meist"], ["Ab Ø 6 mm", "Tropfen 45° oder flache Decke"], ["Senkrechte Löcher", "immer am genauesten"]] },
+  { id: "einsaetze", g: "verbindung", titel: "Gewindeeinsätze (Einschmelzmuttern)", kurz: "Lochmaß für deine Messing-Einsätze", dyn: "einsatz",
+    punkte: ["Loch-Ø etwas kleiner als der Außen-Ø der Rändelung: Startwert Außen-Ø − 0,5 mm. Mit einem Teststreifen ±0,1 mm prüfen.",
+      "Lochtiefe = Länge des Einsatzes + 1 mm, damit verdrängtes Material Platz hat.",
+      "Oben eine kleine Fase (0,5 mm) erleichtert das Ansetzen. Um den Einsatz mindestens 1,5–2 mm Wand, im Slicer 4 Wandlinien.",
+      "Lötkolben: PLA etwa 210–230 °C, PETG 230–250 °C, ASA 240–260 °C. Senkrecht und langsam eindrücken, nicht drehen.",
+      "Den Rechner oben nutzen: er zeigt die Maße für deine Einsätze aus dem Inventar."] },
+  { id: "schrauben", g: "verbindung", titel: "Schrauben: Durchgangs- und Kernlöcher", kurz: "Loch für durchgesteckte und eingedrehte Schrauben", dyn: "schraube",
+    punkte: ["Durchgangsloch: Normmaß (mittel) + 0,2 mm, weil gedruckte Löcher kleiner werden.",
+      "Direkt in Kunststoff schrauben: Kernloch etwa 0,8 × Gewinde-Ø. Hält für wenige Montagen, besser sind Einsätze oder Muttern.",
+      "Für Zylinderköpfe eine Senkung mit Kopf-Ø + 0,5 mm vorsehen. Liegt die Senkung unten, mit einer Opferschicht (0,2 mm) drucken und danach durchstechen.",
+      "Um Schraubenlöcher mindestens 3 Wandlinien, damit die Schraube nicht in die Füllung schneidet."] },
+  { id: "magnete", g: "verbindung", titel: "Magnettaschen", kurz: "Taschen für deine Magnete", dyn: "magnet",
+    punkte: ["Tasche: Magnet-Ø + 0,1–0,2 mm, Tiefe: Magnetdicke + 0,1–0,2 mm. Für Presssitz + 0,1, für Kleber + 0,2.",
+      "Eingeschlossene Magnete: Druck in Bambu Studio an der Schicht über der Tasche anhalten (Pause), Magnete einlegen, weiterdrucken. Polung vorher markieren!",
+      "Über der Tasche mindestens 0,4–0,6 mm (2–3 Schichten) Material, sonst bricht die Decke durch.",
+      "Magnete verlieren ab etwa 80 °C dauerhaft Kraft. Kein Problem beim Drucken, aber nicht auf ein heißes Bett legen."] },
+  { id: "muttern", g: "verbindung", titel: "Sechskant-Muttertaschen", kurz: "Muttern sicher einlassen", dyn: "mutter",
+    punkte: ["Tasche: Schlüsselweite (über die flachen Seiten) + 0,2–0,3 mm, Tiefe: Mutternhöhe + 0,2 mm.",
+      "Waagrechte Mutter im Druck: eine flache Seite nach oben legen, dann ist die Decke eine kurze Brücke.",
+      "Seitlich einschiebbare Muttern (Schlitz) halten beim Schrauben gut und lassen sich tauschen.",
+      "Senkrecht über einer Mutter: erst die Tasche, darüber eine Opferschicht, damit das Schraubenloch sauber druckt."] },
+  { id: "ueberhang", g: "geometrie", titel: "Überhänge: die 45°-Regel", kurz: "Was ohne Stützen geht",
+    punkte: ["Bis 45° zur Senkrechten druckt jede Schicht noch zur Hälfte auf der vorherigen. Mit gutem Lüfter gehen beim P1S mit PLA oft 55–60°.",
+      "Steilere Überhänge mit Fasen oder einem Stützwinkel konstruieren statt Stützen zu drucken.",
+      "Rundungen auf der Unterseite werden zum Ende hin flach. Eine 45°-Fase am Ende hilft.",
+      "PETG, ASA und TPU vertragen weniger Überhang als PLA, weil sie mit weniger Lüfter gedruckt werden."],
+    werte: [["PLA", "bis 50–60°"], ["PETG", "bis 45°"], ["ASA / ABS", "bis 40–45°"], ["TPU", "bis 35–40°"]] },
+  { id: "bruecken", g: "geometrie", titel: "Brücken", kurz: "Frei gespannte Strecken zwischen zwei Stützen",
+    punkte: ["Eine Brücke spannt sich zwischen zwei Auflagen. Kurze Brücken sind kein Problem, die erste Schicht hängt leicht durch.",
+      "Brücken möglichst gerade halten. Geschlossene Ringe (Decke über einem Loch) überbrückt Bambu Studio in Streifen.",
+      "Für saubere Brücken: Lüfter 100 %, langsam (Überbrückung 25–50 mm/s), Material trocken.",
+      "Lange Brücken mit einer Mittelstütze im Modell teilen, das ist oft schneller als Stützstrukturen."],
+    werte: [["PLA", "bis 20–30 mm gut"], ["PETG", "bis 10–15 mm"], ["ASA / ABS", "bis 10 mm"]] },
+  { id: "fasen", g: "geometrie", titel: "Fasen statt Rundungen unten", kurz: "Gegen Elefantenfuß und Überhänge",
+    punkte: ["Unten am Bett eine 45°-Fase (0,4–1 mm) statt einer Rundung: die Rundung beginnt als flacher Überhang direkt über dem Bett.",
+      "Die Fase gleicht auch den Elefantenfuß aus: die erste Schicht wird breit gedrückt, das Teil passt trotzdem.",
+      "Rundungen sind oben und an senkrechten Kanten in Ordnung, dort sehen sie sogar besser aus als Fasen.",
+      "Löcher, die unten am Bett liegen, ebenfalls leicht anfasen: sie werden durch den Elefantenfuß sonst zu eng."],
+    werte: [["Fase am Bett", "0,4 – 1 mm × 45°"], ["Rundungen", "oben / senkrecht frei wählbar"]] },
+  { id: "waende", g: "festigkeit", titel: "Wandstärke = Vielfache der Linienbreite", kurz: "Wände ohne Lücken planen",
+    punkte: ["Der Slicer füllt eine Wand mit ganzen Linien. Passt die Stärke nicht, entsteht eine schmale Lücke oder eine Füllung im Zickzack.",
+      "Faustregel: mindestens 2 Linien, für Funktionsteile 3–4 Linien. Den Rechner oben für deine Düse nutzen.",
+      "Bambu Studio (Wandgenerator Arachne) passt Linienbreiten an, trotzdem sind ganze Vielfache stabiler und schneller.",
+      "Dünne Rippen lieber etwas dicker als zu dünn: Festigkeit kommt beim FDM-Druck vor allem von den Wänden."] },
+  { id: "details", g: "geometrie", titel: "Kleinste Details", kurz: "Was mit der Düse noch druckbar ist",
+    punkte: ["In XY ist die kleinste Wand etwa eine Linienbreite (0,4-mm-Düse: rund 0,45 mm), stabil wird es ab 2 Linien.",
+      "In Z ist die Schichthöhe die kleinste Stufe. Höhen besser als Vielfache der Schichthöhe planen.",
+      "Erhabene Schrift: Strichstärke ≥ 0,5 mm (besser 0,8), Höhe ≥ 0,4 mm. Vertiefte Schrift: ≥ 0,6 mm breit, 0,4–0,6 mm tief.",
+      "Kleine Stifte unter 2 mm Ø brechen leicht ab und schmelzen beim Druck, weil die Schicht keine Zeit zum Abkühlen hat."],
+    werte: [["0,2-mm-Düse", "Details ab 0,25 mm"], ["0,4-mm-Düse", "Details ab 0,45 mm"], ["0,6-mm-Düse", "Details ab 0,65 mm"]] },
+  { id: "schichten", g: "festigkeit", titel: "Schichtrichtung und Festigkeit", kurz: "Teile sind zwischen den Schichten am schwächsten",
+    punkte: ["Gedruckte Teile sind nicht in alle Richtungen gleich fest: zwischen den Schichten (Z) halten sie nur etwa 50–70 % der Festigkeit in XY.",
+      "Die Hauptlast soll entlang der Schichten laufen, nicht die Schichten auseinanderziehen.",
+      "Mehr Wände helfen mehr als mehr Füllung. Höhere Düsentemperatur und weniger Lüfter verbessern die Schichthaftung.",
+      "Haken, Halter und Clips daher liegend drucken, nicht stehend."] },
+  { id: "ausrichtung", g: "festigkeit", titel: "Druckausrichtung", kurz: "Wie das Teil auf dem Bett liegt",
+    punkte: ["Größte flache Seite nach unten: beste Haftung, kaum Stützen.",
+      "Runde Löcher senkrecht stellen, dann werden sie wirklich rund und maßhaltig.",
+      "Sichtflächen nach oben oder zur Seite, die Unterseite übernimmt die Struktur der Platte.",
+      "Belastung entlang der Schichten (siehe Schichtrichtung). Im Zweifel ein Teil in zwei Teile aufteilen, die jeweils gut liegen."] },
+  { id: "schnapp", g: "verbindung", titel: "Schnapphaken", kurz: "Clips, die nicht brechen",
+    punkte: ["Biegearm mindestens 5–10 × so lang wie dick, Haken 0,5–1 mm Hinterschnitt.",
+      "Immer liegend drucken, damit der Arm entlang der Schichten biegt.",
+      "Am Fuß des Arms eine Rundung (Radius ≥ halbe Dicke) gegen Bruch.",
+      "PETG und PLA+ verzeihen mehr Biegung als normales PLA, das spröde bricht."],
+    werte: [["Länge : Dicke", "≥ 5 : 1, besser 10 : 1"], ["Hinterschnitt", "0,5 – 1 mm"], ["Fügewinkel", "30 – 45°"]] },
+  { id: "gewinde", g: "verbindung", titel: "Gedruckte Gewinde", kurz: "Wann Gewinde selbst drucken",
+    punkte: ["Gewinde ab etwa M8 lassen sich direkt drucken. Kleinere lieber mit Einsatz, Mutter oder nachschneiden.",
+      "Gewinde senkrecht drucken (Achse in Z), mit kleiner Schichthöhe (0,12–0,16 mm).",
+      "Spiel 0,2–0,3 mm zwischen Innen- und Außengewinde, Gewindeanfang anfasen.",
+      "Für Deckel und Dosen grobe Gewinde (Trapez, 3–4 mm Steigung) verwenden: robust und schnell."],
+    werte: [["Kleinstes Gewinde", "≈ M8"], ["Spiel", "0,2 – 0,3 mm"], ["Schichthöhe", "0,12 – 0,16 mm"]] },
+  { id: "warping", g: "geometrie", titel: "Verzug und Auflagefläche", kurz: "Große flache Teile ohne hochgezogene Ecken",
+    punkte: ["Spitze Ecken heben sich zuerst. Ecken in der Draufsicht runden (Radius ≥ 3 mm).",
+      "Bei ASA/ABS und großen PETG-Teilen: Rand (Brim) oder Randohren an den Ecken.",
+      "Lange, dünne Teile mit großer Auflage verziehen sich am stärksten. Teilen oder Rippen auf die Oberseite setzen.",
+      "Kleine Auflageflächen (Spitzen, Kugeln) unten abflachen, damit genug Fläche das Teil hält."] },
+];
+
+// ---- Slicer-Lexikon: Bambu Studio, Namen wie in der deutschen Oberfläche (englisch in Klammern) ----
+// Gruppen wie die Reiter in Bambu Studio (Prozess: Qualität, Stärke, Geschwindigkeit, Stützen, Sonstige; dazu Filament).
+// ab = Abschnitt im Reiter, was = was es macht, werte = typische Werte (P1S, 0,4-mm-Düse), wann = wann ändern
+const LEX_GRUPPEN = [
+  { id: "qualitaet", name: "Qualität", en: "Quality", icon: "✨" },
+  { id: "staerke", name: "Stärke", en: "Strength", icon: "🧱" },
+  { id: "tempo", name: "Geschwindigkeit", en: "Speed", icon: "⚡" },
+  { id: "stuetzen", name: "Stützen", en: "Support", icon: "🌲" },
+  { id: "sonstige", name: "Sonstige", en: "Others", icon: "🧩" },
+  { id: "filament", name: "Filament", en: "Filament", icon: "🧵" },
+];
+const LEXIKON = [
+  // Qualität
+  { g: "qualitaet", ab: "Schichthöhe", de: "Schichthöhe", en: "Layer height",
+    was: "Höhe jeder gedruckten Schicht. Bestimmt, wie fein Rundungen und Schrägen werden und wie lange der Druck dauert.",
+    werte: "0,4-mm-Düse: 0,08 – 0,28 mm. Standard 0,20 mm, fein 0,12 – 0,16 mm. Faustregel 25 – 75 % des Düsen-Ø.",
+    wann: "Feiner für Figuren, Schrift und flache Schrägen. Gröber für schnelle, robuste Funktionsteile. Halbe Schichthöhe ≈ doppelte Druckzeit." },
+  { g: "qualitaet", ab: "Schichthöhe", de: "Höhe der ersten Schicht", en: "Initial layer height",
+    was: "Dicke der ersten Schicht auf der Platte. Eine dickere erste Schicht verzeiht kleine Unebenheiten.",
+    werte: "0,2 mm (0,4-mm-Düse), 0,1 mm (0,2-mm-Düse), 0,3 mm (0,6-mm-Düse).",
+    wann: "Selten ändern. Bei Haftproblemen eher Platte reinigen als die Höhe anpassen." },
+  { g: "qualitaet", ab: "Breite der Linie", de: "Breite der Linie", en: "Line width",
+    was: "Wie breit eine gedruckte Linie ist, getrennt für Außenwand, Innenwand, Füllung, Oberfläche und Stützen.",
+    werte: "0,4-mm-Düse: Außenwand 0,42 mm, sonst 0,45 mm. Sinnvoll 100 – 120 % des Düsen-Ø.",
+    wann: "Breitere Füllung (0,5 mm) macht Teile stabiler und schneller. Schmalere Außenwand für feinste Details. Konstruktion: Wandstärken als Vielfache planen." },
+  { g: "qualitaet", ab: "Naht", de: "Nahtposition", en: "Seam position",
+    was: "Wo jede Schichtrunde beginnt und endet. An dieser Stelle entsteht eine kleine Naht.",
+    werte: "Ausgerichtet (Aligned, Standard), Nächste (Nearest), Rückseite (Back), Zufällig (Random).",
+    wann: "Rückseite für Sichtteile mit klarer Vorderseite. Zufällig verteilt die Naht, macht die Oberfläche aber rau. Die Naht lässt sich auch aufmalen." },
+  { g: "qualitaet", ab: "Naht", de: "Schrägnaht-Typ", en: "Scarf seam type",
+    was: "Lässt Anfang und Ende einer Runde schräg über mehrere Höhenstufen überlappen. Die Naht ist dann kaum zu sehen.",
+    werte: "Aus (Standard) oder für Konturen bzw. alle Wände. Dazu Schrägnaht Länge und Starthöhe.",
+    wann: "Für runde, glatte Sichtteile wie Vasen, Becher, Zylinder. Kostet etwas Zeit und braucht gut kalibrierten Fluss." },
+  { g: "qualitaet", ab: "Präzision", de: "Elefantenfußkompensation", en: "Elephant foot compensation",
+    was: "Zieht die erste Schicht etwas nach innen, weil sie beim Andrücken breiter wird als geplant.",
+    werte: "0,15 mm (Standard).",
+    wann: "Erhöhen (0,2 – 0,25), wenn die Unterkante wulstig ist oder Teile unten nicht passen. Besser zusätzlich eine kleine Fase ins Modell." },
+  { g: "qualitaet", ab: "Präzision", de: "X-Y-Loch-Kompensation", en: "X-Y hole compensation",
+    was: "Vergrößert (+) oder verkleinert (−) senkrechte Löcher in XY. Gedruckte Löcher werden meist etwas zu klein.",
+    werte: "0 mm (Standard). Typisch +0,05 bis +0,15 mm.",
+    wann: "Wenn Schrauben, Stifte oder Lager nicht in die Löcher passen. Wirkt nur auf senkrechte Löcher." },
+  { g: "qualitaet", ab: "Präzision", de: "Präzise Z-Höhe", en: "Precise Z height",
+    was: "Passt die letzten Schichten an, damit die Gesamthöhe genau dem Modell entspricht und nicht auf die Schichthöhe gerundet wird.",
+    werte: "Aus (Standard).",
+    wann: "Einschalten, wenn die Höhe genau stimmen muss, z. B. bei Teilen, die ineinander gesteckt werden." },
+  { g: "qualitaet", ab: "Glätten", de: "Glätten-Typ", en: "Ironing type",
+    was: "Die Düse fährt noch einmal heiß und mit sehr wenig Material über die Oberfläche und bügelt sie glatt.",
+    werte: "Kein Glätten (Standard), Nur oberste Oberfläche, Alle Oberflächen, Alle soliden Schichten.",
+    wann: "Für glatte, flache Deckflächen (Schilder, Deckel). Kostet deutlich Zeit. Nicht bei gewölbten Oberseiten." },
+  { g: "qualitaet", ab: "Glätten", de: "Glätten-Fluss", en: "Ironing flow",
+    was: "Wie viel Material beim Glätten noch fließt, um feine Rillen zu füllen.",
+    werte: "10 % (Standard), sinnvoll 8 – 15 %. Dazu Abstand der Glättlinien 0,1 mm und 20 – 30 mm/s.",
+    wann: "Mehr, wenn noch Rillen bleiben. Weniger, wenn sich Wülste bilden oder die Fläche glänzend verschmiert." },
+  { g: "qualitaet", ab: "Wandgenerator", de: "Wandgenerator", en: "Wall generator",
+    was: "Wie Wände berechnet werden: Klassisch mit fester Linienbreite oder Arachne mit veränderlicher Breite.",
+    werte: "Klassisch (Standard) oder Arachne.",
+    wann: "Arachne für dünne Stellen, Schrift und spitz zulaufende Teile, dort entstehen keine Lücken. Klassisch für gleichmäßige Außenflächen." },
+  { g: "qualitaet", ab: "Erweitert", de: "Reihenfolge der Wände", en: "Order of walls",
+    was: "Ob zuerst die inneren oder die äußeren Wände einer Schicht gedruckt werden.",
+    werte: "innen/außen (Standard), außen/innen, innen/außen/innen.",
+    wann: "außen/innen für genauere Außenmaße und schönere Flächen, aber schlechtere Überhänge. innen/außen/innen als Mittelweg." },
+  { g: "qualitaet", ab: "Überhänge", de: "Erkennen von Wandüberhängen", en: "Detect overhang wall",
+    was: "Erkennt überhängende Wände und druckt sie langsamer, mit Brückenfluss und mehr Kühlung.",
+    werte: "An (Standard).",
+    wann: "An lassen. Nur bei Sonderfällen (Spiralvase, Tests) ausschalten." },
+  // Stärke
+  { g: "staerke", ab: "Wände", de: "Wandlinien", en: "Wall loops",
+    was: "Anzahl der Linien in jeder Außenwand. Wände tragen den größten Teil der Festigkeit.",
+    werte: "2 (Standard). 3 – 4 für Funktionsteile, 4 – 6 bei Gewinden und Einsätzen.",
+    wann: "Erhöhen, wenn Teile brechen oder Schrauben in die Füllung schneiden. Hilft mehr als höhere Fülldichte." },
+  { g: "staerke", ab: "Wände", de: "Nur eine Wand auf den oberen Flächen", en: "Only one wall on top surfaces",
+    was: "Auf Deckflächen wird nur eine Wandlinie gedruckt, damit mehr Platz für ein sauberes Oberflächenmuster bleibt.",
+    werte: "An (Standard).",
+    wann: "Aus, wenn auf kleinen Deckflächen Lücken entstehen." },
+  { g: "staerke", ab: "Obere/Untere Schichten", de: "Obere Schalenschichten", en: "Top shell layers",
+    was: "Anzahl der geschlossenen Schichten oben. Zusammen mit „Dicke der oberen Schale“: es gilt der größere Wert.",
+    werte: "5 Schichten bzw. 1,0 mm (Standard bei 0,20 mm).",
+    wann: "Erhöhen, wenn die Füllung durchscheint oder die Oberfläche Löcher hat (vor allem bei wenig Fülldichte)." },
+  { g: "staerke", ab: "Obere/Untere Schichten", de: "Untere Schalenschichten", en: "Bottom shell layers",
+    was: "Anzahl der geschlossenen Schichten unten.",
+    werte: "3 Schichten (Standard).",
+    wann: "Mehr bei wasserdichten Gefäßen oder dünnen Bodenplatten, die belastet werden." },
+  { g: "staerke", ab: "Obere/Untere Schichten", de: "Muster der Oberfläche", en: "Top surface pattern",
+    was: "Linienmuster der obersten geschlossenen Schicht.",
+    werte: "Monotonische Linie (Standard), Monotonisch, Geradlinig, Konzentrisch und mehr.",
+    wann: "Konzentrisch für runde Deckel und Knöpfe. Monotonisch für gleichmäßigen Glanz ohne Streifen." },
+  { g: "staerke", ab: "Füllung", de: "Fülldichte", en: "Sparse infill density",
+    was: "Wie dicht das Innere gefüllt wird.",
+    werte: "15 % (Standard). Deko 5 – 15 %, Funktionsteile 20 – 40 %, stark belastet 40 – 60 %.",
+    wann: "Erst Wände erhöhen, dann Füllung. Über 50 % bringt kaum mehr Festigkeit, kostet aber viel Material." },
+  { g: "staerke", ab: "Füllung", de: "Füllmuster", en: "Sparse infill pattern",
+    was: "Form der inneren Füllung.",
+    werte: "Gitternetz (Grid), Gyroid, Kubisch, Adaptiv kubisch, Blitz (Lightning), Bienenwabe u. a. Standard je nach Version Gitternetz oder Kreuzschraffur.",
+    wann: "Gyroid: in alle Richtungen gleich fest, gut für PETG und TPU. Blitz: nur als Stütze für Deckflächen, für Deko. Kubisch: stabil und schnell." },
+  { g: "staerke", ab: "Füllung", de: "Überlappung Füllung/Wand", en: "Infill/Wall overlap",
+    was: "Wie weit die Füllung in die Wand hineinragt, damit beides verbunden ist.",
+    werte: "15 % (Standard).",
+    wann: "Erhöhen, wenn sich die Füllung von der Wand löst. Zu hoch drückt sich die Füllung außen durch." },
+  { g: "staerke", ab: "Erweitert", de: "Sicherstellung der vertikalen Wanddicke", en: "Ensure vertical shell thickness",
+    was: "Fügt an schrägen Flächen massive Füllung ein, damit die Wand dort nicht zu dünn wird.",
+    werte: "An bzw. „Alle“ (Standard).",
+    wann: "An lassen. Nur ausschalten, um bei Deko-Teilen Material zu sparen." },
+  // Geschwindigkeit
+  { g: "tempo", ab: "Geschwindigkeit der ersten Schicht", de: "Erste Schicht", en: "Initial layer",
+    was: "Druckgeschwindigkeit der ersten Schicht. Langsamer = bessere Haftung.",
+    werte: "50 mm/s (Standard). Bei Haftproblemen 20 – 30 mm/s, TPU 15 – 20 mm/s.",
+    wann: "Wenn die erste Schicht nicht haftet, sich Ecken lösen oder sehr kleine Teile umfallen." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Außenwand", en: "Outer wall",
+    was: "Geschwindigkeit der sichtbaren Außenwand. Hat den größten Einfluss auf das Aussehen.",
+    werte: "200 mm/s (Standard). Silk, Transparent, Holz: 40 – 120 mm/s.",
+    wann: "Langsamer für glänzendere, glattere Oberflächen und weniger Geisterbilder." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Innere Wand", en: "Inner wall",
+    was: "Geschwindigkeit der inneren Wandlinien.",
+    werte: "300 mm/s (Standard).",
+    wann: "Senken, wenn das Material den Volumenstrom nicht schafft (Lücken) oder die Außenwand wellig wird." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Füllung", en: "Sparse infill",
+    was: "Geschwindigkeit der inneren Füllung.",
+    werte: "270 mm/s (Standard). Wird oft durch die Maximale Volumengeschwindigkeit gebremst.",
+    wann: "Senken bei Schichtverschiebung oder wenn die Füllung löchrig ist." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Oberfläche", en: "Top surface",
+    was: "Geschwindigkeit der obersten Schicht.",
+    werte: "200 mm/s (Standard). Für glatte Deckflächen 60 – 120 mm/s.",
+    wann: "Langsamer bei Rillen oder Lücken in der Oberfläche." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Überbrückung", en: "Bridge",
+    was: "Geschwindigkeit frei gespannter Linien über Lücken.",
+    werte: "50 mm/s (Standard), 25 – 50 mm/s.",
+    wann: "Langsamer, wenn Brücken durchhängen oder reißen." },
+  { g: "tempo", ab: "Überhanggeschwindigkeit", de: "Verlangsamen bei Überhängen", en: "Slow down for overhang",
+    was: "Druckt überhängende Wände je nach Überhang (10 – 25 %, 25 – 50 %, 50 – 75 %, 75 – 100 % der Linienbreite) langsamer.",
+    werte: "An. Typisch 0 / 50 / 30 / 10 mm/s für die vier Stufen.",
+    wann: "Werte senken, wenn sich Überhänge hochbiegen oder Kanten ausfransen." },
+  { g: "tempo", ab: "Beschleunigung", de: "Beschleunigung", en: "Acceleration",
+    was: "Wie schnell der Kopf auf Tempo kommt. Für normales Drucken, Außenwand, erste Schicht, Oberfläche getrennt.",
+    werte: "Normales Drucken 10 000, Außenwand 5 000, Oberfläche 2 000, erste Schicht 500 mm/s².",
+    wann: "Senken bei Schichtverschiebung, Geisterbildern oder hohen, dünnen Teilen, die wackeln." },
+  // Stützen
+  { g: "stuetzen", ab: "Stützen", de: "Stützstrukturen aktivieren", en: "Enable support",
+    was: "Schaltet automatische Stützen unter Überhängen ein.",
+    werte: "Aus (Standard).",
+    wann: "Wenn Überhänge steiler als etwa 45° oder freie Flächen in der Luft beginnen. Alternativ das Teil drehen oder Fasen konstruieren." },
+  { g: "stuetzen", ab: "Stützen", de: "Typ", en: "Type",
+    was: "Art der Stützen und ob sie automatisch oder nur an bemalten Stellen entstehen.",
+    werte: "Normal (auto), Baum (auto), Normal (manuell), Baum (manuell).",
+    wann: "Baum: weniger Material, leichter zu entfernen, gut bei Figuren. Normal: für große, flache Überhänge. Manuell: nur, wo du Stützen aufmalst." },
+  { g: "stuetzen", ab: "Stützen", de: "Stil", en: "Style",
+    was: "Feinform der Stützen, z. B. bei Baumstützen.",
+    werte: "Standard, Baum schlank, Baum stark, Baum-Hybrid, Baum Organisch.",
+    wann: "Organisch: lässt sich am leichtesten lösen. Stark: für hohe, schwere Überhänge. Hybrid: Baum mit flachen Stützbereichen." },
+  { g: "stuetzen", ab: "Stützen", de: "Schwellenwinkel", en: "Threshold angle",
+    was: "Ab welchem Winkel (gemessen von der Waagrechten) keine Stützen mehr nötig sind. Flachere Flächen werden gestützt.",
+    werte: "30° (Standard).",
+    wann: "Kleiner (20 – 25°) für weniger Stützen bei PLA. Größer (35 – 40°) bei PETG, ASA, TPU." },
+  { g: "stuetzen", ab: "Stützen", de: "Nur auf Druckplatte", en: "On build plate only",
+    was: "Stützen wachsen nur von der Platte, nicht auf dem Modell selbst.",
+    werte: "Aus (Standard).",
+    wann: "An, wenn Stützen auf Sichtflächen Spuren hinterlassen würden." },
+  { g: "stuetzen", ab: "Erweitert", de: "Oberer Z-Abstand", en: "Top Z distance",
+    was: "Abstand zwischen Stütze und Modell in der Höhe. Bestimmt, wie leicht die Stütze abgeht.",
+    werte: "0,2 mm (Standard bei 0,2-mm-Schichten). 0,1 – 0,15 für glattere Unterseiten.",
+    wann: "Größer, wenn Stützen zu fest sitzen. Kleiner, wenn die Unterseite durchhängt." },
+  { g: "stuetzen", ab: "Erweitert", de: "Stützen/Objekt XY-Abstand", en: "Support/object xy distance",
+    was: "Seitlicher Abstand zwischen Stütze und Modell.",
+    werte: "0,35 mm (Standard).",
+    wann: "Größer, wenn Stützen an senkrechten Wänden festkleben." },
+  { g: "stuetzen", ab: "Erweitert", de: "Obere Schnittstellschichten", en: "Top interface layers",
+    was: "Dichte Schichten oben auf der Stütze, direkt unter dem Modell. Ergeben eine glattere Unterseite.",
+    werte: "2 – 3 Schichten.",
+    wann: "Mehr für schönere Unterseiten, weniger für leichteres Entfernen." },
+  { g: "stuetzen", ab: "Erweitert", de: "Brücken nicht unterstützen", en: "Don't support bridges",
+    was: "Kurze Brücken werden nicht gestützt, weil sie frei gedruckt werden können.",
+    werte: "An (Standard).",
+    wann: "Aus, wenn lange Brücken durchhängen." },
+  { g: "stuetzen", ab: "Floß", de: "Floßschichten", en: "Raft layers",
+    was: "Druckt erst ein Gitter (Floß) und darauf das Modell.",
+    werte: "0 (Standard, kein Floß).",
+    wann: "Selten nötig. Bei winzigen Auflageflächen oder starkem Verzug, sonst lieber Rand (Brim)." },
+  // Sonstige
+  { g: "sonstige", ab: "Druckbetthaftung", de: "Randtyp", en: "Brim type",
+    was: "Ein Rand aus Linien rund um das Teil auf der ersten Schicht, damit es besser haftet.",
+    werte: "Automatisch (Standard), Keine Umrandung, Nur äußerer Rand, Nur innerer Rand, Äußerer und innerer Rand, Randohren (Brim ears).",
+    wann: "Äußerer Rand bei kleinen Auflageflächen, ASA/ABS und hohen Teilen. Randohren nur an den Ecken großer Teile." },
+  { g: "sonstige", ab: "Druckbetthaftung", de: "Randbreite", en: "Brim width",
+    was: "Wie breit der Rand ist.",
+    werte: "5 mm (Standard), 3 – 10 mm.",
+    wann: "Breiter bei starkem Verzug, schmaler, wenn er schwer abgeht." },
+  { g: "sonstige", ab: "Druckbetthaftung", de: "Lücke zwischen Rand und Objekt", en: "Brim-object gap",
+    was: "Abstand zwischen Rand und Teil. Entscheidet, wie leicht sich der Rand abtrennen lässt.",
+    werte: "0,1 mm (Standard).",
+    wann: "Größer (0,15 – 0,2), wenn der Rand zu fest sitzt und Spuren hinterlässt." },
+  { g: "sonstige", ab: "Spezialmodus", de: "Druckreihenfolge", en: "Print sequence",
+    was: "Mehrere Teile Schicht für Schicht gemeinsam oder Teil für Teil nacheinander drucken.",
+    werte: "Nach Ebene (Standard), Nach Objekt.",
+    wann: "Nach Objekt: ein Fehler ruiniert nicht alle Teile und es gibt weniger Fäden. Geht nur mit niedrigen Teilen und genug Abstand." },
+  { g: "sonstige", ab: "Spezialmodus", de: "Spiralvase", en: "Spiral vase",
+    was: "Druckt nur eine einzige Wand als durchgehende Spirale ohne Naht, ohne Füllung und Deckel.",
+    werte: "Aus (Standard).",
+    wann: "Für Vasen, Lampenschirme, Becher-Einsätze. Mit 0,6-mm-Düse werden die Wände stabiler." },
+  { g: "sonstige", ab: "Spezialmodus", de: "Zeitraffer", en: "Timelapse",
+    was: "Kamera-Zeitraffer: normal oder Smooth, bei dem der Kopf für jedes Bild zur Seite fährt.",
+    werte: "Normal (Standard), Smooth.",
+    wann: "Smooth braucht einen Reinigungsturm und verlängert den Druck. Nur für schöne Videos." },
+  { g: "sonstige", ab: "Fuzzy Skin", de: "Fuzzy Skin", en: "Fuzzy Skin",
+    was: "Lässt die Düse beim Außenwand-Drucken zufällig zittern. Ergibt eine raue, griffige Oberfläche, die Schichtlinien verdeckt.",
+    werte: "Aus (Standard). Fuzzy Skin Stärke 0,3 mm, Punktabstand 0,8 mm.",
+    wann: "Für Griffe, Gehäuse und Teile, deren Schichtlinien man nicht sehen soll. Lässt sich auch nur an Stellen aufmalen." },
+  { g: "sonstige", ab: "G-Code-Ausgabe", de: "Vermeiden von Wandüberquerungen", en: "Avoid crossing wall",
+    was: "Leerfahrten führen um Wände herum statt quer darüber.",
+    werte: "Aus (Standard).",
+    wann: "An bei Fäden oder Kratzspuren auf Oberflächen. Etwas längere Druckzeit." },
+  // Filament
+  { g: "filament", ab: "Drucktemperatur", de: "Düsentemperatur", en: "Nozzle temperature",
+    was: "Temperatur der Düse für die erste Schicht und die weiteren Schichten.",
+    werte: "PLA 210 – 230 °C, PETG 240 – 255 °C, ASA 260 – 270 °C, TPU 220 – 230 °C.",
+    wann: "Höher für bessere Schichthaftung und hohe Geschwindigkeit. Niedriger gegen Fäden und Glanzverlust. Mit Temperaturturm finden." },
+  { g: "filament", ab: "Drucktemperatur", de: "Druckbetttemperatur", en: "Bed temperature",
+    was: "Betttemperatur, getrennt für jede Plattenart (Cool Plate, Engineering, Smooth PEI, Textured PEI).",
+    werte: "PLA 55 – 65 °C, PETG 70 °C, ASA/ABS 90 – 100 °C, TPU 35 – 45 °C (Textured PEI).",
+    wann: "Höher bei Haftproblemen, niedriger bei Elefantenfuß. Mehr dazu im Reiter Druckplatten." },
+  { g: "filament", ab: "Grundlegende Informationen", de: "Flussverhältnis", en: "Flow ratio",
+    was: "Multipliziert die geförderte Materialmenge. Gleicht Durchmesser- und Dichteschwankungen aus.",
+    werte: "0,95 – 1,0. Bambu PLA 0,98, PETG 0,95.",
+    wann: "Kalibrieren bei jeder neuen Marke. Zu hoch: Wülste, raue Oberfläche. Zu niedrig: Lücken." },
+  { g: "filament", ab: "Grundlegende Informationen", de: "Pressure Advance aktivieren", en: "Enable pressure advance",
+    was: "Gleicht den Druck in der Düse beim Beschleunigen und Bremsen aus (K-Faktor). Sonst werden Ecken dick und Linienanfänge dünn.",
+    werte: "PLA 0,02, PETG 0,04, TPU 0 – 0,05. Ermittelt mit der Kalibrierung Flussdynamik.",
+    wann: "Kalibrieren bei neuem Material oder wenn Ecken ausbeulen." },
+  { g: "filament", ab: "Volumetrische Geschwindigkeitsbegrenzung", de: "Maximale Volumengeschwindigkeit", en: "Max volumetric speed",
+    was: "Obergrenze, wie viel mm³ Material pro Sekunde geschmolzen werden. Bremst alle Geschwindigkeiten passend ein.",
+    werte: "PLA 15 – 21, PETG 12 – 20 (HF bis 25), ASA 12 – 16, TPU 3 – 4 mm³/s.",
+    wann: "Senken bei Lücken trotz richtigem Fluss. Kalibrieren mit dem Max-Volumengeschwindigkeit-Test." },
+  { g: "filament", ab: "Kühlung", de: "Lüftergeschwindigkeit", en: "Fan speed",
+    was: "Bauteillüfter zwischen Minimum und Maximum, abhängig von der Schichtzeit (Minimale Lüftergeschwindigkeit, Schwellenwert für die maximale Lüftergeschwindigkeit).",
+    werte: "PLA 80 – 100 %, PETG 20 – 60 %, ASA/ABS 0 – 30 %, TPU 70 – 100 %.",
+    wann: "Mehr für Überhänge und Brücken. Weniger für bessere Schichthaftung und gegen Verzug." },
+  { g: "filament", ab: "Kühlung", de: "Verlangsamen für eine bessere Schichtkühlung", en: "Slow printing down for better layer cooling",
+    was: "Bremst kleine Schichten, damit jede Schicht Zeit zum Abkühlen hat (bis zur Minimalen Druckgeschwindigkeit).",
+    werte: "An (Standard), Schichtdauer ca. 4 – 8 s.",
+    wann: "An lassen. Wichtig für kleine Teile und Spitzen, die sonst weich werden." },
+  { g: "filament", ab: "Kühlung", de: "Hilfslüfter", en: "Auxiliary part cooling fan",
+    was: "Der große Seitenlüfter im P1S. Kühlt zusätzlich von der Seite.",
+    werte: "PLA 0 – 70 %, PETG, ASA, ABS 0 %.",
+    wann: "Für große Überhänge in PLA. Bei PETG und ASA aus, sonst Verzug und schwache Schichten." },
+  { g: "filament", ab: "Kühlung", de: "Zwangskühlung für Überhänge und Brücken", en: "Force cooling for overhang and bridge",
+    was: "Lüfter bei Überhängen und Brücken auf den eigenen Wert (Lüftergeschwindigkeit für Überhänge) setzen.",
+    werte: "An, 100 % für PLA. Bei PETG 60 – 90 %.",
+    wann: "An lassen. Bei ASA nur, wenn Überhänge sonst durchhängen." },
+  { g: "filament", ab: "Überschreibung", de: "Rückzugslänge", en: "Retraction length",
+    was: "Wie weit das Filament vor Leerfahrten zurückgezogen wird, damit nichts nachläuft.",
+    werte: "P1S: 0,8 mm (Standard). PETG 0,8 – 1,2 mm, TPU 0 – 0,4 mm.",
+    wann: "Erhöhen in 0,2-mm-Schritten bei Fäden (zuerst trocknen und Temperatur prüfen). Zu viel kann die Düse verstopfen." },
+  { g: "filament", ab: "Überschreibung", de: "Z-Hop beim Rückzug", en: "Z hop when retract",
+    was: "Hebt die Düse bei Leerfahrten an, damit sie nicht über das Teil kratzt.",
+    werte: "0,4 mm (Standard am P1S).",
+    wann: "Erhöhen bei Kratzern oder wenn die Düse an hochgebogenen Stellen hängen bleibt. Mehr Z-Hop = mehr Fäden." },
+  { g: "filament", ab: "Grundlegende Informationen", de: "Erweichungstemperatur", en: "Softening temperature",
+    was: "Ab dieser Temperatur wird das Filament weich. Bambu Studio warnt, wenn Bett oder Kammer wärmer sind (Tür öffnen).",
+    werte: "PLA ca. 45 °C, PETG ca. 65 – 70 °C, ASA/ABS ca. 95 – 100 °C.",
+    wann: "Nur bei eigenen Filamenten eintragen. Gilt auch als Grenze fürs Trocknen." },
+];
+
+// ---- Druckplatten (Namen wie PLATTEN in daten.js; Werte nach dem Bambu-Wiki, P1S-Bett max. 100 °C) ----
+const BETT_MAX_P1S = 100;
+const PLATTEN_INFO = [
+  { id: "cool", name: "Cool Plate/PLA Plate", kurz: "Cool Plate", farbe: "#2b2f31", muster: "glatt",
+    text: "Glatte, schwarze Platte für niedrige Betttemperaturen. Gedacht für PLA bei 35–45 °C, wenn die Kammer kühl bleiben soll.",
+    gut: ["PLA bei offener Tür und niedrigem Bett", "Glatte, glänzende Unterseiten"],
+    pflege: ["Vor jedem Druck dünn Klebestift auftragen: hilft beim Haften und beim Lösen.", "Kleber regelmäßig mit warmem Wasser abwaschen.", "Nicht über 60 °C heizen."],
+    vorsicht: "Für PETG, TPU, ASA, ABS nicht geeignet." },
+  { id: "supertack", name: "Bambu Cool Plate SuperTack", kurz: "SuperTack", farbe: "#1f2a27", muster: "glatt",
+    text: "Cool Plate mit besonders haftender Beschichtung. Hält PLA und PETG schon bei niedriger Temperatur ohne Kleber. Wärmer = haftet stärker.",
+    gut: ["PLA und PETG ohne Kleber", "Kleine Auflageflächen, hohe dünne Teile", "Glatte Unterseiten"],
+    pflege: ["Ohne Kleber verwenden. Mit Spülmittel und warmem Wasser reinigen.", "Weiche Oberfläche: Spachtel vorsichtig ansetzen. Kratzer stören nicht.", "Sitzt ein Teil zu fest: Platte auf 50 °C heizen und dann lösen."],
+    vorsicht: "Kein TPU (beschädigt die Platte). Kein Bambu PLA Silk. PLA mit PETG-Stützschnittstelle nur mit Floß." },
+  { id: "eng", name: "Engineering Plate", kurz: "Engineering", farbe: "#3a3f3c", muster: "matt",
+    text: "Glatte, matte Platte für technische Materialien. Braucht immer Kleber, der hier als Haft- und Trennmittel dient.",
+    gut: ["PETG, ASA, ABS, PC, PA mit Kleber", "Glatte Unterseiten bei Technik-Materialien"],
+    pflege: ["Klebestift vor jedem Druck dünn auftragen.", "Kleberreste mit warmem Wasser und Spülmittel abwaschen."],
+    vorsicht: "Für PLA nicht empfohlen. Ohne Kleber reißen PETG und TPU Stücke aus der Oberfläche." },
+  { id: "smooth", name: "Smooth PEI Plate / High Temp Plate", kurz: "Smooth PEI", farbe: "#c9a24a", muster: "glatt",
+    text: "Glatte PEI-Platte (goldgelb) für fast alle Materialien. Gibt spiegelglatte Unterseiten.",
+    gut: ["PLA ohne Kleber", "Glänzende Unterseiten", "PETG, TPU, ASA mit Kleber als Trennmittel"],
+    pflege: ["Mit Spülmittel und warmem Wasser waschen, zwischendurch Isopropanol.", "Kein Aceton auf PEI.", "Teile nach dem Abkühlen durch leichtes Biegen lösen."],
+    vorsicht: "PETG und TPU haften auf glattem PEI zu stark: immer Kleber als Trennschicht, sonst reißen sie die Beschichtung heraus." },
+  { id: "textured", name: "Textured PEI Plate", kurz: "Textured PEI", farbe: "#b8872f", muster: "struktur",
+    text: "Raue PEI-Platte, Standard am P1S. Haftet gut, Teile lösen sich nach dem Abkühlen fast von selbst. Unterseite bekommt eine feine Struktur.",
+    gut: ["Fast alles ohne Kleber: PLA, PETG, TPU, ASA, ABS", "Unterseiten ohne Fingerabdrücke", "PETG ohne Abreißen der Oberfläche"],
+    pflege: ["Wöchentlich mit Spülmittel und warmem Wasser waschen, gut abtrocknen.", "Nicht mit den Fingern auf die Druckfläche fassen.", "Kein Aceton. Verschlissene Stellen in der Mitte sind normal."],
+    vorsicht: "Sehr kleine Kontaktflächen haften schlechter als auf glatten Platten. Dann Rand (Brim) oder SuperTack." },
+];
+// Matrix Material × Platte: a = ok | kleber | nein, t = Betttemperatur in °C
+const PLATTEN_MATRIX = [
+  { m: "PLA", w: { cool: ["kleber", "35–45"], supertack: ["ok", "35–45"], eng: ["nein"], smooth: ["ok", "55–65"], textured: ["ok", "55–65"] } },
+  { m: "PETG", w: { cool: ["nein"], supertack: ["ok", "60–70"], eng: ["kleber", "70–80"], smooth: ["kleber", "70–80"], textured: ["ok", "70–80"] } },
+  { m: "TPU", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "30–35"], smooth: ["kleber", "35–45"], textured: ["ok", "35–45"] } },
+  { m: "ASA", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "90–100"], smooth: ["kleber", "90–100"], textured: ["ok", "90–100"] } },
+  { m: "ABS", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "90–100"], smooth: ["kleber", "90–100"], textured: ["ok", "90–100"] } },
+  { m: "PC", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "100"], smooth: ["kleber", "100"], textured: ["kleber", "100"] } },
+  { m: "PA", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "100"], smooth: ["kleber", "100"], textured: ["kleber", "100"] } },
+];
+// Kleine Zeichnung einer Platte (Draufsicht, leicht schräg)
+function platteSvg(p) {
+  const id = `pl-${p.id}`;
+  const muster = p.muster === "struktur"
+    ? `<pattern id="${id}" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1" fill="rgba(0,0,0,.28)"/><circle cx="0" cy="0" r=".6" fill="rgba(255,255,255,.18)"/></pattern>`
+    : `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,${p.muster === "matt" ? 0.06 : 0.22})"/><stop offset=".45" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(255,255,255,${p.muster === "matt" ? 0.03 : 0.1})"/></linearGradient>`;
+  return `<svg viewBox="0 0 120 80" class="pl-bild" aria-hidden="true"><defs>${muster}</defs>
+    <path d="M18 14 H102 L112 66 H8 Z" fill="${p.farbe}" stroke="rgba(255,255,255,.25)"/>
+    <path d="M18 14 H102 L112 66 H8 Z" fill="url(#${id})"/>
+    <path d="M8 66 H112 V70 H8 Z" fill="#555c58"/>
+    <rect x="52" y="8" width="16" height="6" rx="2" fill="#8da49a"/>
+  </svg>`;
+}
 // ---------------------------------------------------------------------------
 // Aussehen: dunkler Tech-Look, Mint-Akzente, Glas-Karten, Rasterhintergrund
 // ---------------------------------------------------------------------------
@@ -2317,6 +2867,233 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
 .mobil .nb-werkzeug .such-feld { max-width: none; }
 .mobil .nb-chips { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 2px 16px; scrollbar-width: none; }
 .mobil .nb-chips::-webkit-scrollbar { display: none; }
+
+/* ==== 3D-Modelle: Werkzeuge (Auflegen, Beste Lage, Messen, Wandstärke, Skalieren), angedockte Warteschlange (v0.12) ==== */
+/* Handy: Warteschlange als feste Leiste direkt über der unteren Navigation, der Inhalt endet darüber */
+.mobil .mod-fuss.dock { position: absolute; left: 0; right: 0; bottom: var(--mod-nav-h, 64px); z-index: 2; margin: 0; padding: 8px 16px; border: none; border-top: 1px solid var(--rand); border-radius: 0;
+  background: rgba(8,12,11,.9); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 -10px 24px rgba(0,0,0,.35); }
+.mobil .mod-fuss.dock .knopf { min-height: 44px; }
+.mobil .mod-raster { padding-bottom: var(--mod-fuss-h, 0px); }
+/* Handy: die Seite wächst mit dem Inhalt, sonst geht der Platz unter der Leiste verloren */
+.mobil .ansicht-rein.voll { height: auto; }
+/* Vier Reiter passen nebeneinander */
+.mod-tabs { gap: 0; padding: 4px 8px 0; overflow-x: auto; scrollbar-width: none; }
+.mod-tabs .tab { flex: 1 0 auto; padding: 10px 9px; font-size: 13.5px; white-space: nowrap; text-align: center; }
+.mobil .mod-tabs .tab { font-size: 13px; padding: 10px 6px; }
+/* Werkzeug-Liste (ohne Auswahl) und Leiste zum Wechseln */
+.mod-wz-einleitung { margin: 0 0 12px; font-size: 13px; }
+.mod-wz-liste { display: grid; gap: 8px; }
+.mod-wz-zeile { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 10px 12px 10px 10px; border-radius: 14px; background: rgba(0,0,0,.18); border: 1px solid var(--rand);
+  transition: border-color .15s, background .15s, transform .15s; animation: ansicht-rein .3s cubic-bezier(.2,.8,.2,1) both; }
+.mod-wz-zeile:nth-child(2) { animation-delay: .03s; } .mod-wz-zeile:nth-child(3) { animation-delay: .06s; } .mod-wz-zeile:nth-child(4) { animation-delay: .09s; } .mod-wz-zeile:nth-child(5) { animation-delay: .12s; }
+.mod-wz-zeile:hover, .mod-wz-zeile:focus-visible { border-color: rgba(62,230,168,.45); background: var(--mint-weich); outline: none; }
+.mod-wz-zeile:active { transform: scale(.985); }
+.mod-wz-zeile > .mod-ico { width: 22px; height: 22px; padding: 9px; border-radius: 12px; color: var(--mint); background: rgba(62,230,168,.1); border: 1px solid rgba(62,230,168,.22); }
+.mod-wz-zeile > span:not(.mod-wz-pfeil) { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.mod-wz-zeile strong { font-size: 14px; }
+.mod-wz-zeile small { font-size: 12px; color: var(--leise); }
+.mod-wz-pfeil { color: var(--leise); font-size: 22px; line-height: 1; }
+.mod-wz-leiste { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; padding: 4px; margin-bottom: 14px; border-radius: 16px; background: rgba(0,0,0,.28); border: 1px solid var(--rand); }
+.mod-wz { display: grid; justify-items: center; gap: 4px; padding: 8px 2px 6px; border-radius: 12px; color: var(--leise); font-size: 11px; font-weight: 600; transition: color .15s, background .15s, box-shadow .15s; }
+.mod-wz .mod-ico { width: 22px; height: 22px; }
+.mod-wz span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mod-wz:hover { color: var(--text); background: var(--flaeche-hover); }
+.mod-wz.an { color: var(--mint); background: var(--mint-weich); box-shadow: inset 0 0 0 1px rgba(62,230,168,.45); }
+.mod-wz-karte { animation: ansicht-rein .22s ease; }
+.mod-wz-karte h3 { margin-top: 0; }
+.mod-wz-aktiv { display: flex; align-items: center; gap: 10px; }
+.mod-wz-puls { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--mint); animation: wz-puls 1.6s ease-out infinite; }
+@keyframes wz-puls { 0% { box-shadow: 0 0 0 0 rgba(62,230,168,.6); } 100% { box-shadow: 0 0 0 10px rgba(62,230,168,0); } }
+/* Hinweis im 3D-Bild, solange Antippen erwartet wird */
+.mod-wz-hinweis { background: rgba(10,30,24,.82); border-color: rgba(62,230,168,.5); color: #c6f6e3; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.mod-wz-hinweis .mod-ico { width: 18px; height: 18px; color: var(--mint); }
+.mobil .mod-wz-hinweis { top: auto; bottom: 34px; justify-content: center; flex-wrap: wrap; row-gap: 6px; }
+/* Beste Lage: Vergleich als Balken */
+.mod-vergleich { display: grid; gap: 8px; margin: 12px 0 6px; }
+.mod-v-zeile { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.mod-v-zeile > span { color: var(--leise); }
+.mod-v-zeile strong { min-width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+.mod-balken { height: 10px; border-radius: 5px; background: rgba(255,255,255,.06); overflow: hidden; }
+.mod-balken i { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg, #ffb547, #ff6b6b); transition: width .45s cubic-bezier(.2,.8,.2,1); }
+.mod-v-zeile.vorschlag .mod-balken i { background: linear-gradient(90deg, #22b884, var(--mint)); }
+.mod-v-zeile.vorschlag strong { color: var(--mint); }
+.mod-v-text { color: var(--leise); margin: 0 0 4px; }
+.mod-lage-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.mod-lage-chips .chip { display: grid; gap: 1px; padding: 6px 8px; border-radius: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.mod-lage-chips .chip strong { font-size: 13px; }
+.mod-lage-chips .chip small { font-size: 10.5px; color: var(--leise); }
+/* Messen */
+.mod-mess { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.mod-mess-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.mod-mess-linie { stroke: var(--gelb); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 7 5; filter: drop-shadow(0 0 4px rgba(255,213,74,.55)); animation: mess-laufen .9s linear infinite; }
+@keyframes mess-laufen { to { stroke-dashoffset: -12; } }
+.mod-mess-punkt { fill: var(--gelb); stroke: #1b1503; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(255,213,74,.8)); }
+.mod-mess-text { position: absolute; left: 0; top: 0; padding: 4px 10px; border-radius: 9px; background: var(--gelb); color: #1b1503; font-weight: 800; font-size: 14px;
+  white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 4px rgba(255,213,74,.16), 0 6px 18px rgba(0,0,0,.5); }
+.mod-mess-schritte { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 12px; }
+.mod-mess-schritte span { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; background: rgba(0,0,0,.2); border: 1px solid var(--rand); font-size: 13px; color: var(--leise); transition: color .2s, border-color .2s; }
+.mod-mess-schritte i { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 50%; border: 2px solid currentColor; font-style: normal; font-size: 12px; font-weight: 800; }
+.mod-mess-schritte .jetzt { color: var(--gelb); border-color: rgba(255,213,74,.5); }
+.mod-mess-schritte .fertig { color: var(--mint); border-color: rgba(62,230,168,.4); }
+.mod-mess-schritte .fertig i { background: var(--mint); border-color: var(--mint); color: #062018; }
+.mod-mess-ergebnis { display: grid; justify-items: center; gap: 6px; padding: 16px 12px; border-radius: 16px; border: 1px solid rgba(255,213,74,.35);
+  background: radial-gradient(260px 120px at 50% 0%, rgba(255,213,74,.12), transparent 70%), rgba(0,0,0,.22); animation: ansicht-rein .25s ease; }
+.mod-mess-ergebnis strong { font-size: 30px; color: var(--gelb); font-variant-numeric: tabular-nums; }
+.mod-mess-achsen { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.mod-mess-achsen span { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.05); font-size: 12px; font-weight: 800; }
+.mod-mess-achsen b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.mod-mess-achsen .a-x { color: #ff6b6b; }
+.mod-mess-achsen .a-y { color: #4fe08a; }
+.mod-mess-achsen .a-z { color: #5cc8ff; }
+/* Wandstärke und Skalieren */
+.mod-duenn-hinweis .mini { display: inline-block; margin: 6px 0 0; }
+.mod-skala-felder input { font-size: 15px; -moz-appearance: textfield; }
+.mod-skala-felder input::-webkit-inner-spin-button, .mod-skala-felder input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.mod-skala-schnell { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin: 2px 0 6px; }
+.mod-skala-schnell .chip { padding: 6px 0; font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.mod-skala-loecher .hinweis { margin: 10px 0 4px; }
+.mod-skala-loch { display: flex; gap: 10px; align-items: center; margin: 6px 0; padding: 8px 10px; border-radius: 12px; font-size: 13px; background: rgba(0,0,0,.18); border: 1px solid var(--rand); }
+.mod-skala-loch.schlecht { border-color: rgba(255,181,71,.5); background: rgba(255,181,71,.08); color: #ffd59a; }
+.mod-skala-loch.gut .mod-nr { border-color: var(--mint); color: var(--mint); }
+.mod-skala-loecher .mini { margin: 4px 0 0; }
+/* ---- Hilfe v0.12: Trockner mit zwei Plätzen, Konstruktion, Slicer-Lexikon, Druckplatten ---- */
+.hinweis.rot { color: #ffc2c2; background: rgba(255,107,107,.1); border-color: rgba(255,107,107,.35); }
+.pl-jetzt { color: var(--mint); }
+/* Aufklappbare Einträge */
+.hi-eintrag { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); backdrop-filter: blur(10px); transition: border-color .2s, background .2s, box-shadow .2s; min-width: 0; }
+.hi-eintrag:hover { border-color: rgba(62,230,168,.35); background: var(--flaeche-hover); }
+.hi-eintrag.auf { border-color: rgba(62,230,168,.45); box-shadow: 0 8px 28px rgba(0,0,0,.25), inset 0 0 0 1px rgba(62,230,168,.08); }
+.hi-eintrag-kopf { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; text-align: left; border-radius: 16px; }
+.hi-eintrag-kopf:focus-visible { outline: 2px solid rgba(62,230,168,.6); outline-offset: -2px; }
+.hi-pfeil { margin-left: auto; flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: var(--leise); font-size: 18px; transition: transform .22s ease, color .2s, background .2s; }
+.hi-eintrag.auf .hi-pfeil { transform: rotate(90deg); color: var(--mint); background: var(--mint-weich); }
+.hi-eintrag-text { display: none; padding: 0 14px 14px; }
+.hi-eintrag.auf .hi-eintrag-text { display: block; }
+/* Trockner: zwei Plätze */
+.hi-kombi-wahl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hi-kombi-wahl .breit-auswahl { margin: 0; }
+.hi-kombi-erg { margin-top: 14px; }
+.hi-kombi-hinweis { margin-bottom: 8px; }
+.hi-kombi-leer { margin: 6px 0 0; }
+.hi-laeufe { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); margin-top: 6px; }
+.hi-laeufe:not(.zwei) .hi-lauf { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 4px 18px; align-items: center; }
+.hi-laeufe:not(.zwei) .hi-lauf h4 { grid-column: 1 / -1; }
+.hi-laeufe:not(.zwei) .hi-lauf-schritte { grid-template-columns: 1fr 1fr; margin: 0; }
+.mobil .hi-laeufe:not(.zwei) .hi-lauf { grid-template-columns: 1fr; }
+.mobil .hi-laeufe:not(.zwei) .hi-lauf-schritte { margin-top: 10px; }
+.hi-laeufe.zwei { grid-template-columns: 1fr 1fr; }
+.hi-lauf { padding: 12px; border-radius: 16px; background: rgba(0,0,0,.22); border: 1px solid var(--rand); animation: hi-lauf-rein .3s ease both; }
+@keyframes hi-lauf-rein { from { opacity: 0; transform: translateY(6px); } }
+.hi-lauf h4 { margin: 0 0 8px; font-size: 14px; color: var(--mint); }
+.tr-kombi-bild { width: 100%; max-width: 400px; height: auto; display: block; margin: 0 auto; }
+.tr-kombi-name { fill: var(--leise); font-size: 10px; letter-spacing: .4px; }
+.tr-kombi-nr { fill: #ffb547; font-size: 13px; font-weight: 700; }
+.tr-kombi-leer { fill: var(--leise); font-size: 13px; }
+.hi-lauf-schritte { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; counter-reset: schritt; }
+.hi-lauf-schritte li { counter-increment: schritt; display: grid; gap: 2px; padding: 8px 10px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); font-size: 12px; min-width: 0; }
+.hi-lauf-schritte li span { color: var(--leise); }
+.hi-lauf-schritte li span::before { content: counter(schritt) ". "; color: var(--mint); font-weight: 700; }
+.hi-lauf-schritte strong { color: var(--amber); font-size: 15px; overflow-wrap: anywhere; }
+.hi-lauf-schritte small { font-size: 11px; }
+.hi-laeufe.zwei .hi-lauf-schritte { grid-template-columns: 1fr 1fr; }
+.mobil .hi-kombi-wahl, .mobil .hi-laeufe.zwei { grid-template-columns: 1fr; }
+.mobil .hi-lauf-schritte { grid-template-columns: 1fr 1fr; }
+/* Konstruktion */
+.kn-rechner { margin-bottom: 16px; align-items: stretch; }
+.kn-karte .chips { margin: 4px 0 10px; }
+.kn-karte .chip { padding: 6px 12px; }
+.kn-da { font-style: normal; color: var(--mint); font-size: 9px; vertical-align: 2px; }
+.kn-stufen .info-zeile { padding: 8px 14px; }
+.kn-stufen .kn-empf { background: var(--mint-weich); }
+.kn-stufen .kn-empf strong { color: var(--mint); }
+.kn-regler { margin: 14px 0 8px; }
+.kn-erg .hinweis { margin: 0; }
+.kn-erg strong { color: inherit; }
+.kn-einsatz-erg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.kn-gross { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--mint-weich); border: 1px solid rgba(62,230,168,.3); }
+.kn-gross span { font-size: 12px; color: var(--leise); }
+.kn-gross strong { font-size: 26px; color: var(--mint); line-height: 1.1; }
+.kn-gross small { font-size: 11px; }
+.kn-karte .info-liste .info-zeile { padding: 9px 14px; }
+.kn-karte > p.klein { margin: 10px 0 0; }
+.kn-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; align-items: start; }
+.mobil .kn-raster { grid-template-columns: 1fr; }
+.kn-bild { width: 96px; height: auto; flex: none; border-radius: 10px; background: rgba(0,0,0,.3); }
+.mobil .kn-bild { width: 84px; }
+.kn-kopf-text { display: grid; gap: 2px; min-width: 0; }
+.kn-kopf-text small { font-size: 12px; }
+.kn-punkte { margin-top: 4px; }
+.kn-werte { margin-top: 12px; }
+.kn-werte .info-zeile { padding: 8px 12px; font-size: 13px; }
+.kn-werte strong { color: var(--amber); text-align: right; }
+.kn-tab-titel { margin: 12px 0 6px; }
+.kn-tabelle { margin-top: 12px; border: 1px solid var(--rand); border-radius: 12px; overflow: hidden; font-size: 13px; }
+.kn-tz { display: grid; grid-template-columns: 1.3fr repeat(calc(var(--spalten) - 1), 1fr); gap: 6px; padding: 7px 12px; border-bottom: 1px solid var(--rand); align-items: center; }
+.kn-tz:last-child { border-bottom: none; }
+.kn-tz span { color: var(--amber); font-variant-numeric: tabular-nums; }
+.kn-tk { background: rgba(0,0,0,.25); }
+.kn-tk span { color: var(--leise); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+.mobil .kn-tz { padding: 7px 10px; font-size: 12px; }
+/* Slicer-Lexikon */
+.lex-werkzeug { display: flex; margin-bottom: 12px; }
+.lex-werkzeug .suche { max-width: 520px; }
+.lex-gruppen .chip small { margin-left: 6px; font-size: 11px; color: var(--leise); }
+.lex-gruppen .chip.an small { color: var(--mint); }
+.lex-gruppe { margin-bottom: 18px; }
+.lex-gruppe-titel { margin: 4px 0 10px; font-size: 15px; }
+.lex-gruppe-titel small { font-weight: 400; }
+.lex-liste { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px; align-items: start; }
+.mobil .lex-liste { grid-template-columns: 1fr; }
+.lex-eintrag .hi-eintrag-kopf { flex-wrap: wrap; row-gap: 2px; padding: 11px 14px; }
+.lex-name { display: grid; gap: 1px; min-width: 0; flex: 1 1 180px; }
+.lex-name small { color: var(--leise); font-size: 12px; }
+.lex-name small::before { content: "("; } .lex-name small::after { content: ")"; }
+.lex-ab { order: 3; flex-basis: 100%; font-size: 11px; color: var(--mint); opacity: .8; }
+.lex-eintrag .hi-pfeil { order: 2; }
+.lex-text { margin: 0; display: grid; gap: 4px; font-size: 14px; line-height: 1.45; }
+.lex-text dt { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); margin-top: 6px; }
+.lex-text dd { margin: 0; }
+.lex-text dd.lex-werte { color: var(--amber); }
+.lex-anzahl { margin: 0 0 8px; }
+/* Druckplatten */
+.pl-matrix { display: grid; gap: 4px; }
+.pl-zeile { display: grid; grid-template-columns: minmax(56px, .8fr) repeat(5, minmax(0, 1fr)); gap: 4px; align-items: stretch; border-radius: 12px; transition: background .2s; }
+.pl-zeile.deine { background: rgba(62,230,168,.07); box-shadow: inset 0 0 0 1px rgba(62,230,168,.3); }
+.pl-mat { display: flex; align-items: center; padding-left: 10px; font-size: 14px; }
+.pl-zeile.deine .pl-mat { color: var(--mint); }
+.pl-spalte { padding: 8px 4px; border-radius: 10px; font-size: 12px; font-weight: 600; color: var(--leise); text-align: center; line-height: 1.2; border: 1px solid transparent; hyphens: manual; }
+.pl-spalte:hover { color: var(--text); background: var(--flaeche-hover); }
+.pl-spalte.an { color: var(--mint); border-color: rgba(62,230,168,.45); background: var(--mint-weich); }
+.pl-spalte.drin::after { content: " ●"; color: var(--mint); font-size: 9px; vertical-align: 1px; }
+.pl-zelle { display: grid; place-items: center; gap: 0; padding: 7px 2px; border-radius: 10px; background: rgba(255,255,255,.03); border: 1px solid var(--rand); transition: transform .15s, border-color .15s; min-width: 0; }
+.pl-zelle:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.2); }
+.pl-zelle b { font-size: 15px; line-height: 1.1; }
+.pl-zelle small { font-size: 11px; color: var(--leise); font-variant-numeric: tabular-nums; }
+.pl-zelle.ok { background: rgba(62,230,168,.10); border-color: rgba(62,230,168,.28); }
+.pl-zelle.ok b { color: var(--mint); }
+.pl-zelle.kleber { background: var(--amber-weich); border-color: rgba(255,181,71,.3); }
+.pl-zelle.kleber b { color: var(--amber); font-size: 12px; font-weight: 600; }
+.pl-zelle.nein b { color: rgba(255,107,107,.75); }
+.pl-zelle.nein { opacity: .7; }
+.pl-zelle.spalte { box-shadow: 0 0 0 1px rgba(62,230,168,.5); }
+.pl-legende { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 12px 0 4px; font-size: 12px; color: var(--leise); }
+.pl-legende b { font-weight: 700; margin-right: 4px; }
+.pl-legende .ok { color: var(--mint); } .pl-legende .kleber { color: var(--amber); } .pl-legende .nein { color: var(--rot); }
+.pl-detail-kopf { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.pl-detail-kopf h2 { font-size: 18px; }
+.pl-detail-kopf p { margin: 4px 0 0; font-size: 14px; }
+.pl-bild { width: 120px; height: auto; flex: none; border-radius: 12px; background: rgba(0,0,0,.3); }
+.pl-wahl .chip { padding: 6px 12px; }
+.mobil .pl-karte { padding: 14px 10px; }
+.mobil .pl-zeile { grid-template-columns: 46px repeat(5, minmax(0, 1fr)); gap: 3px; }
+.mobil .pl-mat { padding-left: 4px; font-size: 12px; }
+.mobil .pl-spalte { font-size: 10px; padding: 6px 1px; }
+.mobil .pl-zelle { padding: 6px 1px; }
+.mobil .pl-zelle.kleber b { font-size: 9.5px; }
+.mobil .pl-zelle small { font-size: 9.5px; }
+.mobil .pl-detail-kopf { flex-direction: column; align-items: flex-start; }
+.mobil .pl-bild { width: 110px; }
+@media (prefers-reduced-motion: reduce) { .hi-lauf { animation: none; } .hi-pfeil, .pl-zelle { transition: none; } }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -3993,20 +4770,271 @@ const BuchenAnsicht = {
 // Hilfe: P1S-Zeichnung mit Bereichen, Sovol-Trockner, Fehlerbilder, Kalibrierung
 // ---------------------------------------------------------------------------
 
-const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"], ["kunststoffe", "🧪 Kunststoffe"], ["codes", "⚠️ Fehlercodes"]];
+const HI_TABS = [["drucker", "🖨️ Drucker"], ["trockner", "♨️ Trockner"], ["fehler", "🩺 Fehlerbilder"], ["kalibrierung", "🎯 Kalibrierung"], ["kunststoffe", "🧪 Kunststoffe"], ["codes", "⚠️ Fehlercodes"], ["konstruktion", "📐 Konstruktion"], ["lexikon", "📖 Slicer-Lexikon"], ["platten", "🟫 Druckplatten"]];
 // Welche Rollenwerte zu welchem Bereich der Zeichnung gehören
 const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "max_vol"], luefter: ["luefter_min", "luefter_max"],
   riemen: ["v_aussen", "v_innen", "v_fuellung"], bett: ["bett"], spule: ["tr_temp", "tr_dauer"] };
 
 const HilfeAnsicht = {
-  // Neue Hilfe-Reiter (v0.12): Konstruktions-Tipps, Slicer-Lexikon, Druckplatten
-  _hiKonstruktionHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
-  _hiLexikonHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
-  _hiPlattenHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
-
   _hiZustand() {
-    if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", rolle: null, kalWert: null };
+    if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", rolle: null, kalWert: null,
+      // v0.12: aufgeklappte Einträge, Konstruktions-Rechner, Lexikon-Suche, gewählte Platte
+      auf: new Set(), knGruppe: "alle", knDuese: 0.4, knWand: 1.2, knEinsatz: null, lexQ: "", lexGruppe: "alle", platte: null };
     return this._hi;
+  },
+
+  // Aufklappbarer Eintrag (Konstruktion, Lexikon). Zustand bleibt beim Neuzeichnen erhalten.
+  _hiEintragHtml(id, kopf, inhalt, klasse = "", vonSelbstAuf = false) {
+    const auf = this._hi.auf.has(id) || vonSelbstAuf;
+    return `<div class="hi-eintrag ${klasse} ${auf ? "auf" : ""}" data-eintrag="${esc(id)}">
+      <button class="hi-eintrag-kopf" data-aktion="hi-auf" data-id="${esc(id)}" aria-expanded="${auf}">${kopf}<span class="hi-pfeil" aria-hidden="true">›</span></button>
+      <div class="hi-eintrag-text">${inhalt}</div></div>`;
+  },
+  // Auf-/Zuklappen ohne alles neu zu zeichnen
+  _hiAufZu(id) {
+    const h = this._hi;
+    const box = [...this.shadowRoot.querySelectorAll(".hi-eintrag")].find((x) => x.dataset.eintrag === id);
+    const auf = box ? !box.classList.contains("auf") : !h.auf.has(id);
+    if (auf) h.auf.add(id); else h.auf.delete(id);
+    if (!box) { this._zeichnen(); return; }
+    const text = box.querySelector(".hi-eintrag-text");
+    box.querySelector(".hi-eintrag-kopf").setAttribute("aria-expanded", String(auf));
+    if (auf) { box.classList.add("auf"); this._klappAnimieren(text, true); }
+    else this._klappAnimieren(text, false, () => { if (!h.auf.has(id)) box.classList.remove("auf"); });
+  },
+
+  // ---- Trockner: zwei Plätze ----
+  _hiPlaetze() {
+    const p = this._daten.trockner_plaetze;
+    return Array.isArray(p) ? [p[0] || "", p[1] || ""] : ["", ""];
+  },
+  // Inhalt eines Platzes: "r:<Rollen-ID>" oder "m:<Material>" → Trocknungswerte
+  _hiPlatzWert(code) {
+    if (!code) return null;
+    const [art, id] = [code.slice(0, 2), code.slice(2)];
+    if (art === "r:") {
+      const r = this._daten.rollen.find((x) => x.id === id);
+      if (!r) return null;
+      const std = TROCKNEN_MATERIALIEN.find((m) => m.id === r.material) || TROCKNEN_MATERIALIEN[0];
+      const v = (k) => wert(r, k).v ?? std[k];
+      const holz = String(r.art || "").toLowerCase() === "wood";
+      return { id: r.id, name: r.name, material: holz ? "Wood" : r.material, temp: v("tr_temp"), dauer: v("tr_dauer"), feuchte: v("tr_feuchte"),
+        ideal: std.id === r.material ? std.ideal : null, farbe: r.hex || materialInfo(r.material).farbe };
+    }
+    const m = TROCKNEN_MATERIALIEN.find((x) => x.id === id);
+    if (!m) return null;
+    return { name: m.name, material: m.id === "WOOD" ? "Wood" : m.id, temp: m.tr_temp, dauer: m.tr_dauer, feuchte: m.tr_feuchte, ideal: m.ideal,
+      farbe: materialInfo(m.id === "WOOD" ? "PLA" : m.id).farbe };
+  },
+  _hiKombiHtml() {
+    const d = this._daten, plaetze = this._hiPlaetze();
+    const werte = plaetze.map((c) => this._hiPlatzWert(c));
+    const k = trocknenKombi(werte[0], werte[1]);
+    const rollen = d.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const wahl = (i) => `<label class="auswahl breit-auswahl ${plaetze[i] ? "an" : ""}"><span>Platz ${i + 1} · ${i ? "rechts" : "links"}</span><select data-hi="tr-platz" data-platz="${i}">
+      <option value="" ${plaetze[i] ? "" : "selected"}>– leer –</option>
+      <optgroup label="Deine Rollen">${rollen.map((r) => `<option value="r:${esc(r.id)}" ${plaetze[i] === `r:${r.id}` ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}</option>`).join("")}</optgroup>
+      <optgroup label="Nur Material">${TROCKNEN_MATERIALIEN.map((m) => `<option value="m:${m.id}" ${plaetze[i] === `m:${m.id}` ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</optgroup>
+    </select></label>`;
+    const zeit = (h) => `${zahl(h, h % 1 ? 1 : 0)} h`;
+    const lauf = (l, i) => `<div class="hi-lauf">
+        <h4>${k.modus === "getrennt" ? `Lauf ${i + 1} · ${esc(l.name)}` : k.modus === "zusammen" ? "Beide Rollen zusammen" : esc(l.name)}</h4>
+        ${trocknerKombiSvg(l, werte, l.plaetze, i ? "vorher" : "danach")}
+        <ol class="hi-lauf-schritte">
+          <li><span>Material</span><strong>${esc(l.name)}</strong><small class="leise">oder „Custom“</small></li>
+          <li><span>Temperatur</span><strong>${l.temp} °C</strong></li>
+          <li><span>Zeit</span><strong>${zeit(l.dauer)}</strong></li>
+          <li><span>Fertig, wenn Feuchte</span><strong>&lt; ${l.feuchte} %</strong></li>
+        </ol></div>`;
+    return `<div class="dr-karte oben-abstand hi-kombi" data-einmal="hi-kombi">
+      <h3 class="dr-titel">Zwei Spulen zusammen trocknen</h3>
+      <p class="leise klein">Wähle für jeden Platz eine Rolle oder nur das Material. Du bekommst die gemeinsame Einstellung fürs Display.</p>
+      <div class="hi-kombi-wahl">${wahl(0)}${wahl(1)}</div>
+      <div class="hi-kombi-erg" data-modus="${k.modus}">
+        ${k.modus === "leer" ? `<p class="leise hi-kombi-leer">Noch nichts gewählt. Wähle oben, was in den Trockner kommt.</p>` : `
+        ${k.hinweise.map((x) => `<div class="hinweis ${x.art} hi-kombi-hinweis">${x.art === "rot" ? "⚠️ " : x.art === "amber" ? "⏱ " : "✓ "}${esc(x.text)}</div>`).join("")}
+        <div class="hi-laeufe ${k.laeufe.length > 1 ? "zwei" : ""}">${k.laeufe.map(lauf).join("")}</div>`}
+      </div></div>`;
+  },
+
+  // ---- Konstruktion ----
+  _hiKonstruktionHtml() {
+    const h = this._hiZustand();
+    const tipps = KONSTRUKTION.filter((t) => h.knGruppe === "alle" || t.g === h.knGruppe);
+    return `<p class="leise">Tipps für Teile, die du selbst konstruierst – auf FDM-Druck und deinen P1S abgestimmt. Tippe auf einen Tipp für Werte und Details.</p>
+      <div class="hi-raster kn-rechner">${this._knWandHtml()}${this._knEinsatzHtml()}</div>
+      <div class="chips unter-tabs kn-gruppen">${KN_GRUPPEN.map(([id, n]) => `<button class="chip ${h.knGruppe === id ? "an" : ""}" data-aktion="hi-kn-gruppe" data-id="${id}">${esc(n)}</button>`).join("")}</div>
+      <div class="kn-raster">${tipps.map((t) => this._hiEintragHtml(`kn:${t.id}`,
+        `${KN_BILD[t.id] || ""}<span class="kn-kopf-text"><strong>${esc(t.titel)}</strong><small class="leise">${esc(t.kurz)}</small></span>`,
+        `<ul class="kal-liste kn-punkte">${t.punkte.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>
+         ${t.werte ? `<div class="info-liste kn-werte">${t.werte.map(([n, w]) => `<div class="info-zeile"><span>${esc(n)}</span><strong>${esc(w)}</strong></div>`).join("")}</div>` : ""}
+         ${t.dyn ? this._knTabelleHtml(t.dyn) : ""}`, "kn-tipp")).join("")}</div>`;
+  },
+  // Linienbreiten in Bambu Studio je Düse: [Außenwand, Innenwand]
+  _knLinien(duese) {
+    return { 0.2: [0.22, 0.22], 0.4: [0.42, 0.45], 0.6: [0.62, 0.62], 0.8: [0.82, 0.82] }[duese] || [duese * 1.05, duese * 1.1];
+  },
+  _knWanddicke(duese, n) { const [a, i] = this._knLinien(duese); return a + (n - 1) * i; },
+  _knWandHtml() {
+    const h = this._hi, d = h.knDuese;
+    const imInventar = new Set((this._daten.inventar || []).filter((t) => t.kat === "duese").map((t) => Number(t.groesse)));
+    const [a, i] = this._knLinien(d);
+    const stufen = [[2, "Minimum"], [3, "Standard"], [4, "Funktionsteil"], [5, "Schrauben, Einsätze"], [6, "sehr stabil"]];
+    return `<div class="dr-karte kn-karte" data-einmal="kn-wand"><h3 class="dr-titel">🧮 Wandstärke für deine Düse</h3>
+      <div class="chips kn-duesen">${[0.2, 0.4, 0.6, 0.8].map((x) => `<button class="chip ${x === d ? "an" : ""}" data-aktion="hi-kn-duese" data-id="${x}">${zahl(x, 1)} mm${imInventar.has(x) ? ' <i class="kn-da" title="im Inventar">●</i>' : ""}</button>`).join("")}</div>
+      <p class="leise klein">Linienbreite in Bambu Studio: Außenwand ${zahl(a, 2)} mm, sonst ${zahl(i, 2)} mm · Schichthöhe ${zahl(d * 0.25, 2)}–${zahl(d * 0.7, 2)} mm</p>
+      <div class="info-liste kn-stufen">${stufen.map(([n, t]) => `<div class="info-zeile ${n === 3 ? "kn-empf" : ""}"><span>${n} Linien · ${esc(t)}</span><strong>${zahl(this._knWanddicke(d, n), 2)} mm</strong></div>`).join("")}</div>
+      <div class="mod-regler kn-regler"><div class="r-kopf"><span>Deine geplante Wand</span><strong id="hi-kn-wand-wert">${zahl(h.knWand, 2)} mm</strong></div>
+        <div class="regler-zeile"><input type="range" min="0.2" max="5" step="0.05" value="${h.knWand}" data-hi="kn-wand" aria-label="Geplante Wandstärke"></div></div>
+      <div id="hi-kn-wand-erg" class="kn-erg">${this._knWandErgebnisHtml()}</div></div>`;
+  },
+  _knWandErgebnisHtml() {
+    const h = this._hi, d = h.knDuese, w = h.knWand;
+    const [a] = this._knLinien(d);
+    if (w < a - 0.01) return `<div class="hinweis rot">Dünner als eine Linie (${zahl(a, 2)} mm): wird nicht oder nur lückenhaft gedruckt.</div>`;
+    let n = 1;
+    while (this._knWanddicke(d, n + 1) <= w + 0.02) n++;
+    const rest = w - this._knWanddicke(d, n);
+    if (rest < 0.06) return `<div class="hinweis mint">✓ Passt: genau ${n} ${n === 1 ? "Linie" : "Linien"}${n < 2 ? " – stabil wird es erst ab 2 Linien" : ""}.</div>`;
+    return `<div class="hinweis amber">${n} ${n === 1 ? "Linie" : "Linien"} + ${zahl(rest, 2)} mm Rest: dort entsteht eine Lücke oder Zickzack-Füllung.
+      Besser <strong>${zahl(this._knWanddicke(d, n), 2)} mm</strong> oder <strong>${zahl(this._knWanddicke(d, n + 1), 2)} mm</strong>.</div>`;
+  },
+  // Gewindeeinsätze aus dem Inventar (sonst übliche Größen)
+  _knEinsaetze() {
+    const inv = (this._daten.inventar || []).filter((t) => t.kat === "einsatz" && t.aussen && t.laenge);
+    const liste = inv.length ? inv : [{ id: "std-m2", gewinde: "M2", laenge: 3, aussen: 3.5 }, { id: "std-m3", gewinde: "M3", laenge: 5, aussen: 5 }, { id: "std-m4", gewinde: "M4", laenge: 5, aussen: 6 }];
+    return liste.slice().sort((x, y) => gewindeD(x.gewinde) - gewindeD(y.gewinde) || x.aussen - y.aussen);
+  },
+  _knEinsatzMasse(e) {
+    const loch = Math.round((e.aussen - 0.5) * 10) / 10;
+    const n = NORM[e.gewinde];
+    return { loch, von: Math.round((e.aussen - 0.6) * 10) / 10, bis: Math.round((e.aussen - 0.4) * 10) / 10, tiefe: e.laenge + 1, dom: Math.round((loch + 4) * 10) / 10,
+      durchgang: n ? Math.round((n.loch + 0.2) * 10) / 10 : null };
+  },
+  _knEinsatzHtml() {
+    const h = this._hi, liste = this._knEinsaetze();
+    const e = liste.find((x) => x.id === h.knEinsatz) || liste.find((x) => x.gewinde === "M3") || liste[0];
+    const m = this._knEinsatzMasse(e);
+    const r = this._hiRolle();
+    const loet = { PETG: "230–250", ASA: "240–260", ABS: "240–260", PC: "260–280", TPU: "200–220" }[r && r.material] || "210–230";
+    const z = (v) => zahl(v, v % 1 ? 1 : 0);
+    return `<div class="dr-karte kn-karte" data-einmal="kn-einsatz"><h3 class="dr-titel">🟡 Loch für Gewindeeinsatz</h3>
+      <div class="chips kn-einsaetze">${liste.map((x) => `<button class="chip ${x.id === e.id ? "an" : ""}" data-aktion="hi-kn-einsatz" data-id="${esc(x.id)}">${esc(x.gewinde)} · ${z(x.laenge)} × Ø ${zahl(x.aussen, 1)}</button>`).join("")}</div>
+      <div class="kn-einsatz-erg">
+        <div class="kn-gross"><span>Loch-Ø im CAD</span><strong>${zahl(m.loch, 1)} mm</strong><small class="leise">Bereich ${zahl(m.von, 1)}–${zahl(m.bis, 1)} mm, mit Teststreifen prüfen</small></div>
+        <div class="kn-gross"><span>Lochtiefe</span><strong>${z(m.tiefe)} mm</strong><small class="leise">Länge + 1 mm</small></div>
+      </div>
+      <div class="info-liste">
+        <div class="info-zeile"><span>Fase am Lochrand</span><strong>0,5 mm × 45°</strong></div>
+        <div class="info-zeile"><span>Dom/Wand rundum</span><strong>Ø ≥ ${zahl(m.dom, 1)} mm (≥ 2 mm Wand)</strong></div>
+        ${m.durchgang ? `<div class="info-zeile"><span>Durchgangsloch im Gegenstück</span><strong>${zahl(m.durchgang, 1)} mm</strong></div>` : ""}
+        <div class="info-zeile"><span>Lötkolben (${esc(r ? r.material : "PLA")})</span><strong>${loet} °C</strong></div>
+      </div>
+      <p class="leise klein">${(this._daten.inventar || []).some((t) => t.kat === "einsatz") ? "Größen aus deinem Inventar." : "Übliche Größen – trage deine Einsätze im Inventar ein."} Slicer: 4 Wandlinien um das Loch.</p></div>`;
+  },
+  // Tabellen in den Tipps, berechnet aus Normmaßen und Corins Inventar
+  _knTabelleHtml(art) {
+    const inv = this._daten.inventar || [];
+    const z = (v, nk = 1) => zahl(Math.round(v * 100) / 100, nk);
+    const tabelle = (kopf, zeilen) => `<div class="kn-tabelle" style="--spalten:${kopf.length}"><div class="kn-tz kn-tk">${kopf.map((k) => `<span>${esc(k)}</span>`).join("")}</div>
+      ${zeilen.map((zl) => `<div class="kn-tz">${zl.map((x, i) => i ? `<span>${x}</span>` : `<strong>${x}</strong>`).join("")}</div>`).join("")}</div>`;
+    if (art === "einsatz") return tabelle(["Einsatz", "Loch-Ø", "Tiefe", "Dom-Ø"], this._knEinsaetze().map((e) => {
+      const m = this._knEinsatzMasse(e);
+      return [`${esc(e.gewinde)} · ${zahl(e.laenge)} × ${z(e.aussen)}`, `${z(m.loch)}`, `${zahl(m.tiefe)}`, `≥ ${z(m.dom)}`];
+    }));
+    if (art === "schraube") return tabelle(["Gewinde", "Durchgang", "Kernloch", "Kopfsenkung"], ["M2", "M2.5", "M3", "M4", "M5"].map((g) => {
+      const n = NORM[g], d = gewindeD(g);
+      return [g, z(n.loch + 0.2), z(Math.round(d * 0.8 * 10) / 10), `Ø ${z(n.kopf_d + 0.5)} × ${z(n.kopf_h + 0.3)}`];
+    }));
+    if (art === "mutter") {
+      const gew = [...new Set(inv.filter((t) => t.kat === "mutter").map((t) => t.gewinde))];
+      return tabelle(["Mutter", "SW-Tasche", "über Ecken", "Tiefe"], (gew.length ? gew : ["M2", "M3", "M4"]).filter((g) => NORM[g]).map((g) => {
+        const n = NORM[g], sw = n.mutter_sw + 0.25;
+        return [g, z(sw, 2), z(sw * 2 / Math.sqrt(3), 2), z(n.mutter_h + 0.2)];
+      }));
+    }
+    if (art === "magnet") {
+      const mags = inv.filter((t) => t.kat === "magnet" && t.form !== "folie" && t.durchmesser && t.dicke);
+      if (!mags.length) return `<p class="leise klein">Trage deine Magnete im Inventar ein, dann stehen hier die passenden Taschen.</p>`;
+      return `<p class="leise klein kn-tab-titel">Deine Magnete aus dem Inventar (+0,15 mm):</p>` + tabelle(["Magnet", "Tasche", "Tiefe"], mags.map((t) => t.form === "quader"
+        ? [`▭ ${z(t.durchmesser, 2)} × ${z(t.breite, 2)} × ${z(t.dicke, 2)}`, `${z(t.durchmesser + 0.15, 2)} × ${z(t.breite + 0.15, 2)}`, z(t.dicke + 0.15, 2)]
+        : [`● Ø ${z(t.durchmesser, 2)} × ${z(t.dicke, 2)}`, `Ø ${z(t.durchmesser + 0.15, 2)}`, z(t.dicke + 0.15, 2)]));
+    }
+    return "";
+  },
+
+  // ---- Slicer-Lexikon ----
+  _hiLexikonHtml() {
+    const h = this._hiZustand();
+    return `<p class="leise">Einstellungen in Bambu Studio, so benannt wie in der deutschen Oberfläche (englisch in Klammern). Werte gelten für den P1S mit 0,4-mm-Düse.</p>
+      <div class="lex-werkzeug"><input id="hi-lex-suche" class="suche" type="search" data-hi="lex-suche" value="${esc(h.lexQ)}" placeholder="Einstellung suchen, z. B. Naht, Brim, Fluss …" autocomplete="off" aria-label="Lexikon durchsuchen"></div>
+      <div class="chips unter-tabs lex-gruppen">${[{ id: "alle", name: "Alle", icon: "📖" }, ...LEX_GRUPPEN].map((g) => `<button class="chip ${h.lexGruppe === g.id ? "an" : ""}" data-aktion="hi-lex-gruppe" data-id="${g.id}">${g.icon} ${esc(g.name)}<small>${g.id === "alle" ? LEXIKON.length : LEXIKON.filter((e) => e.g === g.id).length}</small></button>`).join("")}</div>
+      <div id="hi-lex-liste">${this._hiLexListeHtml()}</div>`;
+  },
+  _hiLexListeHtml() {
+    const h = this._hi, q = h.lexQ.trim();
+    const eintrag = (e, mitGruppe, vonSelbstAuf) => {
+      const g = LEX_GRUPPEN.find((x) => x.id === e.g);
+      return this._hiEintragHtml(`lex:${e.en}`,
+        `<span class="lex-name"><strong>${esc(e.de)}</strong><small>${esc(e.en)}</small></span>${mitGruppe || e.ab !== e.de ? `<span class="lex-ab">${mitGruppe ? `${g.icon} ${esc(g.name)} › ` : ""}${esc(e.ab)}</span>` : ""}`,
+        `<dl class="lex-text"><dt>Was es macht</dt><dd>${esc(e.was)}</dd><dt>Typische Werte</dt><dd class="lex-werte">${esc(e.werte)}</dd><dt>Wann ändern</dt><dd>${esc(e.wann)}</dd></dl>`,
+        "lex-eintrag", vonSelbstAuf);
+    };
+    if (q) {
+      const treffer = LEXIKON.map((e) => ({ e, p: suchPunkte(q, `${e.de} ${e.en} ${e.ab}`) * 2 + suchPunkte(q, `${e.de} ${e.en} ${e.ab} ${e.was}`) }))
+        .filter((x) => x.p > 0).sort((a, b) => b.p - a.p);
+      if (!treffer.length) return `<div class="dr-karte lex-leer"><p class="leise">Nichts gefunden für „${esc(q)}“. Versuche den englischen Namen oder ein kürzeres Wort.</p></div>`;
+      return `<p class="leise klein lex-anzahl">${treffer.length} Treffer</p><div class="lex-liste">${treffer.map((x) => eintrag(x.e, true, treffer.length <= 2)).join("")}</div>`;
+    }
+    return LEX_GRUPPEN.filter((g) => h.lexGruppe === "alle" || g.id === h.lexGruppe).map((g) => `<section class="lex-gruppe">
+      <h3 class="lex-gruppe-titel">${g.icon} ${esc(g.name)} <small class="leise">(${esc(g.en)})</small></h3>
+      <div class="lex-liste">${LEXIKON.filter((e) => e.g === g.id).map((e) => eintrag(e, false, false)).join("")}</div></section>`).join("");
+  },
+  _hiLexSuchen() {
+    const box = this.shadowRoot.getElementById("hi-lex-liste");
+    if (box) box.innerHTML = this._hiLexListeHtml();
+  },
+
+  // ---- Druckplatten ----
+  _hiPlattenHtml() {
+    const h = this._hiZustand();
+    const jetzt = this._drW ? this._drW("platte") : null;
+    const imDrucker = jetzt && typeof DR_PLATTEN !== "undefined" ? PLATTEN_INFO.find((p) => p.name === DR_PLATTEN[jetzt]) : null;
+    const p = PLATTEN_INFO.find((x) => x.id === h.platte) || imDrucker || PLATTEN_INFO.find((x) => x.id === "textured");
+    const r = this._hiRolle();
+    const zeileR = r && PLATTEN_MATRIX.find((z) => z.m === r.material);
+    const kurz = this._mobil ? { cool: "Cool", supertack: "Super­Tack", eng: "Engi­neering", smooth: "Smooth PEI", textured: "Tex­tured" } : null;
+    const zelle = ([a, t], pl, m) => `<button class="pl-zelle ${a} ${pl.id === p.id ? "spalte" : ""}" data-aktion="hi-platte" data-id="${pl.id}" title="${esc(m)} auf ${esc(pl.kurz)}: ${a === "ok" ? "geeignet" : a === "kleber" ? "mit Kleber" : "nicht geeignet"}${t ? `, ${t} °C` : ""}">
+      <b>${a === "ok" ? "✓" : a === "kleber" ? "Kleber" : "✗"}</b>${t ? `<small>${t}°</small>` : ""}</button>`;
+    const fuerRolle = zeileR ? zeileR.w[p.id] : null;
+    return `<p class="leise">Welche Bambu-Platte für welches Material, mit Kleber oder ohne, und wie du sie pflegst.${imDrucker ? ` Im Drucker liegt gerade die <strong class="pl-jetzt">${esc(imDrucker.kurz)}</strong>.` : ""}</p>
+      <div class="dr-karte pl-karte" data-einmal="pl-matrix"><h3 class="dr-titel">Material × Platte</h3>
+        <div class="pl-matrix" role="table" aria-label="Material und Druckplatte">
+          <div class="pl-zeile pl-kopf" role="row"><span></span>${PLATTEN_INFO.map((pl) => `<button class="pl-spalte ${pl.id === p.id ? "an" : ""} ${imDrucker && imDrucker.id === pl.id ? "drin" : ""}" data-aktion="hi-platte" data-id="${pl.id}">${esc(kurz ? kurz[pl.id] : pl.kurz)}</button>`).join("")}</div>
+          ${PLATTEN_MATRIX.map((z) => `<div class="pl-zeile ${r && r.material === z.m ? "deine" : ""}" role="row"><strong class="pl-mat">${esc(z.m)}</strong>${PLATTEN_INFO.map((pl) => zelle(z.w[pl.id] || ["nein"], pl, z.m)).join("")}</div>`).join("")}
+        </div>
+        <div class="pl-legende"><span><b class="ok">✓</b> ohne Kleber</span><span><b class="kleber">Kleber</b> nur mit Klebestift</span><span><b class="nein">✗</b> nicht geeignet</span><span class="leise">Zahlen = Bett in °C</span></div>
+        <p class="leise klein">Der P1S heizt das Bett auf höchstens ${BETT_MAX_P1S} °C. PLA mit Bett über 45 °C: Tür oder Deckel einen Spalt öffnen, sonst wird es in der Kammer zu warm.${r && zeileR ? ` Hervorgehoben: ${esc(r.material)} (${esc(r.name)}).` : ""}</p>
+      </div>
+      <div class="hi-raster oben-abstand">
+        <div class="dr-karte pl-detail" data-einmal="pl-${p.id}">
+          <div class="pl-detail-kopf">${platteSvg(p)}<div><h2>${esc(p.name)}</h2><p class="leise">${esc(p.text)}</p></div></div>
+          ${fuerRolle ? `<div class="hinweis ${fuerRolle[0] === "nein" ? "rot" : fuerRolle[0] === "kleber" ? "amber" : "mint"}">${esc(r.name)}: ${fuerRolle[0] === "nein" ? "auf dieser Platte nicht drucken" : `${fuerRolle[0] === "kleber" ? "mit Klebestift, " : "ohne Kleber, "}Bett ${fuerRolle[1]} °C`}${wert(r, "platte").v ? ` · eingetragen: ${esc(wert(r, "platte").v)}` : ""}</div>` : ""}
+          <h3>Gut für</h3><ul class="kal-liste">${p.gut.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+          <h3>Reinigen und pflegen</h3><ul class="kal-liste">${p.pflege.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+          <div class="hinweis amber oben-abstand">⚠️ ${esc(p.vorsicht)}</div>
+        </div>
+        <div class="dr-karte pl-allgemein"><h3 class="dr-titel">Für alle Platten</h3>
+          <ul class="kal-liste">
+            <li>Fett von den Fingern ist der häufigste Grund für schlechte Haftung: Druckfläche nur am Rand anfassen.</li>
+            <li>Gründlich reinigen: Spülmittel und warmes Wasser, gut abspülen und trocknen. Für zwischendurch Isopropanol (≥ 90 %).</li>
+            <li>Klebestift dünn und gleichmäßig auftragen. Er wirkt als Haftmittel und als Trennschicht, damit PETG oder TPU die Platte nicht beschädigt.</li>
+            <li>Teile erst nach dem Abkühlen lösen. Die Federstahlplatte leicht biegen, nicht hebeln.</li>
+            <li>In Bambu Studio immer die Platte einstellen, die wirklich im Drucker liegt: davon hängt die Betttemperatur ab.</li>
+          </ul>
+          <div class="chips oben-abstand pl-wahl">${PLATTEN_INFO.map((pl) => `<button class="chip ${pl.id === p.id ? "an" : ""}" data-aktion="hi-platte" data-id="${pl.id}">${esc(pl.kurz)}</button>`).join("")}</div>
+        </div>
+      </div>`;
   },
 
   _hiHtml() {
@@ -4074,6 +5102,7 @@ const HilfeAnsicht = {
           <span class="tr-werte"><b>${t.temp} °C</b><b>${t.h} h</b><b>&lt; ${t.ziel} %</b></span>
           <small class="leise">Feucht, wenn: ${esc(t.zeichen)}. ${esc(t.lagern)}</small></div>`).join("")}</div></div>
     </div>
+    ${this._hiKombiHtml()}
     <div class="dr-karte oben-abstand"><h3 class="dr-titel">Deine Rollen</h3><div class="tr-rollen">${rollen.map((r) => {
       const t = wert(r, "tr_temp").v, d = wert(r, "tr_dauer").v, f = wert(r, "tr_feuchte").v;
       return `<button class="tr-rolle" data-aktion="oeffnen-filament" data-id="${esc(r.id)}">${spuleSvg(r)}<span><strong>${esc(r.name)}</strong><small>${esc(r.hersteller)}</small></span>
@@ -4205,6 +5234,12 @@ const HilfeAnsicht = {
       case "hi-fehler": this._hiFehlerAuf(el.dataset.id); return;
       case "hi-fehler-zu": this._hiFehlerZu(); return;
       case "hi-kal": h.kal = el.dataset.id; h.kalWert = null; break;
+      case "hi-auf": this._hiAufZu(el.dataset.id); return;
+      case "hi-kn-gruppe": h.knGruppe = el.dataset.id; break;
+      case "hi-kn-duese": h.knDuese = Number(el.dataset.id); break;
+      case "hi-kn-einsatz": h.knEinsatz = el.dataset.id; break;
+      case "hi-lex-gruppe": h.lexGruppe = el.dataset.id; h.lexQ = ""; break;
+      case "hi-platte": h.platte = el.dataset.id; break;
       case "hi-kal-schritt": {
         const k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
         const r = this._hiRolle();
@@ -4240,12 +5275,26 @@ const HilfeAnsicht = {
     const k = t.dataset && t.dataset.hi;
     if (!k) return false;
     if (k === "kal-wert") { this._hi.kalWert = Number(t.value); this._hiKalWertZeigen(); }
+    if (k === "kn-wand") {
+      this._hi.knWand = Number(t.value);
+      const w = this.shadowRoot.getElementById("hi-kn-wand-wert"), e = this.shadowRoot.getElementById("hi-kn-wand-erg");
+      if (w) w.textContent = `${zahl(this._hi.knWand, 2)} mm`;
+      if (e) e.innerHTML = this._knWandErgebnisHtml();
+    }
+    if (k === "lex-suche") { this._hi.lexQ = t.value; this._hiLexSuchen(); }
     return true;
   },
   _hiAenderung(t) {
     const k = t.dataset && t.dataset.hi;
     if (!k) return false;
     if (k === "rolle") { this._hi.rolle = t.value; this._hi.kalWert = null; this._zeichnen(); }
+    if (k === "tr-platz") {
+      const p = this._hiPlaetze();
+      p[Number(t.dataset.platz)] = t.value;
+      this._daten.trockner_plaetze = p;   // optionales Feld, fehlt in älteren Daten
+      this._speichern();
+      this._zeichnen();
+    }
     return true;
   },
 };
@@ -5908,18 +6957,24 @@ function gewichtSchaetzen(kenn, dichte, { duese = 0.4, waende = 2, fuellung = 15
   return { gramm: (mm3 / 1000) * dichte, mm3, meter: mm3 / FILAMENT_QUERSCHNITT / 1000 };
 }
 
-// Flächen, die Stützen brauchen (Normale zeigt steiler als STUETZ_WINKEL nach unten, nicht auf dem Bett)
-function ueberhaenge(v) {
+// Flächen, die Stützen brauchen (Normale zeigt steiler als STUETZ_WINKEL nach unten, nicht auf dem Bett).
+// Mit „unten“ (Einheitsvektor) wird eine andere Lage bewertet, ohne das Modell zu drehen:
+// diese Richtung zeigt dann aufs Bett, die Höhe eines Punkts ist −(p·unten).
+function ueberhaenge(v, unten = null) {
   const grenze = -Math.cos((STUETZ_WINKEL * Math.PI) / 180);
   const markiert = new Uint8Array(v.length / 9);
+  const [ax, ay, az] = unten ? unten.map((x) => -x) : [0, 0, 1];   // „oben“ in Modellkoordinaten
+  let boden = 0;
+  if (unten) { boden = Infinity; for (let i = 0; i < v.length; i += 3) { const h = v[i] * ax + v[i + 1] * ay + v[i + 2] * az; if (h < boden) boden = h; } }
   let flaeche = 0;
   for (let t = 0, i = 0; i < v.length; i += 9, t++) {
     const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2];
     const wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
     const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
     const l = Math.hypot(nx, ny, nz) || 1;
-    const zMin = Math.min(v[i + 2], v[i + 5], v[i + 8]);
-    if (nz / l < grenze && zMin > 0.3) { markiert[t] = 1; flaeche += l / 2; }
+    if ((nx * ax + ny * ay + nz * az) / l >= grenze) continue;
+    const zMin = Math.min(v[i] * ax + v[i + 1] * ay + v[i + 2] * az, v[i + 3] * ax + v[i + 4] * ay + v[i + 5] * az, v[i + 6] * ax + v[i + 7] * ay + v[i + 8] * az) - boden;
+    if (zMin > 0.3) { markiert[t] = 1; flaeche += l / 2; }
   }
   return { markiert, flaeche };
 }
@@ -6530,9 +7585,10 @@ function drehMatrix(grad) {
     sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
     -sy, cy * sx, cy * cx];
 }
-function drehenGrad(v, grad) {
+function drehenGrad(v, grad) { return drehenMit(v, drehMatrix(grad)); }
+// Mit einer beliebigen Drehmatrix (3×3 zeilenweise) um die Modellmitte drehen, danach aufs Bett
+function drehenMit(v, R) {
   const g = meshGrenzen(v), c = [0, 1, 2].map((i) => (g.min[i] + g.max[i]) / 2);
-  const R = drehMatrix(grad);
   for (let i = 0; i < v.length; i += 3) {
     const x = v[i] - c[0], y = v[i + 1] - c[1], z = v[i + 2] - c[2];
     v[i] = R[0] * x + R[1] * y + R[2] * z + c[0];
@@ -6540,6 +7596,162 @@ function drehenGrad(v, grad) {
     v[i + 2] = R[6] * x + R[7] * y + R[8] * z + c[2];
   }
   return aufsBett(v);
+}
+
+// ---- Auf Fläche legen, beste Lage, Skalieren, Wandstärke (v0.12) -------------
+// Drehmatrix um die (normierte) Achse k mit Winkel w (Rodrigues), 3×3 zeilenweise
+function achsDrehung(k, w) {
+  const c = Math.cos(w), s = Math.sin(w), t = 1 - c, [x, y, z] = k;
+  return [t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+    t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+    t * x * z - s * y, t * y * z + s * x, t * z * z + c];
+}
+// Drehung, die den Vektor n genau nach unten (0, 0, −1) bringt: {achse, winkel}
+function drehungNachUnten(n) {
+  const l = Math.hypot(n[0], n[1], n[2]) || 1, x = n[0] / l, y = n[1] / l, z = n[2] / l;
+  const winkel = Math.acos(Math.max(-1, Math.min(1, -z)));
+  if (winkel < 1e-6) return { achse: [1, 0, 0], winkel: 0 };
+  if (Math.PI - winkel < 1e-6) return { achse: [1, 0, 0], winkel: Math.PI };   // zeigt nach oben: einmal um X wenden
+  const la = Math.hypot(x, y);   // Achse = n × (0, 0, −1)
+  return { achse: [-y / la, x / la, 0], winkel };
+}
+
+// Mögliche Lagen fürs Drucken: die sechs Achsrichtungen und die Normalen der größten ebenen Flächen.
+// Ergebnis: Richtungen (Einheitsvektoren), die beim Drucken nach unten aufs Bett zeigen würden.
+function lageKandidaten(v, anzahl = 20) {
+  const gruppen = new Map();
+  const Q = 24;   // Normalen auf etwa 2–3° runden, damit die Dreiecke einer ebenen Fläche zusammenfallen
+  for (let i = 0; i < v.length; i += 9) {
+    const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2];
+    const wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    const l = Math.hypot(nx, ny, nz);
+    if (l < 1e-12) continue;
+    const k = (Math.round((nx / l) * Q) + Q) * 4096 + (Math.round((ny / l) * Q) + Q) * 64 + (Math.round((nz / l) * Q) + Q);
+    let g = gruppen.get(k);
+    if (!g) gruppen.set(k, (g = [0, 0, 0, 0]));
+    g[0] += nx / 2; g[1] += ny / 2; g[2] += nz / 2; g[3] += l / 2;   // flächengewichtete Normale
+  }
+  const flaechen = [...gruppen.values()].sort((a, b) => b[3] - a[3]).slice(0, 40)
+    .map((g) => { const l = Math.hypot(g[0], g[1], g[2]) || 1; return [g[0] / l, g[1] / l, g[2] / l]; });
+  const liste = [];
+  const dazu = (n) => { if (liste.length < anzahl && !liste.some((x) => x[0] * n[0] + x[1] * n[1] + x[2] * n[2] > 0.9976)) liste.push(n); };   // mindestens 4° auseinander
+  [[0, 0, -1], [0, 0, 1], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]].forEach(dazu);
+  flaechen.forEach(dazu);
+  return liste;
+}
+
+// Gleichmäßig skalieren um die Mitte der Grundfläche, danach wieder aufs Bett
+function skalieren(v, f) {
+  const g = meshGrenzen(v), cx = (g.min[0] + g.max[0]) / 2, cy = (g.min[1] + g.max[1]) / 2, cz = g.min[2];
+  for (let i = 0; i < v.length; i += 3) { v[i] = cx + (v[i] - cx) * f; v[i + 1] = cy + (v[i + 1] - cy) * f; v[i + 2] = cz + (v[i + 2] - cz) * f; }
+  return aufsBett(v);
+}
+
+// Hüllkörper-Baum (BVH) für viele Strahlen: Dreiecke nach Mittelpunkten geteilt, Blätter mit höchstens 6 Dreiecken
+function bvhBauen(v) {
+  const n = v.length / 9;
+  const reihe = new Uint32Array(n), mitte = new Float32Array(n * 3), tb = new Float32Array(n * 6);
+  for (let t = 0; t < n; t++) {
+    reihe[t] = t;
+    const i = t * 9;
+    for (let k = 0; k < 3; k++) {
+      const a = v[i + k], b = v[i + 3 + k], c = v[i + 6 + k];
+      const lo = Math.min(a, b, c), hi = Math.max(a, b, c);
+      tb[t * 6 + k] = lo; tb[t * 6 + 3 + k] = hi; mitte[t * 3 + k] = (lo + hi) / 2;
+    }
+  }
+  const max = 2 * n + 1;   // ein Binärbaum mit n Blättern hat höchstens 2n − 1 Knoten
+  const box = new Float32Array(max * 6), start = new Uint32Array(max), anz = new Uint32Array(max), links = new Int32Array(max).fill(-1);
+  let knoten = 1;
+  const stapel = [0, 0, n];
+  while (stapel.length) {
+    const bis = stapel.pop(), von = stapel.pop(), k = stapel.pop();
+    let lx = Infinity, ly = Infinity, lz = Infinity, hx = -Infinity, hy = -Infinity, hz = -Infinity;
+    const mlo = [Infinity, Infinity, Infinity], mhi = [-Infinity, -Infinity, -Infinity];
+    for (let j = von; j < bis; j++) {
+      const t = reihe[j], b = t * 6;
+      if (tb[b] < lx) lx = tb[b]; if (tb[b + 1] < ly) ly = tb[b + 1]; if (tb[b + 2] < lz) lz = tb[b + 2];
+      if (tb[b + 3] > hx) hx = tb[b + 3]; if (tb[b + 4] > hy) hy = tb[b + 4]; if (tb[b + 5] > hz) hz = tb[b + 5];
+      for (let a = 0; a < 3; a++) { const c = mitte[t * 3 + a]; if (c < mlo[a]) mlo[a] = c; if (c > mhi[a]) mhi[a] = c; }
+    }
+    const o = k * 6;
+    box[o] = lx; box[o + 1] = ly; box[o + 2] = lz; box[o + 3] = hx; box[o + 4] = hy; box[o + 5] = hz;
+    start[k] = von; anz[k] = bis - von;
+    if (bis - von <= 6) continue;
+    const ex = mhi[0] - mlo[0], ey = mhi[1] - mlo[1], ez = mhi[2] - mlo[2];
+    const achse = ex >= ey && ex >= ez ? 0 : ey >= ez ? 1 : 2;
+    const schnitt = (mlo[achse] + mhi[achse]) / 2;
+    let i = von, j = bis - 1;
+    while (i <= j) {
+      if (mitte[reihe[i] * 3 + achse] < schnitt) i++;
+      else { const x = reihe[i]; reihe[i] = reihe[j]; reihe[j] = x; j--; }
+    }
+    if (i === von || i === bis) i = (von + bis) >> 1;   // alle Mittelpunkte gleich: einfach halbieren
+    links[k] = knoten;
+    stapel.push(knoten, von, i, knoten + 1, i, bis);
+    knoten += 2;
+  }
+  return { v, reihe, box, start, anz, links };
+}
+
+// Nächster Treffer entlang des Strahls (t > tMin, Dreieck „ohne“ wird übersprungen): {t, dreieck} oder null
+function bvhStrahl(bvh, o, d, tMin = 0, ohne = -1) {
+  const { v, reihe, box, start, anz, links } = bvh;
+  const ix = 1 / (d[0] || 1e-30), iy = 1 / (d[1] || 1e-30), iz = 1 / (d[2] || 1e-30);
+  let best = Infinity, dreieck = -1;
+  const stapel = [0];
+  while (stapel.length) {
+    const k = stapel.pop(), b = k * 6;
+    let t1 = (box[b] - o[0]) * ix, t2 = (box[b + 3] - o[0]) * ix;
+    let tn = Math.min(t1, t2), tf = Math.max(t1, t2);
+    t1 = (box[b + 1] - o[1]) * iy; t2 = (box[b + 4] - o[1]) * iy;
+    tn = Math.max(tn, Math.min(t1, t2)); tf = Math.min(tf, Math.max(t1, t2));
+    t1 = (box[b + 2] - o[2]) * iz; t2 = (box[b + 5] - o[2]) * iz;
+    tn = Math.max(tn, Math.min(t1, t2)); tf = Math.min(tf, Math.max(t1, t2));
+    if (tf < tn || tf < tMin || tn > best) continue;
+    if (links[k] >= 0) { stapel.push(links[k], links[k] + 1); continue; }
+    for (let j = start[k], e = start[k] + anz[k]; j < e; j++) {
+      const t = reihe[j];
+      if (t === ohne) continue;
+      const i = t * 9;
+      const e1x = v[i + 3] - v[i], e1y = v[i + 4] - v[i + 1], e1z = v[i + 5] - v[i + 2];
+      const e2x = v[i + 6] - v[i], e2y = v[i + 7] - v[i + 1], e2z = v[i + 8] - v[i + 2];
+      const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+      const det = e1x * px + e1y * py + e1z * pz;
+      if (Math.abs(det) < 1e-14) continue;
+      const inv = 1 / det, tx = o[0] - v[i], ty = o[1] - v[i + 1], tz = o[2] - v[i + 2];
+      const u = (tx * px + ty * py + tz * pz) * inv;
+      if (u < 0 || u > 1) continue;
+      const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+      const w = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
+      if (w < 0 || u + w > 1) continue;
+      const tt = (e2x * qx + e2y * qy + e2z * qz) * inv;
+      if (tt > tMin && tt < best) { best = tt; dreieck = t; }
+    }
+  }
+  return dreieck >= 0 ? { t: best, dreieck } : null;
+}
+
+// Wandstärke an einem Dreieck: vom Mittelpunkt gegen die Normale nach innen bis zur Rückseite der Wand.
+// richtung = +1 bei nach außen zeigenden Normalen, −1 bei „umgestülpten“ STL-Dateien. NaN = nicht messbar.
+function wandDicke(bvh, t, richtung = 1) {
+  const v = bvh.v, i = t * 9;
+  const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2];
+  const wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
+  const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+  const l = Math.hypot(nx, ny, nz);
+  if (l < 1e-12) return NaN;
+  const d = [(-nx * richtung) / l, (-ny * richtung) / l, (-nz * richtung) / l];
+  const o = [(v[i] + v[i + 3] + v[i + 6]) / 3, (v[i + 1] + v[i + 4] + v[i + 7]) / 3, (v[i + 2] + v[i + 5] + v[i + 8]) / 3];
+  const h = bvhStrahl(bvh, o, d, 1e-4, t);
+  if (!h) return NaN;
+  // Nur zählen, wenn der Strahl die Wand von innen verlässt (Rückseite getroffen)
+  const j = h.dreieck * 9;
+  const ax = v[j + 3] - v[j], ay = v[j + 4] - v[j + 1], az = v[j + 5] - v[j + 2];
+  const bx = v[j + 6] - v[j], by = v[j + 7] - v[j + 1], bz = v[j + 8] - v[j + 2];
+  const hn = ((ay * bz - az * by) * d[0] + (az * bx - ax * bz) * d[1] + (ax * by - ay * bx) * d[2]) * richtung;
+  return hn > 0 ? h.t : NaN;
 }
 
 // ---- G-Code ------------------------------------------------------------------
@@ -7178,7 +8390,21 @@ const MOD_ICON = {
   orbit: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><ellipse cx="12" cy="12" rx="9.6" ry="4.3" transform="rotate(-28 12 12)"/><ellipse cx="12" cy="12" rx="4.3" ry="9.6" transform="rotate(-28 12 12)" opacity=".45"/><circle cx="12" cy="12" r="2.4" class="voll"/><path d="M17.6 4.3l2.9.6-.9 2.8"/></svg>`,
   orbitEin: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><ellipse cx="12" cy="16" rx="9.4" ry="3.6"/><path d="M12 3v13" stroke-dasharray="2 2"/><circle cx="12" cy="16" r="2.2" class="voll"/><path d="M18.4 11.6l2.6 1.6-2.4 1.8"/></svg>`,
   haus: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M4 11.5L12 4.5l8 7"/><path d="M6.5 10v9h11v-9"/><path d="M10.5 19v-5h3v5"/></svg>`,
+  // Werkzeuge (v0.12)
+  flaeche: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M7 4.5l7-1.5 4 5-7 1.5z" opacity=".5"/><path d="M12 10.5v6.5"/><path d="M9.2 14.4L12 17.2l2.8-2.8"/><path d="M3 20.5h18"/><path d="M7 20.5l1.6-2.2h6.8l1.6 2.2" class="voll" opacity=".55"/></svg>`,
+  lage: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M3 20.5h18"/><path d="M5 20.5v-6h6v6"/><path d="M13 20.5l3.5-7 3.5 7" opacity=".5"/><path d="M16 3.5l1 2.3 2.4.3-1.8 1.6.5 2.4-2.1-1.3-2.1 1.3.5-2.4-1.8-1.6 2.4-.3z" class="voll"/></svg>`,
+  messen: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M3.5 16.5L16.5 3.5l4 4-13 13z"/><path d="M7 13l1.8 1.8M9.6 10.4l1.2 1.2M12.2 7.8l1.8 1.8M14.8 5.2l1.2 1.2"/></svg>`,
+  waende: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><path d="M4 20V6l4-2v16"/><path d="M16 20V4l4 2v14"/><path d="M8 12h8" stroke-dasharray="2 2"/><path d="M9.5 10.5L8 12l1.5 1.5M14.5 10.5L16 12l-1.5 1.5"/></svg>`,
+  skala: `<svg viewBox="0 0 24 24" class="mod-ico" aria-hidden="true"><rect x="4" y="11" width="9" height="9" rx="1.5" opacity=".55"/><path d="M4 7V4h3M17 4h3v3M20 17v3h-3"/><path d="M11 13l9-9"/><path d="M15 4h5v5"/></svg>`,
 };
+const MOD_WERKZEUGE = [
+  { id: "flaeche", name: "Auflegen", titel: "Auf Fläche legen", text: "Fläche antippen, sie kommt flach aufs Bett" },
+  { id: "lage", name: "Beste Lage", titel: "Beste Lage finden", text: "Lage mit den wenigsten Stützen" },
+  { id: "messen", name: "Messen", titel: "Abstand messen", text: "Zwei Punkte antippen" },
+  { id: "waende", name: "Wände", titel: "Wandstärke prüfen", text: "Zu dünne Stellen für die Düse" },
+  { id: "skala", name: "Skalieren", titel: "Skalieren", text: "In Prozent oder auf ein Maß" },
+];
+const MOD_WAND_PROBEN = 40000;   // höchstens so viele Strahlen für die Wandstärke (große Modelle: Stichprobe)
 const SCHICHT_BEREICH = { 0.2: [0.06, 0.14, 0.1], 0.4: [0.08, 0.28, 0.2], 0.6: [0.18, 0.42, 0.3], 0.8: [0.24, 0.56, 0.4] };
 
 const MOD_MAX_BYTES = 200 * 1048576;      // größere Dateien bringen Handys zum Absturz
@@ -7191,7 +8417,7 @@ const ModellAnsicht = {
     if (!m) return this._modLeerHtml();
     if (m.laedt) return `<div class="dr-karte mod-laden"><span class="dreher"></span><div><h2>${esc(m.name)}</h2><p class="leise">${esc(m.laedt)}</p></div></div>`;
     const tabs = m.art === "stl"
-      ? [["uebersicht", "Übersicht"], ["loecher", `Löcher${m.loecher ? ` (${m.loecher.length})` : ""}`], ["schichten", "Schichten"]]
+      ? [["uebersicht", "Übersicht"], ["loecher", `Löcher${m.loecher ? ` (${m.loecher.length})` : ""}`], ["schichten", "Schichten"], ["werkzeuge", "Werkzeuge"]]
       : [["uebersicht", "Übersicht"], ["schichten", "Schichten"]];
     return `<div class="mod-raster">
       <div class="mod-huelle">
@@ -7199,6 +8425,7 @@ const ModellAnsicht = {
       <div class="mod-buehne-karte dr-karte">
         <div id="mod-buehne" class="mod-buehne"></div>
         <div id="mod-marker" class="mod-marker"></div>
+        <div id="mod-mess" class="mod-mess" aria-hidden="true"></div>
         <div class="mod-leiste">
           <span class="mod-name" title="${esc(m.name)}">${m.art === "stl" ? "🧊" : "🧾"} ${esc(m.name)}</span>
           <button class="chip" data-aktion="mod-ansicht" data-id="iso">3D</button>
@@ -7217,12 +8444,13 @@ const ModellAnsicht = {
           <span id="mod-schicht-text" class="mod-schicht-text">${this._modSchichtText()}</span>
         </div>` : ""}
         ${m.markieren ? `<div class="mod-markier-hinweis" data-einmal="mod-markier">🎯 Tippe auf die Stelle, an der das Loch beginnt <button class="mini" data-aktion="mod-markieren">Abbrechen</button></div>` : ""}
+        ${this._modWzHinweisHtml()}
         <p class="mod-hilfe leise">${this._mobil ? "Ein Finger dreht um die berührte Stelle · zwei Finger zoomen und schieben" : "Ziehen dreht um die Stelle unter dem Zeiger · Rechtsklick oder Shift schiebt · Mausrad zoomt"}</p>
       </div>
       </div>
       <aside class="mod-seite dr-karte">
         <div class="tabs mod-tabs">${tabs.map(([id, n]) => `<button class="tab ${m.tab === id ? "an" : ""}" data-aktion="mod-tab" data-id="${id}">${n}</button>`).join("")}</div>
-        <div class="mod-inhalt">${m.tab === "loecher" ? this._modLoecherHtml() : m.tab === "schichten" ? this._modSchichtenHtml() : this._modUebersichtHtml()}</div>
+        <div class="mod-inhalt">${this._modInhaltHtml()}</div>
         <div class="mod-fuss"><button class="knopf breit mod-ws" data-aktion="ws-aus-modell">＋ In die Warteschlange</button></div>
       </aside>
     </div>`;
@@ -7636,7 +8864,8 @@ const ModellAnsicht = {
     const rolle = this._daten.rollen.filter((r) => r.rest_g != null).sort((a, b) => b.rest_g - a.rest_g)[0];
     const muster = this._modMusterId || this._modEinstellung("muster");
     return { tab: "uebersicht", fuellung: 15, waende: 2, duese: 0.4, schicht_h: 0.2, stuetzen: "keine", eingesetzt: {}, rolleId: this._modRolleId || (rolle && rolle.id),
-      muster: FUELLMUSTER.some((x) => x.id === muster) ? muster : "grid", drehEigen: false, drehWerte: [0, 0, 0], drehFeld: 2 };
+      muster: FUELLMUSTER.some((x) => x.id === muster) ? muster : "grid", drehEigen: false, drehWerte: [0, 0, 0], drehFeld: 2,
+      werkzeug: null, skala: 100, messPunkte: [] };
   },
   // Speicher für „Zuletzt geöffnet“: auf dem Server, wenn die Integration da ist
   _modSpeicher() {
@@ -7714,6 +8943,9 @@ const ModellAnsicht = {
     m.ueber = ueberhaenge(m.v);
     m.loecher = null; m.eingesetzt = {}; m.lochAuswahl = null; m.geloescht = [];
     m.schichten = null; m.schichtZahl = 0; m.schichtGewicht = null;
+    // Werkzeuge: Ergebnisse gelten nur für die alte Geometrie; „Rückgängig“ nur für die letzte Werkzeug-Änderung
+    m.messPunkte = []; m.duenn = null; m.bvh = null; m.lage = null; m.skala = 100; m.skalaHinweise = null;
+    m.rueck = m.rueckNeu || null; m.rueckNeu = null;
     const id = (m.id = (m.id || 0) + 1);
     setTimeout(() => {
       if (this._mod !== m || m.id !== id) return;
@@ -7751,7 +8983,7 @@ const ModellAnsicht = {
     if (!this._buehne) {
       this._buehne = new Buehne();
       if (!this._buehne.ok) { ort.innerHTML = `<div class="dr-kamera-leer">Dieser Browser kann kein WebGL.</div>`; return; }
-      this._buehne.nachZeichnen = () => { this._modMarkerSetzen(); this._modWuerfelNachfuehren(); };
+      this._buehne.nachZeichnen = () => { this._modMarkerSetzen(); this._modWuerfelNachfuehren(); this._modMessSetzen(); };
       this._buehne.antippen = (strahl) => this._modAntippen(strahl);
       this._buehne.treffen = (strahl) => this._modTreffen(strahl);
       this._buehne.setzeOrbitArt(this._modOrbitArt);
@@ -7769,6 +9001,8 @@ const ModellAnsicht = {
     this._modRo.disconnect();
     this._modRo.observe(ort);
     this._modMarker();
+    this._modMess();
+    this._modFussAndocken();
     this._buehne.neu();
   },
 
@@ -7779,19 +9013,21 @@ const ModellAnsicht = {
     if (m.art === "stl") {
       const farbe = new Float32Array(m.v.length);
       const ueber = m.tab === "schichten" && m.stuetzen !== "keine" ? m.ueber.markiert : null;
+      const duenn = m.tab === "werkzeuge" && m.werkzeug === "waende" && m.duenn && m.duenn.markiert;   // zu dünne Wände rot
       for (let t = 0; t < m.v.length / 9; t++) {
-        const f = ueber && ueber[t] ? [1, 0.45, 0.3] : [0.24, 0.86, 0.64];
+        const f = ueber && ueber[t] ? [1, 0.45, 0.3] : duenn && duenn[t] ? [1, 0.25, 0.3] : [0.24, 0.86, 0.64];
         for (let k = 0; k < 9; k += 3) { farbe[t * 9 + k] = f[0]; farbe[t * 9 + k + 1] = f[1]; farbe[t * 9 + k + 2] = f[2]; }
       }
       b.mesh("modell", m.v, farbe);
       this._modGrundriss();
       Object.entries(m.eingesetzt).forEach(([nr, id]) => this._modTeilZeigen(Number(nr), id, false));
       if (m.tab === "schichten") this._modSchichtenStarten();
-      if (m.drehWerte && m.drehWerte.some((x) => Number(x))) setTimeout(() => this._modDrehVorschau(), 0);
+      if ((m.drehWerte && m.drehWerte.some((x) => Number(x))) || this._modSkalaVorschau() !== 1 || this._modLageVorschau()) setTimeout(() => this._modDrehVorschau(), 0);
     } else {
       this._modGcodeLinien();
     }
     this._modSchichtAnzeigen();
+    this._modMess();
   },
 
   _modGrundriss() {
@@ -7807,7 +9043,7 @@ const ModellAnsicht = {
   _modMarker() {
     const box = this.shadowRoot.getElementById("mod-marker");
     const m = this._mod;
-    if (!box || !m || m.art !== "stl" || !m.loecher || m.tab === "schichten") { if (box) box.innerHTML = ""; return; }
+    if (!box || !m || m.art !== "stl" || !m.loecher || m.tab === "schichten" || m.tab === "werkzeuge") { if (box) box.innerHTML = ""; return; }
     box.innerHTML = m.loecher.map((l) => `<button class="mod-pin ${m.lochAuswahl === l.nr ? "an" : ""} ${m.eingesetzt[l.nr] ? "drin" : ""}" data-aktion="mod-loch" data-nr="${l.nr}" data-pin="${l.nr}">${l.nr}</button>`).join("");
     this._modMarkerSetzen();
   },
@@ -8005,7 +9241,11 @@ const ModellAnsicht = {
 
   _modSeiteNeu() {
     const box = this.shadowRoot.querySelector(".mod-inhalt");
-    if (box) { const sc = box.scrollTop; box.innerHTML = this._mod.tab === "loecher" ? this._modLoecherHtml() : this._mod.tab === "schichten" ? this._modSchichtenHtml() : this._modUebersichtHtml(); box.scrollTop = sc; this._auswahlenBauen(); }
+    if (box) {
+      const sc = box.scrollTop, schonDa = new Set([...box.querySelectorAll("[data-einmal]")].map((x) => x.dataset.einmal));
+      box.innerHTML = this._modInhaltHtml(); box.scrollTop = sc; this._auswahlenBauen();
+      box.querySelectorAll("[data-einmal]").forEach((x) => { if (schonDa.has(x.dataset.einmal)) x.classList.add("still"); });   // nicht erneut einblenden
+    }
     const tab = this.shadowRoot.querySelector('[data-aktion="mod-tab"][data-id="loecher"]');
     if (tab && this._mod.loecher) tab.textContent = `Löcher (${this._mod.loecher.length})`;
   },
@@ -8014,6 +9254,7 @@ const ModellAnsicht = {
   _modKlick(a, el) {
     const m = this._mod;
     if (!["mod-orbit-menue", "mod-orbit-art", "mod-wuerfel-ziehen"].includes(a)) this._modMenueZu();
+    if (a.startsWith("mod-wz")) { if (m && m.art === "stl" && !m.laedt) this._modWzKlick(a, el); return; }
     switch (a) {
       case "mod-ansicht": if (this._buehne) this._buehne.ansicht(el.dataset.id, m && m.grenzen, true); return;
       case "mod-orbit-menue": this._modOrbitMenue = !this._modOrbitMenue; break;
@@ -8062,6 +9303,8 @@ const ModellAnsicht = {
       case "mod-schliessen": this._mod = null; if (this._buehne) for (const n of [...this._buehne.objekte.keys()]) if (!n.startsWith("bett")) this._buehne.weg(n); break;
       case "mod-tab":
         m.tab = el.dataset.id;
+        if (m.tab !== "werkzeuge") this._modWzVerlassen();
+        else if (m.drehWerte.some((x) => Number(x))) m.drehWerte = [0, 0, 0];   // offene Winkel-Vorschau würde Antippen und Messen verfälschen
         this._zeichnen();
         this._modSzene();
         return;
@@ -8098,7 +9341,10 @@ const ModellAnsicht = {
         m.duese = Number(el.dataset.id);
         const [lo, hi, std] = SCHICHT_BEREICH[m.duese] || [0.08, 0.28, 0.2];
         if (m.schicht_h < lo || m.schicht_h > hi) m.schicht_h = std;
-        this._zeichnen(); this._modSchichtenStarten();
+        if (m.tab !== "schichten" && m.duenn && m.duenn.dicke) this._modDuennAuswerten();   // Wandstärke-Grenze hängt an der Düse
+        this._zeichnen();
+        if (m.tab === "schichten") this._modSchichtenStarten();
+        else if (m.duenn && m.duenn.dicke) this._modSzene();
         return;
       }
       case "mod-stuetzen": m.stuetzen = el.dataset.id; this._zeichnen(); this._modSzene(); return;
@@ -8137,6 +9383,7 @@ const ModellAnsicht = {
   // Loch von Hand: Strahl gegen alle Dreiecke (Möller–Trumbore), nächster Treffer zählt
   _modAntippen(strahl) {
     const m = this._mod;
+    if (m && m.art === "stl" && m.tab === "werkzeuge" && ["flaeche", "messen"].includes(m.werkzeug)) { this._modWzAntippen(strahl); return; }
     if (!m || !m.markieren || m.art !== "stl") return;
     const o = strahl.von, d = strahl.richtung;
     const h = strahlTreffer(m.v, o, d);
@@ -8166,11 +9413,13 @@ const ModellAnsicht = {
   _modDrehVorschau() {
     const m = this._mod, b = this._buehne;
     if (!m || !b || m.art !== "stl") return;
-    const aktiv = m.drehWerte && m.drehWerte.some((x) => Number(x));
+    const lage = this._modLageVorschau(), s = this._modSkalaVorschau();
+    const dreh = !lage && m.drehWerte && m.drehWerte.some((x) => Number(x));
+    const aktiv = dreh || !!lage || s !== 1;
     const c = [0, 1, 2].map((i) => (m.grenzen.min[i] + m.grenzen.max[i]) / 2);
-    const R = aktiv ? drehMatrix(m.drehWerte) : null;
-    const mat = aktiv ? M4.drehungUm(R, c) : M4.eins();
-    if (aktiv) {
+    const R = dreh ? drehMatrix(m.drehWerte) : null;
+    let mat = lage ? this._modLageMatrix(lage.R).mat : dreh ? M4.drehungUm(R, c) : M4.eins();
+    if (dreh) {
       // Wie beim Anwenden: der tiefste Punkt liegt immer auf dem Druckbett
       const v = m.v;
       let unten = Infinity;
@@ -8180,6 +9429,8 @@ const ModellAnsicht = {
       }
       mat[14] = -unten - (R[6] * c[0] + R[7] * c[1] + R[8] * c[2]);
     }
+    // Skalieren um die Mitte der Grundfläche (das Modell steht immer mittig auf dem Bett, z = 0 bleibt unten)
+    if (s !== 1) mat = M4.mal([s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, c[0] * (1 - s), c[1] * (1 - s), 0, 1], mat);
     b.setze("modell", { m: mat });
     b.setze("grundriss", { sichtbar: !aktiv });
     for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: !aktiv && m.tab !== "schichten" });
@@ -8206,6 +9457,7 @@ const ModellAnsicht = {
     if (!k || !this._mod) return false;
     const m = this._mod;
     if (k === "schicht") { this._modSchichtSetzen(Number(t.value)); return true; }
+    if (k === "skala" || k === "skala-mm") { this._modSkalaEingabe(t, k); return true; }
     if (k === "dreh-grad") {
       const i = Number(t.dataset.achse), w = Number(String(t.value).replace(",", "."));
       m.drehFeld = i;
@@ -8245,6 +9497,8 @@ const ModellAnsicht = {
     if (!m) return false;
     if (k === "rolle") { m.rolleId = this._modRolleId = t.value; this._zeichnen(); return true; }
     if (k === "dreh-grad") return true;
+    if (k === "skala") return true;
+    if (k === "skala-mm") { this._modSkalaAnzeigen(); return true; }   // Felder auf die gerundeten Werte bringen
     if (k === "muster") {
       if (!FUELLMUSTER.some((x) => x.id === t.value)) return true;
       m.muster = this._modMusterId = t.value;
@@ -8261,6 +9515,488 @@ const ModellAnsicht = {
     }
     if (["fuellung", "waende", "schicht_h"].includes(k) && m.tab === "schichten" && m.art === "stl") { this._modSchichtenStarten(); this._modSeiteNeu(); return true; }
     return ["fuellung", "waende", "schicht_h", "schicht"].includes(k);
+  },
+
+  // ==== Werkzeuge (v0.12): Auf Fläche legen, Beste Lage, Messen, Wandstärke, Skalieren ====
+  _modInhaltHtml() {
+    const m = this._mod;
+    if (m.tab === "loecher") return this._modLoecherHtml();
+    if (m.tab === "schichten") return this._modSchichtenHtml();
+    if (m.tab === "werkzeuge" && m.art === "stl") return this._modWerkzeugeHtml();
+    return this._modUebersichtHtml();
+  },
+
+  // Ohne Auswahl: Liste mit Erklärung. Mit Auswahl: kleine Werkzeugleiste zum Wechseln und darunter das Werkzeug.
+  _modWerkzeugeHtml() {
+    const m = this._mod, w = m.werkzeug;
+    if (!w) return `<p class="leise mod-wz-einleitung">Ausrichten, messen und die Größe ändern. Werkzeuge, die ein Antippen brauchen, arbeiten direkt im 3D-Bild.</p>
+      <div class="mod-wz-liste">${MOD_WERKZEUGE.map((x) => `<button class="mod-wz-zeile" data-aktion="mod-wz" data-id="${x.id}">${MOD_ICON[x.id]}
+        <span><strong>${x.titel}</strong><small>${x.text}</small></span><span class="mod-wz-pfeil" aria-hidden="true">›</span></button>`).join("")}</div>`;
+    // Nach einer Änderung der Geometrie sind alte Ergebnisse weg: neu rechnen, sobald das Werkzeug zu sehen ist
+    if (w === "lage" && !m.lage) this._modLageStarten();
+    if (w === "waende" && !m.duenn) this._modWaendeStarten();
+    const leiste = `<div class="mod-wz-leiste" role="toolbar" aria-label="Werkzeuge">${MOD_WERKZEUGE.map((x) => `<button class="mod-wz ${w === x.id ? "an" : ""}" data-aktion="mod-wz" data-id="${x.id}" aria-pressed="${w === x.id}" title="${esc(x.titel)}">${MOD_ICON[x.id]}<span>${x.name}</span></button>`).join("")}</div>`;
+    const inhalt = { flaeche: this._modWzFlaecheHtml, lage: this._modWzLageHtml, messen: this._modWzMessenHtml, waende: this._modWzWaendeHtml, skala: this._modWzSkalaHtml }[w].call(this);
+    return `${leiste}<div class="mod-wz-karte" data-einmal="mod-wz-${w}">${inhalt}</div>`;
+  },
+
+  _modWzRueckHtml() {
+    const r = this._mod.rueck;
+    return r ? `<button class="knopf leise breit oben-abstand" data-aktion="mod-wz-rueck">↺ Rückgängig: ${esc(r.text)}</button>` : "";
+  },
+
+  // Hinweis im 3D-Bild, solange ein Werkzeug auf Antippen wartet
+  _modWzHinweisHtml() {
+    const m = this._mod;
+    if (!m || m.art !== "stl" || m.tab !== "werkzeuge") return "";
+    if (m.werkzeug === "flaeche") return `<div class="mod-markier-hinweis mod-wz-hinweis" data-einmal="mod-wz-h-flaeche">${MOD_ICON.flaeche}<span>Tippe auf die Fläche, die aufs Bett soll</span><button class="mini" data-aktion="mod-wz" data-id="flaeche">Fertig</button></div>`;
+    if (m.werkzeug === "messen") {
+      const n = (m.messPunkte || []).length;
+      return `<div class="mod-markier-hinweis mod-wz-hinweis" data-einmal="mod-wz-h-messen">${MOD_ICON.messen}<span>${n === 0 ? "Ersten Punkt antippen" : n === 1 ? "Jetzt den zweiten Punkt antippen" : "Neuer Tipp beginnt eine neue Messung"}</span>${n ? `<button class="mini" data-aktion="mod-wz-mess-weg">Löschen</button>` : ""}<button class="mini" data-aktion="mod-wz" data-id="messen">Fertig</button></div>`;
+    }
+    return "";
+  },
+
+  _modWzFlaecheHtml() {
+    return `<h3>Auf Fläche legen</h3>
+      <p class="leise">Tippe im 3D-Bild auf eine Fläche. Das Teil dreht sich so, dass genau diese Fläche flach auf dem Druckbett liegt.</p>
+      <div class="hinweis mint mod-wz-aktiv"><span class="mod-wz-puls"></span>Bereit: tippe auf das Modell. Ziehen dreht weiter die Ansicht.</div>
+      <p class="leise klein">Große, ebene Flächen unten haften am besten und brauchen keine Stützen. Mit dem Würfel (UNTEN) siehst du, was gerade aufliegt.</p>
+      ${this._modWzRueckHtml()}`;
+  },
+
+  _modWzLageHtml() {
+    const m = this._mod, l = m.lage;
+    if (!l || l.laeuft) return `<h3>Beste Lage finden</h3><div class="mod-laden-klein" id="mod-lage-status"><span class="dreher klein"></span> Vergleiche ${l && l.anzahl ? `${l.anzahl} Lagen` : "Lagen"} … ${zahl((l ? l.fortschritt : 0) * 100)} %</div>`;
+    const a = l.aktuell, w = l.liste[l.wahl], best = l.liste[0];
+    if (!w) return `<h3>Beste Lage finden</h3><div class="hinweis">Keine andere Lage gefunden.</div>`;
+    const cm = (x) => `${zahl(x / 100, 1)} cm²`;
+    const schonGut = best.flaeche >= a.flaeche - 50;   // weniger als 0,5 cm² besser: nicht der Rede wert
+    const max = Math.max(a.flaeche, w.flaeche, 1);
+    const balken = (x) => `<div class="mod-balken"><i style="width: ${Math.max(x.flaeche > 0 ? 3 : 0, (x.flaeche / max) * 100).toFixed(1)}%"></i></div>`;
+    const weniger = a.flaeche > 0 ? Math.round(((a.flaeche - w.flaeche) / a.flaeche) * 100) : 0;
+    return `<h3>Beste Lage finden</h3>
+      ${schonGut ? `<div class="hinweis mint">✓ Die jetzige Lage braucht schon am wenigsten Stützen (${cm(a.flaeche)}).</div>`
+        : `<div class="hinweis mint">★ Vorschlag: etwa ${cm(best.flaeche)} statt ${cm(a.flaeche)} Stützfläche.</div>`}
+      <div class="mod-vergleich">
+        <div class="mod-v-zeile"><span>Jetzt</span>${balken(a)}<strong>${cm(a.flaeche)}</strong></div>
+        <div class="mod-v-zeile vorschlag"><span>${l.wahl === 0 ? (schonGut ? "Nächstbeste" : "Vorschlag") : `Lage ${l.wahl + 1}`}</span>${balken(w)}<strong>${cm(w.flaeche)}</strong></div>
+      </div>
+      <p class="klein mod-v-text">${weniger > 0 ? `${weniger} % weniger Stützfläche` : weniger < 0 ? `${-weniger} % mehr Stützfläche` : "Gleich viel Stützfläche"} · Höhe ${zahl(a.hoehe, 1)} → ${zahl(w.hoehe, 1)} mm</p>
+      <div class="r-kopf oben-abstand"><span>Weitere Lagen</span><span class="leise klein">antippen = Vorschau</span></div>
+      <div class="mod-lage-chips">${l.liste.map((x, i) => `<button class="chip ${i === l.wahl ? "an" : ""}" data-aktion="mod-wz-lage-wahl" data-i="${i}"><strong>${i === 0 ? "★ " : ""}${cm(x.flaeche)}</strong><small>${zahl(x.hoehe, 0)} mm hoch</small></button>`).join("")}</div>
+      <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="mod-wz-lage-vorschau">${l.vorschau ? "Vorschau aus" : "Vorschau"}</button><button class="knopf" data-aktion="mod-wz-lage-anwenden">Übernehmen</button></div>
+      <p class="leise klein">Verglichen werden ${l.anzahl} Lagen: die sechs Seiten und die größten ebenen Flächen. Gezählt wird, was steiler als ${STUETZ_WINKEL}° überhängt.</p>
+      ${this._modWzRueckHtml()}`;
+  },
+
+  _modWzMessenHtml() {
+    const p = this._mod.messPunkte || [];
+    let erg = `<p class="leise">Tippe im 3D-Bild nacheinander auf zwei Stellen des Modells.</p>`;
+    if (p.length === 2) {
+      const d = V3.minus(p[1], p[0]);
+      erg = `<div class="mod-mess-ergebnis"><span class="leise klein">Abstand</span><strong id="mod-mess-wert">${zahl(Math.hypot(d[0], d[1], d[2]), 2)} mm</strong>
+        <div class="mod-mess-achsen">${["X", "Y", "Z"].map((n, i) => `<span class="a-${n.toLowerCase()}">Δ${n}<b>${zahl(Math.abs(d[i]), 2)}</b></span>`).join("")}</div></div>`;
+    }
+    return `<h3>Abstand messen</h3>
+      <div class="mod-mess-schritte"><span class="${p.length >= 1 ? "fertig" : "jetzt"}"><i>1</i>Erster Punkt</span><span class="${p.length >= 2 ? "fertig" : p.length === 1 ? "jetzt" : ""}"><i>2</i>Zweiter Punkt</span></div>
+      ${erg}
+      ${p.length ? `<button class="knopf leise breit oben-abstand" data-aktion="mod-wz-mess-weg">✕ Messung löschen</button>` : ""}
+      <p class="leise klein">Gemessen wird die gerade Strecke zwischen den Punkten auf der Oberfläche, in mm. Ein dritter Tipp beginnt eine neue Messung.</p>`;
+  },
+
+  _modWzWaendeHtml() {
+    const m = this._mod, d = m.duenn;
+    const duesen = [...new Set(this._daten.inventar.filter((t) => t.kat === "duese" && (t.menge == null || t.menge > 0)).map((t) => t.groesse))].sort();
+    const linie = 1.125 * m.duese, grenze = 2 * linie;
+    let erg;
+    if (!d || d.laeuft) erg = `<div class="mod-laden-klein"><span class="dreher klein"></span> Messe Wandstärken … ${zahl((d ? d.fortschritt : 0) * 100)} %</div>`;
+    else if (!d.gemessen) erg = `<div class="hinweis">Keine Wand messbar. Ist das Modell geschlossen (wasserdicht)?</div>`;
+    else if (d.anzahl) erg = `<div class="hinweis rot-hinweis mod-duenn-hinweis">⚠️ ${zahl(d.anzahl)} von ${zahl(d.gemessen)} Messstellen sind dünner als ${zahl(grenze, 2)} mm, zusammen etwa ${zahl(d.flaeche / 100, d.flaeche < 100 ? 2 : 1)} cm². Dünnste Stelle: ${zahl(d.min, 2)} mm.
+        <button class="mini" data-aktion="mod-wz-waende-zeigen">Zeigen</button></div>
+      <div class="mod-legende"><span><i style="background: #ff4052"></i>zu dünn für die ${zahl(m.duese, 1)}-mm-Düse</span></div>`;
+    else erg = `<div class="hinweis mint">✓ Alle gemessenen Wände sind mindestens ${zahl(grenze, 2)} mm dick. Dünnste Stelle: ${zahl(d.min, 2)} mm.</div>`;
+    return `<h3>Wandstärke prüfen</h3>
+      <div class="r-kopf"><span>Düse</span><span class="leise klein">aus deinem Inventar</span></div>
+      <div class="chips">${(duesen.length ? duesen : [0.4]).map((x) => `<button class="chip ${m.duese === x ? "an" : ""}" data-aktion="mod-duese" data-id="${x}">${zahl(x, 1)} mm</button>`).join("")}</div>
+      <p class="leise klein">Eine Linie ist etwa ${zahl(linie, 2)} mm breit. Damit eine Wand sauber druckt, braucht sie mindestens zwei Linien, also ${zahl(grenze, 2)} mm.</p>
+      <div id="mod-waende-status">${erg}</div>
+      ${d && !d.laeuft && d.stichprobe ? `<p class="leise klein">Großes Modell: geprüft wurde eine Stichprobe von ${zahl(d.proben)} Stellen.</p>` : ""}
+      <p class="leise klein">Gemessen wird von der Oberfläche gerade nach innen bis zur anderen Seite der Wand. Feine Spitzen und Kanten können auch als dünn auffallen.</p>`;
+  },
+
+  _modWzSkalaHtml() {
+    const m = this._mod, s = m.skala / 100, g = m.grenzen.groesse;
+    return `<h3>Skalieren</h3>
+      ${this._modReglerHtml("skala", "Größe", Math.round(m.skala), 10, 400, 1, "%")}
+      <div class="chips mod-skala-schnell">${[50, 80, 120, 150, 200].map((p) => `<button class="chip ${Math.abs(m.skala - p) < 1e-6 ? "an" : ""}" data-aktion="mod-wz-skala-setzen" data-p="${p}">${p} %</button>`).join("")}</div>
+      <div class="r-kopf oben-abstand"><span>Oder auf ein Maß</span><span class="leise klein">ein Feld reicht, der Rest geht mit</span></div>
+      <div class="mod-dreh-felder mod-skala-felder">${["X", "Y", "Z"].map((a, i) => `<label class="mod-dreh-feld a-${a.toLowerCase()}"><span>${a}</span>
+        <input type="number" inputmode="decimal" step="0.1" min="0.1" value="${+(g[i] * s).toFixed(2)}" data-mod="skala-mm" data-achse="${i}" id="mod-skala-${i}" aria-label="${a} in mm"><small>mm</small></label>`).join("")}</div>
+      <div id="mod-skala-info">${this._modSkalaInfoHtml()}</div>
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="mod-wz-skala-setzen" data-p="100">Zurücksetzen</button><button class="knopf" data-aktion="mod-wz-skala-anwenden">Anwenden</button></div>
+      ${this._modSkalaHinweiseHtml()}
+      ${this._modWzRueckHtml()}`;
+  },
+
+  _modSkalaInfoHtml() {
+    const m = this._mod, s = m.skala / 100, g = m.grenzen.groesse.map((x) => x * s);
+    const zuGross = g.some((x) => x > BETT_MM + 0.01);
+    const rolle = this._modRolle(), dichte = materialInfo(rolle ? rolle.material : "PLA").dichte;
+    const opt = { duese: m.duese, waende: m.waende, fuellung: m.fuellung };
+    const alt = gewichtSchaetzen(m.kenn, dichte, opt).gramm;
+    const neu = gewichtSchaetzen({ volumen: m.kenn.volumen * s ** 3, flaeche: m.kenn.flaeche * s * s, dreiecke: m.kenn.dreiecke }, dichte, opt).gramm;
+    const gr = (x) => `${zahl(x, x < 10 ? 1 : 0)} g`;
+    const loch = s !== 1 ? this._modSkalaLochHinweise(m.loecher || [], m.eingesetzt || {}, s).filter((h) => !h.passt) : [];
+    return `<div class="info-liste oben-abstand">
+        <div class="info-zeile"><span>Maße</span><strong class="${zuGross ? "rot" : ""}">${g.map((x) => zahl(x, 1)).join(" × ")} mm</strong></div>
+        <div class="info-zeile"><span>Gewicht (geschätzt)</span><strong>${s === 1 ? `≈ ${gr(alt)}` : `≈ ${gr(alt)} → ${gr(neu)}`}</strong></div>
+      </div>
+      ${zuGross ? `<div class="hinweis rot-hinweis">✕ So groß passt es nicht mehr auf das Druckbett (256 mm).</div>` : ""}
+      ${loch.length ? `<div class="mod-skala-loecher"><div class="hinweis amber">⚠️ In dieser Größe ${loch.length === 1 ? "passt 1 Loch" : `passen ${loch.length} Löcher`} nicht mehr zum Teil:</div>${this._modSkalaLochZeilen(loch)}</div>` : ""}`;
+  },
+
+  // Für jedes Loch mit eingesetztem oder vorgeschlagenem Teil: passt es nach dem Skalieren mit Faktor f noch?
+  _modSkalaLochHinweise(loecher, eingesetzt, f) {
+    const inv = this._daten.inventar, liste = [];
+    for (const l of loecher) {
+      const id = eingesetzt[l.nr];
+      const teil = id ? inv.find((t) => t.id === id) : (teileFuerLoch(l, inv)[0] || {}).teil;
+      if (!teil) continue;
+      const neu = { ...l, durchmesser: l.durchmesser * f, tiefe: l.tiefe * f };
+      const passt = teileFuerLoch(neu, [teil]).length > 0;
+      // Passt es nicht mehr, vielleicht ein anderes Teil derselben Art (z. B. M2- statt M3-Einsatz)
+      const statt = passt ? null : (teileFuerLoch(neu, inv).find((x) => x.teil.kat === teil.kat) || {}).teil || null;
+      liste.push({ nr: l.nr, alt: l.durchmesser, neu: neu.durchmesser, teil, eingesetzt: !!id, passt, statt });
+    }
+    return liste;
+  },
+  _modZu(t) { return t.kat === "schraube" ? "zur" : "zum"; },
+  _modTeilKurz(t) {
+    const z = (x) => Number(x).toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    if (t.kat === "einsatz") return `${t.gewinde}-Einsatz`;
+    if (t.kat === "schraube") return `${t.gewinde}-Schraube`;
+    if (t.kat === "magnet") return `Magnet Ø ${z(t.durchmesser)} × ${z(t.dicke)} mm`;
+    return kategorie(t.kat).einzahl;
+  },
+  _modLochText(h) {
+    return `Loch ${h.nr}: Ø ${zahl(h.alt, 2)} → ${zahl(h.neu, 2)} mm, ${h.passt ? "passt weiter" : "passt nicht mehr"} ${this._modZu(h.teil)} ${this._modTeilKurz(h.teil)}${h.statt ? ` (dafür ${this._modZu(h.statt)} ${this._modTeilKurz(h.statt)})` : ""}`;
+  },
+  _modSkalaLochZeilen(liste) {
+    return liste.map((x) => `<div class="mod-skala-loch ${x.passt ? "gut" : "schlecht"}"><span class="mod-nr">${x.nr}</span><span>${esc(this._modLochText(x))}${x.eingesetzt ? ` <small class="leise">· war eingesetzt</small>` : ""}</span></div>`).join("");
+  },
+  _modSkalaHinweiseHtml() {
+    const h = this._mod.skalaHinweise;
+    if (!h || !h.liste.length) return "";
+    return `<div class="mod-skala-loecher oben-abstand"><div class="r-kopf"><span>Löcher nach dem Skalieren auf ${zahl(h.prozent, Number.isInteger(h.prozent) ? 0 : 1)} %</span></div>
+      ${this._modSkalaLochZeilen(h.liste)}
+      <button class="mini mint-rand" data-aktion="mod-tab" data-id="loecher">Zu den Löchern</button></div>`;
+  },
+
+  // Schieber oder Maßfelder geändert: Vorschau und Anzeigen nachführen (ohne Neuzeichnen, damit das Ziehen weitergeht)
+  _modSkalaEingabe(t, k) {
+    const m = this._mod;
+    if (k === "skala") m.skala = Math.max(10, Math.min(400, Number(t.value) || 100));
+    else {
+      const i = Number(t.dataset.achse), w = Number(String(t.value).replace(",", "."));
+      if (!(w > 0) || !(m.grenzen.groesse[i] > 0)) return;
+      m.skala = Math.max(10, Math.min(400, (w / m.grenzen.groesse[i]) * 100));
+    }
+    this._modSkalaAnzeigen(k === "skala-mm" ? Number(t.dataset.achse) : -1);
+    this._modDrehVorschau();
+  },
+  _modSkalaAnzeigen(ausser = -1) {
+    const root = this.shadowRoot, m = this._mod;
+    if (!m || !m.grenzen) return;
+    const s = m.skala / 100;
+    const w = root.getElementById("mod-wert-skala");
+    if (w) w.textContent = `${zahl(m.skala, Number.isInteger(m.skala) ? 0 : 1)} %`;
+    const r = root.querySelector('input[data-mod="skala"]');
+    if (r && Number(r.value) !== Math.round(m.skala)) r.value = Math.round(m.skala);
+    [0, 1, 2].forEach((i) => { const f = root.getElementById(`mod-skala-${i}`); if (f && i !== ausser) f.value = +(m.grenzen.groesse[i] * s).toFixed(2); });
+    root.querySelectorAll('[data-aktion="mod-wz-skala-setzen"].chip').forEach((c) => c.classList.toggle("an", Math.abs(m.skala - Number(c.dataset.p)) < 1e-6));
+    const info = root.getElementById("mod-skala-info");
+    if (info) info.innerHTML = this._modSkalaInfoHtml();
+  },
+  _modSkalaAnwenden() {
+    const m = this._mod, f = m.skala / 100;
+    if (Math.abs(f - 1) < 1e-6) { this._toast("Erst eine andere Größe wählen."); return; }
+    const hinweise = this._modSkalaLochHinweise(m.loecher || [], m.eingesetzt || {}, f);
+    const prozent = m.skala;
+    m.rueckNeu = { v: m.v.slice(), text: `Skalieren auf ${zahl(prozent, Number.isInteger(prozent) ? 0 : 1)} %` };
+    skalieren(m.v, f);
+    this._modGeometrieNeu();
+    m.skalaHinweise = { prozent, liste: hinweise };
+    this._zeichnen();
+    if (this._buehne) this._buehne.ansicht("iso", m.grenzen, true);
+    const schlecht = hinweise.filter((h) => !h.passt).length;
+    this._toast(`Auf ${zahl(prozent, Number.isInteger(prozent) ? 0 : 1)} % skaliert${schlecht ? `, ${schlecht === 1 ? "1 Loch passt" : `${schlecht} Löcher passen`} nicht mehr zum Teil` : ""}.`);
+  },
+
+  _modSkalaVorschau() {
+    const m = this._mod;
+    return m && m.art === "stl" && m.tab === "werkzeuge" && m.werkzeug === "skala" && m.skala !== 100 ? m.skala / 100 : 1;
+  },
+  _modLageVorschau() {
+    const m = this._mod;
+    return m && m.art === "stl" && m.tab === "werkzeuge" && m.werkzeug === "lage" && m.lage && !m.lage.laeuft && m.lage.vorschau ? m.lage.liste[m.lage.wahl] || null : null;
+  },
+  // Werkzeug oder Reiter verlassen: Vorschauen verwerfen (Schieber zurück auf 100 %)
+  _modWzVerlassen() {
+    const m = this._mod;
+    if (!m) return;
+    m.skala = 100;
+    if (m.lage) m.lage.vorschau = false;
+  },
+
+  _modWzKlick(a, el) {
+    const m = this._mod, b = this._buehne;
+    switch (a) {
+      case "mod-wz": {
+        const neu = m.werkzeug === el.dataset.id ? null : el.dataset.id;
+        this._modWzVerlassen();
+        m.werkzeug = neu; m.tab = "werkzeuge"; m.markieren = false;
+        if (m.drehWerte.some((x) => Number(x))) m.drehWerte = [0, 0, 0];   // eigene Winkel-Vorschau würde das Antippen verfälschen
+        this._zeichnen(); this._modSzene();
+        return;
+      }
+      case "mod-wz-rueck": {
+        if (!m.rueck || m.dreht) return;
+        const text = m.rueck.text;
+        m.v = m.rueck.v;
+        this._modGeometrieNeu();
+        this._zeichnen();
+        if (b) b.ansicht("iso", m.grenzen, true);
+        this._toast(`${text} rückgängig gemacht.`);
+        return;
+      }
+      case "mod-wz-lage-wahl": if (m.lage && m.lage.liste) { m.lage.wahl = Number(el.dataset.i); m.lage.vorschau = true; this._modSeiteNeu(); this._modDrehVorschau(); } return;
+      case "mod-wz-lage-vorschau": if (m.lage && m.lage.liste) { m.lage.vorschau = !m.lage.vorschau; this._modSeiteNeu(); this._modDrehVorschau(); } return;
+      case "mod-wz-lage-anwenden": {
+        const k = m.lage && m.lage.liste && m.lage.liste[m.lage.wahl];
+        if (!k) return;
+        const sofort = m.lage.vorschau;   // die Vorschau zeigt das Ergebnis schon: ohne Animation übernehmen
+        this._modDrehenAnimiert(k.achse, k.winkel, "Beste Lage", `Neue Lage übernommen: etwa ${zahl(k.flaeche / 100, 1)} cm² Stützfläche statt ${zahl(m.lage.aktuell.flaeche / 100, 1)} cm².`, sofort);
+        return;
+      }
+      case "mod-wz-mess-weg": m.messPunkte = []; this._zeichnen(); return;
+      case "mod-wz-waende-zeigen": {
+        const d = m.duenn;
+        if (b && d && d.minPunkt) b.fliegen(V3.mal(b._f(), -1), d.minPunkt, Math.min(b.abstand, 140), true);
+        return;
+      }
+      case "mod-wz-skala-setzen": m.skala = Number(el.dataset.p); this._modSkalaAnzeigen(); this._modDrehVorschau(); return;
+      case "mod-wz-skala-anwenden": this._modSkalaAnwenden(); return;
+      default: return;
+    }
+  },
+
+  // Antippen im 3D-Bild: Messpunkt setzen oder die getroffene Fläche nach unten drehen
+  _modWzAntippen(strahl) {
+    const m = this._mod;
+    if (m.dreht) return;
+    const h = strahlTreffer(m.v, strahl.von, strahl.richtung);
+    if (!h) { this._toast("Da ist kein Modell. Tippe direkt auf die Oberfläche."); return; }
+    const d = strahl.richtung;
+    if (m.werkzeug === "messen") {
+      const p = [0, 1, 2].map((i) => strahl.von[i] + d[i] * h.t);
+      m.messPunkte = m.messPunkte && m.messPunkte.length === 1 ? [m.messPunkte[0], p] : [p];
+      this._zeichnen();
+      return;
+    }
+    // Sichtbare Seite = Außenseite: Normale zur Kamera drehen
+    let n = V3.norm(h.n);
+    if (V3.punkt(n, d) > 0) n = V3.mal(n, -1);
+    const { achse, winkel } = drehungNachUnten(n);
+    if (winkel < 0.0035) { this._toast("Diese Fläche liegt schon unten."); return; }
+    this._modDrehenAnimiert(achse, winkel, "Auf Fläche legen", "Auf die Fläche gelegt. Der tiefste Punkt liegt auf dem Bett.");
+  },
+
+  // Drehung mit Rückgängig übernehmen; vorher sanft in der Ansicht drehen und absenken
+  _modDrehenAnimiert(achse, winkel, text, meldung, sofort = false) {
+    const m = this._mod, b = this._buehne;
+    const R = achsDrehung(achse, winkel);
+    const fertig = () => {
+      m.dreht = false;
+      if (this._mod !== m) return;
+      m.rueckNeu = { v: m.v.slice(), text };
+      m.drehWerte = [0, 0, 0];
+      drehenMit(m.v, R);
+      this._modGeometrieNeu();
+      this._zeichnen();
+      if (this._buehne) this._buehne.ansicht("iso", m.grenzen, true);
+      this._toast(meldung);
+    };
+    if (sofort || !b || !b.objekte.has("modell")) { fertig(); return; }
+    const { shift, c } = this._modLageMatrix(R);
+    m.dreht = true;
+    b.setze("grundriss", { sichtbar: false });
+    for (const [n] of b.objekte) if (n.startsWith("teil-")) b.setze(n, { sichtbar: false });
+    const start = performance.now(), dauer = 650;
+    b.animieren((t) => {
+      if (this._mod !== m) { m.dreht = false; return false; }
+      const x = Math.max(0, Math.min(1, (t - start) / dauer)), e = x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+      b.setze("modell", { m: M4.mal(M4.verschieben(shift[0] * e, shift[1] * e, shift[2] * e), M4.drehungUm(achsDrehung(achse, winkel * e), c)) });
+      if (x >= 1) { setTimeout(fertig, 0); return false; }
+      return true;
+    });
+  },
+
+  // Matrix für eine Drehung R um die Modellmitte, danach wie aufsBett mittig aufs Bett gestellt
+  _modLageMatrix(R) {
+    const m = this._mod, v = m.v, g = m.grenzen;
+    const c = [0, 1, 2].map((i) => (g.min[i] + g.max[i]) / 2);
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < v.length; i += 3) {
+      const x = v[i] - c[0], y = v[i + 1] - c[1], z = v[i + 2] - c[2];
+      for (let k = 0; k < 3; k++) {
+        const q = R[k * 3] * x + R[k * 3 + 1] * y + R[k * 3 + 2] * z + c[k];
+        if (q < lo[k]) lo[k] = q;
+        if (q > hi[k]) hi[k] = q;
+      }
+    }
+    const shift = [BETT_MM / 2 - (lo[0] + hi[0]) / 2, BETT_MM / 2 - (lo[1] + hi[1]) / 2, -lo[2]];
+    return { mat: M4.mal(M4.verschieben(...shift), M4.drehungUm(R, c)), shift, c };
+  },
+
+  // Beste Lage: jede Kandidaten-Lage nach Stützfläche bewerten, in Häppchen, damit die Seite flüssig bleibt
+  _modLageStarten() {
+    const m = this._mod, id = m.id;
+    m.lage = { laeuft: true, fortschritt: 0, anzahl: 0 };
+    const sichtbar = () => this._ansicht === "modelle" && m.tab === "werkzeuge" && m.werkzeug === "lage";
+    setTimeout(() => {
+      if (this._mod !== m || m.id !== id || !m.lage) return;
+      const v = m.v, kand = lageKandidaten(v), erg = [];
+      m.lage.anzahl = kand.length;
+      const hoeheIn = (u) => {
+        let lo = Infinity, hi = -Infinity;
+        for (let i = 0; i < v.length; i += 3) { const h = -(v[i] * u[0] + v[i + 1] * u[1] + v[i + 2] * u[2]); if (h < lo) lo = h; if (h > hi) hi = h; }
+        return hi - lo;
+      };
+      let k = 0;
+      const schritt = () => {
+        if (this._mod !== m || m.id !== id || !m.lage) return;
+        const t0 = performance.now();
+        while (k < kand.length && performance.now() - t0 < 30) {
+          const u = kand[k++], aktuell = k === 1;   // die erste Richtung (0, 0, −1) ist die jetzige Lage
+          const { achse, winkel } = drehungNachUnten(u);
+          erg.push({ u, aktuell, achse, winkel, R: achsDrehung(achse, winkel),
+            flaeche: aktuell ? m.ueber.flaeche : ueberhaenge(v, u).flaeche, hoehe: aktuell ? m.grenzen.groesse[2] : hoeheIn(u) });
+        }
+        m.lage.fortschritt = k / kand.length;
+        if (k < kand.length) {
+          const st = sichtbar() && this.shadowRoot.getElementById("mod-lage-status");
+          if (st) st.innerHTML = `<span class="dreher klein"></span> Vergleiche ${kand.length} Lagen … ${zahl(m.lage.fortschritt * 100)} %`;
+          setTimeout(schritt, 0);
+          return;
+        }
+        // Wenig Stützen zählt, bei Gleichstand gewinnt die flachere Lage; zu hoch fürs Bett fällt raus
+        // (1 mm Höhe zählt wie 1 mm² Stützfläche: hohe, schmale Lagen kippeln leichter und dauern länger)
+        const wert = (e) => e.flaeche + e.hoehe + (e.hoehe > BETT_MM + 0.01 ? 1e9 : 0);
+        const liste = erg.filter((e) => !e.aktuell).sort((a, b) => wert(a) - wert(b)).slice(0, 4);
+        m.lage = { laeuft: false, fortschritt: 1, anzahl: kand.length, aktuell: erg[0], liste, wahl: 0, vorschau: false };
+        if (sichtbar()) this._modSeiteNeu();
+      };
+      schritt();
+    }, 30);
+  },
+
+  // Wandstärke: Strahlen von der Oberfläche nach innen (BVH, Stichprobe bei großen Modellen, in Häppchen)
+  _modWaendeStarten() {
+    const m = this._mod, id = m.id;
+    m.duenn = { laeuft: true, fortschritt: 0 };
+    const sichtbar = () => this._ansicht === "modelle" && m.tab === "werkzeuge" && m.werkzeug === "waende";
+    setTimeout(() => {
+      if (this._mod !== m || m.id !== id || !m.duenn) return;
+      const v = m.v, n = v.length / 9;
+      const bvh = m.bvh || (m.bvh = bvhBauen(v));
+      // Zeigen die Normalen nach außen? Am Vorzeichen des Volumens erkennbar
+      let vol = 0;
+      for (let i = 0; i < v.length; i += 9) vol += v[i] * (v[i + 4] * v[i + 8] - v[i + 5] * v[i + 7]) - v[i + 1] * (v[i + 3] * v[i + 8] - v[i + 5] * v[i + 6]) + v[i + 2] * (v[i + 3] * v[i + 7] - v[i + 4] * v[i + 6]);
+      const richtung = vol < 0 ? -1 : 1;
+      const abstand = Math.max(1, n / MOD_WAND_PROBEN), proben = [];
+      for (let x = 0; x < n; x += abstand) proben.push(Math.floor(x));
+      const dicke = new Float32Array(n).fill(NaN);
+      let k = 0;
+      const weiter = () => {
+        if (this._mod !== m || m.id !== id || !m.duenn) return;
+        const t0 = performance.now();
+        while (k < proben.length && performance.now() - t0 < 30) { const t = proben[k++]; dicke[t] = wandDicke(bvh, t, richtung); }
+        m.duenn.fortschritt = k / proben.length;
+        if (k < proben.length) { if (sichtbar()) { const st = this.shadowRoot.getElementById("mod-waende-status"); if (st) st.innerHTML = `<div class="mod-laden-klein"><span class="dreher klein"></span> Messe Wandstärken … ${zahl(m.duenn.fortschritt * 100)} %</div>`; } setTimeout(weiter, 0); return; }
+        let probe = 0;
+        for (const t of proben) probe += this._modDreieckFlaeche(t);
+        m.duenn = { laeuft: false, dicke, proben: proben.length, stichprobe: abstand > 1, faktor: probe > 0 ? m.kenn.flaeche / probe : 1 };
+        this._modDuennAuswerten();
+        if (sichtbar()) { this._modSeiteNeu(); this._modSzene(); }
+      };
+      weiter();
+    }, 30);
+  },
+  _modDreieckFlaeche(t) {
+    const v = this._mod.v, i = t * 9;
+    const ux = v[i + 3] - v[i], uy = v[i + 4] - v[i + 1], uz = v[i + 5] - v[i + 2], wx = v[i + 6] - v[i], wy = v[i + 7] - v[i + 1], wz = v[i + 8] - v[i + 2];
+    return Math.hypot(uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx) / 2;
+  },
+  // Gemessene Stärken gegen die Düse prüfen (zwei Linienbreiten, Linie ≈ 1,125 × Düse)
+  _modDuennAuswerten() {
+    const m = this._mod, d = m.duenn;
+    if (!d || !d.dicke) return;
+    const grenze = 2 * 1.125 * m.duese, v = m.v;
+    const markiert = new Uint8Array(d.dicke.length);
+    let anzahl = 0, flaeche = 0, gemessen = 0, min = Infinity, minT = -1;
+    for (let t = 0; t < d.dicke.length; t++) {
+      const x = d.dicke[t];
+      if (!(x >= 0)) continue;   // NaN: nicht gemessen oder nicht messbar
+      gemessen++;
+      if (x < min) { min = x; minT = t; }
+      if (x < grenze) { markiert[t] = 1; anzahl++; flaeche += this._modDreieckFlaeche(t); }
+    }
+    const i = minT * 9;
+    Object.assign(d, { grenze, markiert, anzahl, gemessen, min, flaeche: flaeche * d.faktor,
+      minPunkt: minT >= 0 ? [(v[i] + v[i + 3] + v[i + 6]) / 3, (v[i + 1] + v[i + 4] + v[i + 7]) / 3, (v[i + 2] + v[i + 5] + v[i + 8]) / 3] : null });
+  },
+
+  // Messlinie über dem 3D-Bild (HTML/SVG, bleibt sichtbar, auch wenn sie durchs Teil geht)
+  _modMess() {
+    const box = this.shadowRoot.getElementById("mod-mess"), m = this._mod;
+    if (!box) return;
+    const p = m && m.art === "stl" && m.tab === "werkzeuge" && m.werkzeug === "messen" ? m.messPunkte || [] : [];
+    if (!p.length) { box.innerHTML = ""; return; }
+    const d = p.length === 2 ? Math.hypot(...V3.minus(p[1], p[0])) : null;
+    box.innerHTML = `<svg class="mod-mess-svg">${d != null ? `<line id="mod-mess-l" class="mod-mess-linie"/>` : ""}${p.map((_, i) => `<circle id="mod-mess-p${i}" class="mod-mess-punkt" r="6"/>`).join("")}</svg>
+      ${d != null ? `<div id="mod-mess-text" class="mod-mess-text">${zahl(d, 2)} mm</div>` : ""}`;
+    this._modMessSetzen();
+  },
+  _modMessSetzen() {
+    const m = this._mod, root = this.shadowRoot, b = this._buehne;
+    if (!m || !b || !m.messPunkte || !m.messPunkte.length) return;
+    const box = root.getElementById("mod-mess");
+    if (!box || !box.firstChild) return;
+    const s = m.messPunkte.map((p) => b.projizieren(p));
+    s.forEach((q, i) => {
+      const c = root.getElementById(`mod-mess-p${i}`);
+      if (!c) return;
+      c.style.display = q ? "" : "none";
+      if (q) { c.setAttribute("cx", q[0].toFixed(1)); c.setAttribute("cy", q[1].toFixed(1)); }
+    });
+    const l = root.getElementById("mod-mess-l"), t = root.getElementById("mod-mess-text");
+    if (!l || !s[0] || !s[1]) return;
+    l.setAttribute("x1", s[0][0].toFixed(1)); l.setAttribute("y1", s[0][1].toFixed(1));
+    l.setAttribute("x2", s[1][0].toFixed(1)); l.setAttribute("y2", s[1][1].toFixed(1));
+    if (t) t.style.transform = `translate(${((s[0][0] + s[1][0]) / 2).toFixed(1)}px, ${((s[0][1] + s[1][1]) / 2).toFixed(1)}px) translate(-50%, -140%)`;
+  },
+
+  // Handy: „In die Warteschlange“ als feste Leiste direkt über der unteren Navigation.
+  // Die Leiste wandert dazu aus dem Bildlauf heraus in die App; der Inhalt bekommt unten so viel Platz, wie sie hoch ist.
+  _modFussAndocken() {
+    const root = this.shadowRoot, fuss = root.querySelector(".mod-fuss"), app = root.querySelector(".app");
+    if (!this._mobil || !fuss || !app) return;
+    app.appendChild(fuss);
+    fuss.classList.add("dock");
+    const nav = root.querySelector(".nav-unten");
+    app.style.setProperty("--mod-nav-h", `${nav ? nav.offsetHeight : 64}px`);
+    app.style.setProperty("--mod-fuss-h", `${fuss.offsetHeight}px`);
   },
 };
 
@@ -9522,7 +11258,7 @@ const NotizAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.12.0";
+const VERSION = "0.13.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
