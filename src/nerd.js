@@ -39,7 +39,7 @@ const NerdAnsicht = {
     const inhalt = { abgleich: () => this._neAbgleichHtml(), werte: () => this._neWerteHtml(), gesundheit: () => this._neGesundheitHtml() }[n.tab] || (() => this._neStatistikHtml());
     return `<div class="ne-seite">
       <div class="chips unter-tabs">${NE_TABS.map(([id, t]) => `<button class="chip ${n.tab === id ? "an" : ""}" data-aktion="ne-tab" data-id="${id}">${t}</button>`).join("")}</div>
-      <div class="wechsel-rein" data-einmal="ne-${n.tab}">${inhalt()}</div></div>`;
+      <div class="wechsel-rein" data-einmal="ne-${n.tab}">${inhalt()}${n.tab === "statistik" && this._shopNerdHtml ? this._shopNerdHtml() : ""}</div></div>`;
   },
 
   // Ein Datensatz je Druck: Ergebnis, Material, Rolle, Zeitpunkte
