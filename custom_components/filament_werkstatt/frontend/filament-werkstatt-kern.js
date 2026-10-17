@@ -225,6 +225,7 @@ const EINSTELLUNGEN_STANDARD = {
   mindest_g: 250,        // Einkaufsliste: unter dieser Menge je Farbe + Material nachkaufen
   mindest_material_g: 500,
   korrektur: {},         // Faktor je Material aus dem Abgleich beim Wiegen
+  korrektur_n: {},       // Anzahl Wiegungen, aus denen der Faktor je Material gelernt ist
   sicherung_am: null,
   sicherung_spaeter: null,
   sicherung_start: null, // erste Erinnerung eine Woche nach dem ersten Start
@@ -285,6 +286,49 @@ function farbfamilie(rolle) {
   if (h < 260) return "Blau";
   if (h < 300) return "Lila";
   return "Rosa";
+}
+
+// ---------------------------------------------------------------------------
+// Preis, Feuchte und Korrektur je Rolle (alles optionale Felder an der Rolle)
+//   preis_kg       eigener Preis pro kg (null = voreingestellt)
+//   kauflink       Link zum Nachkaufen (nur http/https)
+//   bewertung      1–5 Sterne, wie zufrieden ich mit dem Filament bin
+//   geoeffnet_am   Datum (JJJJ-MM-TT), an dem die Rolle aus der Tüte kam
+//   getrocknet_am  Datum des letzten Trocknens
+//   korrektur      { f, n } gelernter Faktor aus Wiegungen dieser Rolle
+// ---------------------------------------------------------------------------
+
+// Rollen ohne eigenen Preis rechnen mit 19,99 € je Rolle (bezogen auf die Spulengröße,
+// 1 kg → knapp 2 ct/g), damit überall Kosten entstehen.
+const PREIS_STANDARD_ROLLE = 19.99;
+function preisProGramm(rolle) {
+  if (rolle && rolle.preis_kg > 0) return { wert: rolle.preis_kg / 1000, voreingestellt: false };
+  const nenn = (rolle && rolle.nenn_g) || 1000;
+  return { wert: PREIS_STANDARD_ROLLE / nenn, voreingestellt: true };
+}
+
+// Wie lange eine offene Rolle ungefähr trocken genug bleibt (Tage, normale Raumluft
+// um 40–60 % rF). Richtwerte aus Herstellerangaben (Bambu Lab, Polymaker, Prusa):
+//   PLA nimmt langsam Wasser auf (≈ 2 Monate), PETG/ABS/ASA etwa einen Monat,
+//   TPU und PC deutlich schneller (≈ 2 Wochen), Nylon (PA) und PVA schon nach Tagen.
+const FEUCHTE_TAGE = { PLA: 60, PETG: 30, ABS: 30, ASA: 30, HIPS: 30, TPU: 14, PC: 14, PA: 7, PVA: 7, BVOH: 7 };
+const FEUCHTE_STANDARD_TAGE = 30;
+function feuchteTage(material) {
+  const m = String(material || "").toUpperCase();
+  if (FEUCHTE_TAGE[m]) return FEUCHTE_TAGE[m];
+  // PA-CF, PA12, PETG-CF … nach dem Grundmaterial
+  const basis = Object.keys(FEUCHTE_TAGE).find((k) => m.startsWith(k));
+  return basis ? FEUCHTE_TAGE[basis] : FEUCHTE_STANDARD_TAGE;
+}
+
+// Korrekturfaktor aus Wiegungen: Grenzen und ab welcher Abweichung eine Wiegung nicht zählt
+const KORREKTUR_MIN = 0.8;
+const KORREKTUR_MAX = 1.25;
+const KORREKTUR_UNPLAUSIBEL = [0.5, 1.6];
+// Gleitender Mittelwert: die ersten Wiegungen zählen gleich, danach wiegt jede neue ein Fünftel
+function korrekturMitteln(alt, n, neu) {
+  const f = alt && n ? alt + (neu - alt) / Math.min(n + 1, 5) : neu;
+  return Math.min(KORREKTUR_MAX, Math.max(KORREKTUR_MIN, f));
 }
 // ---------------------------------------------------------------------------
 // Inventar: Kategorien, Maße und Corins Startbestand
@@ -3191,6 +3235,270 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
 .dr-dg-punkt { fill: var(--grund); stroke: var(--mint); stroke-width: 2.5; pointer-events: none; }
 .dr-dg-laedt { display: grid; justify-items: center; gap: 12px; padding: 60px 0; }
 .dr-strom-fuss { margin: 12px 0 0; }
+/* ==== Filament (v0.12): voreingestellter Preis, Kauflink, Sterne, Feuchte, Korrektur ==== */
+.voreingestellt { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: .3px; color: var(--leise); border: 1px dashed rgba(141,164,154,.45); border-radius: 6px; padding: 0 5px; vertical-align: 2px; text-transform: lowercase; }
+.r-kopf strong .voreingestellt { font-size: 10px; }
+.kauflink { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rand); flex-wrap: wrap; }
+.kauflink .mini { margin: 0 0 0 auto; }
+.kauflink.bearbeiten { display: block; }
+.kauflink.bearbeiten .feld { margin-top: 0; }
+.kauflink input.fehler { border-color: var(--rot); background: rgba(255,107,107,.1); }
+.kauf-knopf { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; text-decoration: none;
+  color: #062018; background: linear-gradient(135deg, var(--mint), #7ff0c6); box-shadow: 0 4px 18px rgba(62,230,168,.25); transition: transform .12s, filter .15s, box-shadow .15s; }
+.kauf-knopf:hover { filter: brightness(1.06); box-shadow: 0 6px 24px rgba(62,230,168,.35); }
+.kauf-knopf:active { transform: scale(.97); }
+.sterne-block { display: grid; gap: 4px; justify-items: start; padding: 14px 16px; border-radius: 16px; background: var(--flaeche); border: 1px solid var(--rand); margin-top: 12px; }
+.sterne-block > span { font-size: 14px; color: var(--leise); }
+.sterne { display: flex; gap: 2px; }
+.stern { font-size: 30px; line-height: 1; padding: 4px 3px; color: rgba(255,255,255,.16); transition: color .15s, transform .15s, text-shadow .2s; }
+.stern.an { color: var(--gelb, #ffd54a); text-shadow: 0 0 14px rgba(255,213,74,.35); }
+.stern:hover { transform: scale(1.12); }
+.stern:active { transform: scale(.92); }
+.sterne-block small { font-size: 12px; }
+.feuchte-daten { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mobil .feuchte-daten { grid-template-columns: 1fr; gap: 6px; }
+.datum-feld { display: grid; gap: 2px; font-size: 13px; color: var(--leise); margin-top: 6px; }
+.datum-feld .text { margin-top: 0; color-scheme: dark; min-height: 40px; }
+.feuchte-block .chips { margin-top: 4px; }
+.feuchte-hinweis { display: flex; align-items: center; gap: 10px; }
+.feuchte-hinweis > div { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.feuchte-hinweis small { opacity: .85; }
+.feuchte-hinweis .mini { margin: 0; flex: none; color: var(--mint); border-color: rgba(62,230,168,.4); }
+.feuchte-icon { font-size: 20px; }
+.mobil .feuchte-hinweis { flex-wrap: wrap; }
+.mobil .feuchte-hinweis > div { flex-basis: calc(100% - 40px); }
+.mobil .feuchte-hinweis .mini { margin-left: 30px; }
+.badge-trocknen { position: absolute; top: 12px; right: 12px; z-index: 1; font-size: 10px; font-weight: 600; color: #9fd8ff; background: rgba(92,200,255,.14); border: 1px solid rgba(92,200,255,.35); border-radius: 6px; padding: 1px 6px; animation: trocknen-puls 2.4s ease-in-out infinite; }
+.kachel.offen .badge-trocknen { top: 34px; }
+.mobil .badge-trocknen { font-size: 9px; padding: 1px 5px; }
+@keyframes trocknen-puls { 0%, 100% { box-shadow: 0 0 0 0 rgba(92,200,255,0); } 50% { box-shadow: 0 0 0 4px rgba(92,200,255,.12); } }
+.korrektur-block { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px dashed var(--rand); background: rgba(255,255,255,.02); }
+.korrektur-block.an { border-style: solid; border-color: rgba(62,230,168,.3); background: var(--mint-weich); }
+.korr-icon { font-size: 20px; }
+.korr-text { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: 14px; }
+.korr-text small { font-size: 12px; }
+.korrektur-block .mini { margin: 0; flex: none; }
+/* ===================== Shop: Rechner, Produkte, Aufträge ===================== */
+.sh-seite { --sh-filament: #2bc4c4; --sh-strom: #ffd54a; --sh-verschleiss: #7d948a; --sh-fehl: #ff6b6b; --sh-zubehoer: #e48ad0;
+  --sh-arbeit: #5ab0ff; --sh-entwicklung: #a98bff; --sh-gebuehren: #ff8f6b; --sh-versand: #ffb547; --sh-mwst: #4f5d58; --sh-gewinn: #3ee6a8; }
+.sh-f-filament { background: var(--sh-filament); } .sh-f-strom { background: var(--sh-strom); } .sh-f-verschleiss { background: var(--sh-verschleiss); }
+.sh-f-fehl { background: var(--sh-fehl); } .sh-f-zubehoer { background: var(--sh-zubehoer); } .sh-f-arbeit { background: var(--sh-arbeit); }
+.sh-f-entwicklung { background: var(--sh-entwicklung); } .sh-f-gebuehren { background: var(--sh-gebuehren); } .sh-f-versand { background: var(--sh-versand); }
+.sh-f-mwst { background: var(--sh-mwst); }
+.sh-f-gewinn { background: linear-gradient(90deg, #3ee6a8, #7cf5c8); box-shadow: 0 0 14px rgba(62,230,168,.55); }
+.sh-gewinn-text { color: var(--mint); }
+.sh-rechner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.sh-spalte { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sh-ergebnis-spalte { position: sticky; top: 0; }
+.mobil .sh-rechner { grid-template-columns: 1fr; gap: 14px; }
+.mobil .sh-ergebnis-spalte { position: static; }
+.sh-block { padding: 16px 18px; }
+.sh-block .dr-titel { margin-bottom: 6px; }
+.sh-regler { margin: 10px 0; }
+.sh-regler .r-kopf { gap: 10px; }
+.sh-regler .r-kopf span { display: flex; flex-direction: column; gap: 1px; font-size: 14px; }
+.sh-regler .r-kopf strong { white-space: nowrap; color: var(--text); font-variant-numeric: tabular-nums; }
+.sh-info { font-size: 11px; }
+.sh-quellen { margin: 8px 0 10px; }
+.sh-quellen .chip { padding: 6px 12px; }
+.sh-zwei-wahl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mobil .sh-zwei-wahl { grid-template-columns: 1fr; gap: 0; }
+.sh-auf-kopf { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; padding: 2px 0; font-size: 14px; color: var(--leise); font-weight: 600; }
+.sh-auf-kopf span { flex: none; }
+.sh-auf-kopf small { flex: 1; text-align: right; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sh-auf-kopf i { font-style: normal; font-size: 18px; transition: transform .2s ease; color: var(--leise); }
+.sh-auf-kopf.an i { transform: rotate(90deg); color: var(--mint); }
+.sh-auf-kopf:hover span { color: var(--text); }
+.sh-auf-inhalt { margin-top: 6px; animation: sh-auf .25s cubic-bezier(.2,.8,.2,1); }
+@keyframes sh-auf { from { opacity: 0; transform: translateY(-6px); } }
+.sh-zub-zeile { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--rand); }
+.sh-zub-zeile > div:first-child { display: flex; flex-direction: column; min-width: 0; }
+.sh-zub-zeile .regler-zeile { margin: 0; }
+.sh-zub-zahl { min-width: 34px; text-align: center; }
+/* Ergebnis */
+.sh-ergebnis { position: relative; overflow: hidden; }
+.sh-ergebnis::before { content: ""; position: absolute; inset: -40% -20% auto auto; width: 260px; height: 260px; background: radial-gradient(circle, rgba(62,230,168,.13), transparent 65%); pointer-events: none; }
+.sh-preise { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.sh-preis { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-radius: 14px; background: rgba(0,0,0,.22); border: 1px solid var(--rand); min-width: 0; }
+.sh-preis small { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); }
+.sh-preis strong { font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sh-preis.haupt-preis { border-color: rgba(62,230,168,.45); background: linear-gradient(160deg, rgba(62,230,168,.16), rgba(62,230,168,.03)); }
+.sh-preis.haupt-preis strong { font-size: 28px; color: var(--mint); text-shadow: 0 0 22px rgba(62,230,168,.35); }
+.mobil .sh-preise { grid-template-columns: 1fr 1fr; }
+.mobil .sh-preis.haupt-preis { grid-column: 1 / -1; }
+.sh-balken { display: flex; height: 26px; border-radius: 9px; overflow: hidden; background: rgba(255,255,255,.05); gap: 2px; }
+.sh-balken span { display: block; height: 100%; min-width: 3px; transition: width .35s cubic-bezier(.2,.8,.2,1); animation: balken-wachsen .6s cubic-bezier(.2,.8,.2,1); transform-origin: left; }
+.sh-legende { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 12px 0 14px; }
+.mobil .sh-legende { grid-template-columns: 1fr; }
+.sh-leg-zeile { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto 36px; gap: 8px; align-items: center; font-size: 13px; padding: 3px 0; }
+.sh-leg-zeile i { width: 12px; height: 12px; border-radius: 4px; }
+.sh-leg-zeile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-leg-zeile strong { font-variant-numeric: tabular-nums; font-weight: 600; }
+.sh-leg-zeile small { text-align: right; }
+.sh-eckdaten .info-zeile { padding: 8px 14px; font-size: 13px; }
+.sh-annahmen { margin: 10px 0 0; }
+.sh-mini { display: none; }
+.mobil .sh-mini { display: flex; position: sticky; top: -16px; z-index: 3; justify-content: space-between; gap: 8px; padding: 10px 14px; background: rgba(14,22,19,.92); backdrop-filter: blur(14px); border-color: rgba(62,230,168,.3); }
+.sh-mini div { display: flex; flex-direction: column; }
+.sh-mini small { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.sh-mini strong { font-size: 16px; font-variant-numeric: tabular-nums; }
+.sh-mini div:first-child strong { color: var(--mint); }
+/* Düsenvergleich */
+.sh-duesen .dr-titel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sh-dv { display: grid; grid-template-columns: minmax(0, 1.4fr) 1fr 1fr; border: 1px solid var(--rand); border-radius: 14px; overflow: hidden; font-size: 13px; }
+.sh-dv > * { padding: 8px 12px; border-bottom: 1px solid var(--rand); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.sh-dv > :nth-last-child(-n+3) { border-bottom: none; }
+.sh-dv > strong { background: rgba(0,0,0,.22); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+.sh-dv .sh-dv-name { text-align: left; color: var(--leise); white-space: normal; }
+.sh-dv .sh-dv-06 { background: rgba(255,181,71,.07); }
+.sh-dv strong.sh-dv-06 { color: var(--amber); background: rgba(255,181,71,.12); }
+.sh-dv .sh-dv-06.besser { color: var(--mint); font-weight: 700; }
+/* Produkte */
+.sh-produkte { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.mobil .sh-produkte { grid-template-columns: 1fr; }
+.sh-produkt { display: flex; flex-direction: column; gap: 12px; transition: border-color .2s, transform .2s; }
+.sh-produkt:hover { border-color: rgba(62,230,168,.35); transform: translateY(-2px); }
+.sh-produkt-kopf { display: flex; gap: 12px; align-items: center; }
+.sh-produkt-kopf > div { display: flex; flex-direction: column; min-width: 0; }
+.sh-produkt-kopf strong { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-produkt-preis { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.sh-produkt-preis strong { font-size: 30px; color: var(--mint); text-shadow: 0 0 20px rgba(62,230,168,.3); font-variant-numeric: tabular-nums; }
+.sh-produkt-zahlen { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.sh-produkt-zahlen > div { display: flex; flex-direction: column; padding: 8px 10px; border-radius: 12px; background: rgba(0,0,0,.2); }
+.sh-produkt-zahlen small { font-size: 11px; }
+.sh-produkt-zahlen span { font-weight: 600; font-variant-numeric: tabular-nums; }
+.sh-produkt-knoepfe { display: flex; gap: 8px; align-items: center; margin-top: auto; }
+.sh-produkt-knoepfe .rund { margin-left: auto; }
+/* Status-Pillen */
+.sh-status { --st: var(--leise); display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap;
+  color: var(--st); background: color-mix(in srgb, var(--st) 15%, transparent); border: 1px solid color-mix(in srgb, var(--st) 35%, transparent); transition: transform .15s, box-shadow .15s; }
+.sh-status i { font-style: normal; font-size: 10px; opacity: .7; transition: transform .2s; }
+.sh-status.offen i { transform: rotate(180deg); }
+.sh-status:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--st) 18%, transparent); }
+.sh-status.an { background: var(--st); color: #071510; }
+.sh-st-grau, .sh-chip-grau { --st: #a3b5ad; } .sh-st-blau, .sh-chip-blau { --st: #5ab0ff; } .sh-st-amber, .sh-chip-amber { --st: #ffb547; }
+.sh-st-tuerkis, .sh-chip-tuerkis { --st: #2bd4d4; } .sh-st-lila, .sh-chip-lila { --st: #b18cff; } .sh-st-mint, .sh-chip-mint { --st: #3ee6a8; }
+.sh-filter .chip { display: inline-flex; align-items: center; gap: 6px; }
+.sh-filter .chip small { opacity: .7; }
+.sh-punkt { width: 8px; height: 8px; border-radius: 50%; background: var(--st); box-shadow: 0 0 8px var(--st); }
+.sh-status-wahl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.25); animation: sh-auf .2s ease; }
+.sh-pfeil { color: var(--leise); font-size: 12px; }
+.sh-status-chips { gap: 6px; margin: 6px 0 10px; }
+/* Aufträge */
+.sh-stats { grid-template-columns: repeat(5, 1fr); }
+.sh-auftrag-oben { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+.mobil .sh-auftrag-oben { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1180px) { .sh-auftrag-oben { grid-template-columns: minmax(0, 1fr); } }
+.sh-auftrag-links { min-width: 0; }
+.sh-auftrag-links .ws-kopfzeile { align-items: center; }
+.sh-tabelle-rahmen { padding: 0; overflow-x: auto; }
+.sh-tabelle { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sh-tabelle th { text-align: left; padding: 0; border-bottom: 1px solid var(--rand); background: rgba(0,0,0,.18); }
+.sh-tabelle th button { width: 100%; display: flex; align-items: center; gap: 4px; padding: 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--leise); font-weight: 700; white-space: nowrap; }
+.sh-tabelle th.rechts button { justify-content: flex-end; }
+.sh-tabelle th.an button, .sh-tabelle th button:hover { color: var(--mint); }
+.sh-sort-pfeil { font-style: normal; font-size: 9px; }
+.sh-sort-pfeil.leer { opacity: 0; }
+.sh-tabelle th button:hover .sh-sort-pfeil.leer { opacity: .4; }
+.sh-tabelle td { padding: 11px 12px; border-bottom: 1px solid var(--rand); vertical-align: middle; }
+.sh-tabelle tbody tr { transition: background .15s; }
+.sh-tabelle tbody tr:not(.sh-status-zeile):hover { background: rgba(62,230,168,.045); }
+.sh-tabelle tbody tr:last-child td { border-bottom: none; }
+.sh-tabelle tr.menue-offen td { border-bottom-color: transparent; background: rgba(62,230,168,.05); }
+.sh-tabelle .sh-status-zeile td { padding: 0 12px 12px; background: rgba(62,230,168,.05); }
+.sh-tabelle .rechts { text-align: right; font-variant-numeric: tabular-nums; }
+.sh-tabelle td strong { font-weight: 600; }
+.sh-nr { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--leise); font-size: 13px; }
+.sh-preis-zelle { font-weight: 700; color: var(--text); white-space: nowrap; }
+.sh-plattform { font-size: 12px; color: var(--leise); }
+.sh-notiz { display: block; font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-reserv { display: block; font-size: 11px; color: var(--amber); margin-top: 2px; }
+.sh-reserv.erledigt { color: var(--leise); }
+.sh-aktionen { white-space: nowrap; text-align: right; }
+.sh-aktionen .mini, .sh-a-knoepfe .mini { margin: 0 6px 0 0; }
+.sh-aktionen .rund { vertical-align: middle; }
+.sh-in-schlange { margin-right: 6px; }
+.mini.sh-inline { margin: 0 0 0 4px; padding: 2px 8px; }
+.sh-karten { display: grid; gap: 10px; }
+.sh-a-karte { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.sh-a-kopf { display: flex; align-items: baseline; gap: 8px; }
+.sh-a-kopf strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.sh-a-preis { font-weight: 800; font-size: 17px; color: var(--mint); font-variant-numeric: tabular-nums; }
+.sh-a-mitte { display: flex; flex-direction: column; gap: 1px; font-size: 14px; }
+.sh-a-fuss { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sh-a-knoepfe { display: flex; align-items: center; gap: 4px; }
+/* Kleinunternehmer */
+.sh-ku { display: flex; flex-direction: column; gap: 12px; }
+.sh-ku .dr-titel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0; }
+.sh-ku.warn { border-color: rgba(255,181,71,.4); }
+.sh-ku-zeile { display: flex; flex-direction: column; gap: 4px; }
+.sh-ku-kopf { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; }
+.sh-ku-kopf strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sh-ku-kopf strong small { font-weight: 400; font-size: 11px; }
+.sh-ku-bahn { position: relative; height: 10px; border-radius: 5px; background: rgba(255,255,255,.07); }
+.sh-ku-bahn span { display: block; height: 100%; border-radius: 5px; background: linear-gradient(90deg, #2bc4c4, #3ee6a8); box-shadow: 0 0 12px rgba(62,230,168,.35); animation: balken-wachsen .8s cubic-bezier(.2,.8,.2,1); transform-origin: left; }
+.sh-ku-bahn span.amber { background: linear-gradient(90deg, #ffb547, #ffd54a); box-shadow: 0 0 12px rgba(255,181,71,.4); }
+.sh-ku-bahn span.rot { background: var(--rot); box-shadow: 0 0 12px rgba(255,107,107,.45); }
+.sh-ku-bahn i { position: absolute; top: -3px; bottom: -3px; width: 2px; background: rgba(255,181,71,.6); border-radius: 1px; }
+.sh-ku .hinweis, .sh-ku p { margin: 0; }
+.sh-ku small b { font-weight: 700; }
+.sh-ku small b.amber { color: var(--amber); } .sh-ku small b.rot { color: var(--rot); }
+/* Einstellungen */
+.sh-einst { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.mobil .sh-einst { grid-template-columns: 1fr; }
+.sh-preset { padding: 10px 0 2px; border-bottom: 1px solid var(--rand); }
+.sh-preset:last-child { border-bottom: none; }
+.sh-preset .sh-regler { margin: 4px 0; }
+.sh-schalter-zeile { display: flex; align-items: center; gap: 14px; justify-content: space-between; }
+.sh-schalter-zeile > div { display: flex; flex-direction: column; gap: 2px; }
+.sh-schalter { width: 50px; height: 28px; border-radius: 14px; background: rgba(255,255,255,.12); position: relative; flex: none; transition: background .2s; }
+.sh-schalter span { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #dfe9e4; transition: transform .22s cubic-bezier(.2,.9,.3,1.3); }
+.sh-schalter.an { background: var(--mint); box-shadow: 0 0 14px rgba(62,230,168,.4); }
+.sh-schalter.an span { transform: translateX(22px); background: #062018; }
+/* Sheet und Nerd */
+.sh-sheet .feld input[type=date] { color-scheme: dark; }
+.knopf.sh-loeschen { margin-right: auto; color: var(--rot); }
+.mobil .sh-sheet .sheet-fuss .knopf.sh-loeschen { flex: 0 0 auto; }
+.sh-saeulen { height: 170px; gap: 6px; }
+.sh-umsatz { background: linear-gradient(180deg, #7cf5c8, #2bc4c4); border-radius: 6px 6px 0 0; }
+.sh-nerd .sh-stats { grid-template-columns: repeat(4, 1fr); }
+.mobil .sh-stats { grid-template-columns: repeat(2, 1fr); }
+.mobil .sh-nerd .sh-stats .stat:nth-child(n+3) { display: flex; }
+.mobil .sh-filter { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 4px; }
+.mobil .sh-filter::-webkit-scrollbar { display: none; }
+.mobil .sh-auftrag-links .ws-kopfzeile { gap: 10px; align-items: stretch; }
+/* ---- Integration: automatische Sicherung und Update-Prüfung (System) ---- */
+.sich-auto { margin: 16px 0 6px; padding: 14px; border-radius: 14px; border: 1px solid rgba(62,230,168,.22); background: radial-gradient(420px 140px at 0% 0%, rgba(62,230,168,.08), transparent 70%), var(--flaeche); }
+.sich-auto-kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 14px; }
+.sich-auto-kopf .dot { margin-right: 2px; background: var(--leise); }
+.sich-auto-kopf .dot.mint { background: var(--mint); box-shadow: 0 0 10px var(--mint); }
+.sich-auto-kopf .dot.amber { background: var(--amber); }
+.sich-auto-kopf .dot.aus { background: var(--rot); }
+.sich-auto > p { margin: 6px 0 10px; }
+.sich-liste { display: grid; gap: 6px; margin-bottom: 12px; }
+.sich-zeile { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 12px; border-radius: 12px; background: rgba(0,0,0,.22); border: 1px solid var(--rand); }
+.sich-zeile.kaputt { opacity: .6; }
+.sich-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.sich-text strong { font-size: 14px; font-weight: 600; }
+.sich-text small { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sich-zeile .knopf { flex: none; }
+.sich-unter { margin: 18px 0 4px; font-size: 14px; color: var(--leise); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.upd-karte .knopf-reihe, .sich-auto .knopf-reihe { flex-wrap: wrap; }
+.upd-karte .knopf-reihe .knopf { min-width: 180px; }
+.upd-liste { margin: 14px 0 12px; }
+.upd-liste .pille { margin-left: 6px; vertical-align: 1px; }
+.upd-notizen { margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; background: rgba(0,0,0,.25); border: 1px solid var(--rand); max-height: 260px; overflow: auto; font-size: 13px; line-height: 1.5; }
+.upd-notizen p { margin: 0 0 6px; }
+.upd-md { white-space: pre-wrap; color: var(--leise); }
+.upd-md strong { color: var(--text); }
+.upd-link { color: var(--mint); text-decoration: none; }
+.upd-link:hover { text-decoration: underline; }
+.upd-liste .info-zeile strong { text-align: right; }
+.mobil .sich-zeile { padding: 8px 8px 8px 10px; gap: 8px; }
+.mobil .sich-text strong { font-size: 13px; }
+.mobil .sich-text small { white-space: normal; }
+.mobil .sich-zeile .klein-knopf { padding: 8px 10px; font-size: 12px; }
+.mobil .upd-karte .knopf-reihe .knopf { min-width: 0; flex-basis: 100%; }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -5031,9 +5339,10 @@ const BuchenAnsicht = {
   _buBedarf(d, rolle, fortschritt) {
     const e = this._daten.einstellungen;
     const anteil = Math.max(0, Math.min(100, fortschritt)) / 100;
-    const korr = (rolle && e.korrektur[rolle.material]) || 1;
-    const druck = (d.gewicht || 0) * anteil * korr;
-    return { druck, fix: e.linie_g + e.extruder_g, summe: druck + e.linie_g + e.extruder_g, korr };
+    const korr = this._korrektur(rolle).faktor;
+    const slicer = (d.gewicht || 0) * anteil;
+    const druck = slicer * korr;
+    return { druck, slicer, fix: e.linie_g + e.extruder_g, summe: druck + e.linie_g + e.extruder_g, korr };
   },
   _buVorschlaege(d) {
     const mats = this._buMaterialRaten(d);
@@ -5077,10 +5386,11 @@ const BuchenAnsicht = {
     const bu = this._bu, d = this._buAlle().find((x) => x.uid === bu.uid);
     const rolle = this._daten.rollen.find((r) => r.id === bu.rolleId);
     const b = this._buBedarf(d, rolle, bu.fortschritt);
-    const fil = rolle && rolle.preis_kg ? (b.summe / 1000) * rolle.preis_kg : null;
+    const preis = rolle ? this._preisProGramm(rolle) : null;
+    const fil = preis ? b.summe * preis.wert : null;
     const strom = bu.strom === "laedt" ? "lädt …" : bu.strom ? `${zahl(bu.strom.kwh, 3)} kWh · ${zahl(bu.strom.eur, 2)} €` : "keine Messung";
     const gesamt = (fil || 0) + (bu.strom && bu.strom.eur ? bu.strom.eur : 0);
-    return `<div class="info-zeile"><span>Filament</span><strong>${fil != null ? `${zahl(fil, 2)} €` : `<span class="leise">Preis/kg fehlt</span>`}</strong></div>
+    return `<div class="info-zeile"><span>Filament${preis ? `<small class="norm">${zahl(preis.wert * 100, 1)} ct/g${preis.voreingestellt ? ` · ${zahl(PREIS_STANDARD_ROLLE, 2)} € je Rolle` : ""}</small>` : ""}</span><strong>${fil != null ? `${zahl(fil, 2)} €${this._voreingestelltHtml(preis)}` : `<span class="leise">keine Rolle gewählt</span>`}</strong></div>
       <div class="info-zeile"><span>Strom (Steckdose)</span><strong>${strom}</strong></div>
       <div class="info-zeile"><span>Dieser Druck</span><strong>${gesamt ? `${zahl(gesamt, 2)} €` : "–"}</strong></div>`;
   },
@@ -5128,7 +5438,7 @@ const BuchenAnsicht = {
 
   _buRechnungHtml(d, rolle, b, alt, rest) {
     const e = this._daten.einstellungen;
-    return `${d.gewicht == null ? `<div class="info-zeile"><span class="amber">Gewicht fehlt im Eintrag</span><strong>0 g</strong></div>` : `<div class="info-zeile"><span>Druck${this._bu.fortschritt < 100 ? ` (${zahl(this._bu.fortschritt)} %)` : ""}${b.korr !== 1 ? ` × ${zahl(b.korr, 2)} Abgleich` : ""}</span><strong>${zahl(b.druck, 1)} g</strong></div>`}
+    return `${d.gewicht == null ? `<div class="info-zeile"><span class="amber">Gewicht fehlt im Eintrag</span><strong>0 g</strong></div>` : `<div class="info-zeile"><span>Druck${this._bu.fortschritt < 100 ? ` (${zahl(this._bu.fortschritt)} %)` : ""}${b.korr !== 1 ? `<small class="norm">${zahl(b.slicer, 1)} g laut Slicer · ${esc(this._korrekturText(rolle))}</small>` : ""}</span><strong>${zahl(b.druck, 1)} g</strong></div>`}
       <div class="info-zeile"><span>Anfangslinie + 3× Extruder</span><strong>${zahl(e.linie_g + e.extruder_g, 2)} g</strong></div>
       <div class="info-zeile"><span><strong class="tx">Von ${esc(rolle ? rolle.name : "–")} ab</strong></span><strong>${zahl(b.summe, 1)} g</strong></div>
       ${alt ? `<div class="info-zeile"><span>🔁 Rollenwechsel: Reststück von ${esc(alt.name)}</span><strong>${zahl(e.wechsel_g, 2)} g</strong></div>` : ""}
@@ -5161,12 +5471,13 @@ const BuchenAnsicht = {
     }
     if (rolle.rest_g != null) rolle.rest_g = Math.max(0, rolle.rest_g - b.summe);
     rolle.verbraucht_g = (rolle.verbraucht_g || 0) + b.summe;
-    const fil = rolle.preis_kg ? (b.summe / 1000) * rolle.preis_kg : null;
+    const preis = this._preisProGramm(rolle);
+    const fil = b.summe * preis.wert;
     const strom = bu.strom && bu.strom !== "laedt" ? bu.strom : null;
     this._daten.drucke[d.uid] = {
       ...this._buExtra(d.uid),
-      gebucht: { am: new Date().toISOString(), rolle: rolle.id, g: b.summe, druck_g: b.druck, fix_g: b.fix, wechsel, ergebnis: bu.ergebnis, fortschritt: bu.fortschritt,
-        kosten: { filament: fil, kwh: strom ? strom.kwh : null, strom: strom ? strom.eur : null } },
+      gebucht: { am: new Date().toISOString(), rolle: rolle.id, g: b.summe, druck_g: b.druck, slicer_g: b.slicer, korr: b.korr, fix_g: b.fix, wechsel, ergebnis: bu.ergebnis, fortschritt: bu.fortschritt,
+        kosten: { filament: fil, voreingestellt: preis.voreingestellt || undefined, kwh: strom ? strom.kwh : null, strom: strom ? strom.eur : null } },
       name: d.name, start: d.start, ende: d.ende,
     };
     this._daten.letzte_rolle = rolle.id;
@@ -5352,6 +5663,71 @@ const BuchenAnsicht = {
     if (!best) return null;
     const d = this._buAlle().find((v) => v.uid === best.uid);
     return { uid: best.uid, name: (d && d.name) || best.x.name || "Druck", d, x: best.x };
+  },
+  // ---- Preis und Korrektur je Rolle (auch für andere Bereiche) ----
+  // Preis pro Gramm: eigener Preis oder voreingestellt 19,99 € je Rolle → { wert, voreingestellt }
+  _preisProGramm(rolle) { return preisProGramm(rolle); },
+  // Dezente Markierung hinter einem Preis, der auf dem voreingestellten Rollenpreis beruht
+  _voreingestelltHtml(preis) {
+    return preis && preis.voreingestellt ? ` <span class="voreingestellt" title="Kein eigener Preis: gerechnet mit ${zahl(PREIS_STANDARD_ROLLE, 2)} € je Rolle">voreingestellt</span>` : "";
+  },
+
+  // Korrekturfaktor für das Slicer-Gewicht: zuerst der dieser Rolle, sonst der des Materials
+  _korrektur(rolle) {
+    if (!rolle) return { faktor: 1, quelle: null, n: 0 };
+    const k = rolle.korrektur;
+    if (k && k.n >= 1 && k.f > 0) return { faktor: k.f, quelle: "rolle", n: k.n };
+    const e = this._daten.einstellungen;
+    const f = (e.korrektur || {})[rolle.material];
+    if (f > 0 && f !== 1) return { faktor: f, quelle: "material", n: (e.korrektur_n || {})[rolle.material] || 1 };
+    return { faktor: 1, quelle: null, n: 0 };
+  },
+  // z. B. „Korrektur +4 % (gelernt aus 3 Wiegungen)“
+  _korrekturText(rolle) {
+    const k = this._korrektur(rolle);
+    if (!k.quelle) return "Keine Korrektur";
+    const p = Math.round((k.faktor - 1) * 100);
+    return `Korrektur ${p > 0 ? "+" : p < 0 ? "−" : "±"}${Math.abs(p)} % (${k.quelle === "material" ? `${rolle.material}, ` : ""}gelernt aus ${k.n} ${k.n === 1 ? "Wiegung" : "Wiegungen"})`;
+  },
+
+  // Seit dem letzten Wiegen verbucht: gesamt, davon Slicer-Gewicht (ohne Korrektur) und feste Posten
+  _buSeitWiegen(r) {
+    const ab = r.gewogen_am || "";
+    let g = 0, slicer = 0, fix = 0, n = 0;
+    for (const x of Object.values(this._daten.drucke || {})) {
+      const b = x.gebucht;
+      if (b && b.rolle === r.id && b.am > ab) {
+        g += b.g; fix += b.fix_g || 0; n++;
+        slicer += b.slicer_g != null ? b.slicer_g : (b.druck_g || 0) / (b.korr || 1);
+      }
+      if (b && b.wechsel && b.wechsel.rolle === r.id && b.am > ab) { g += b.wechsel.g; fix += b.wechsel.g; }
+    }
+    return { g, slicer, fix, n };
+  },
+
+  // Wiegen: gewogenen Rest mit dem verbuchten vergleichen und daraus den Faktor lernen
+  // (je Rolle und je Material). Ändert rest_g nicht. Gibt einen Satz für die Meldung zurück.
+  _wiegungLernen(r, netto) {
+    if (!r || r.rest_g == null) return "";
+    const seit = this._buSeitWiegen(r);
+    if (!seit.n || seit.slicer < 5) return "";   // zu wenig verbucht, um etwas zu lernen
+    const echt = r.rest_g + seit.g - netto;     // tatsächlich verbraucht seit dem letzten Wiegen
+    const faktor = (echt - seit.fix) / seit.slicer;
+    const [min, max] = KORREKTUR_UNPLAUSIBEL;
+    if (!(faktor >= min && faktor <= max)) return ` Abweichung zu groß (× ${zahl(faktor, 2)}), Korrektur nicht gelernt. Stimmt das Spulengewicht?`;
+    const d = this._daten, e = d.einstellungen;
+    const k = r.korrektur || { f: 1, n: 0 };
+    r.korrektur = { f: korrekturMitteln(k.f, k.n, faktor), n: k.n + 1, am: new Date().toISOString() };
+    const mn = (e.korrektur_n || {})[r.material] || (e.korrektur[r.material] ? 1 : 0);
+    e.korrektur = { ...e.korrektur, [r.material]: korrekturMitteln(e.korrektur[r.material], mn, faktor) };
+    e.korrektur_n = { ...(e.korrektur_n || {}), [r.material]: mn + 1 };
+    d.abgleich = [...(d.abgleich || []), { am: new Date().toISOString(), rolle: r.id, name: r.name, material: r.material, gebucht: seit.g, echt, faktor }].slice(-60);
+    return ` ${this._korrekturText(r)}.`;
+  },
+  _korrekturZuruecksetzen(r) {
+    delete r.korrektur;
+    this._speichern();
+    this._toast(`Korrektur für ${r.name} zurückgesetzt.`);
   },
 };
 // ---------------------------------------------------------------------------
@@ -6054,7 +6430,7 @@ const WerkstattAnsicht = {
     const e = this._daten.einstellungen, rest = {};
     return liste.map((a) => {
       const r = this._daten.rollen.find((x) => x.id === a.rolleId);
-      const bedarf = (a.gewicht || 0) + e.linie_g + e.extruder_g;
+      const bedarf = (a.gewicht || 0) * this._korrektur(r).faktor + e.linie_g + e.extruder_g;
       if (!r) return { a, r: null, stufe: "ohne", bedarf };
       if (r.rest_g == null) return { a, r, stufe: "ungewogen", bedarf };
       const vorher = r.id in rest ? rest[r.id] : r.rest_g;
@@ -6156,7 +6532,7 @@ const WerkstattAnsicht = {
         return `${trenner}<div class="ws-auftrag dr-karte ${x.stufe === "fehlt" ? "fehlt" : ""}" data-einmal="ws-a-${esc(x.a.id)}">
           <div class="ws-nr">${i + 1}${x.stufe === "fehlt" ? `<i class="ws-rot-punkt" title="Rolle reicht nicht"></i>` : ""}</div>
           <div class="ws-text"><strong>${esc(x.a.name)}</strong>
-            <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${p.min != null ? ` · ${wsDauerText(p.min)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}</small>
+            <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${p.min != null ? ` · ${wsDauerText(p.min)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}${x.r && x.a.gewicht ? (() => { const pp = this._preisProGramm(x.r); return ` · ≈ ${zahl(x.bedarf * pp.wert, 2)} €${this._voreingestelltHtml(pp)}`; })() : ""}</small>
             <span class="ws-pillen"><span class="pille ${farbe}">${st}${x.vorher != null && x.a.gewicht ? (x.danach < 0 ? ` · es fehlen ${zahl(-x.danach)} g` : ` · danach ${zahl(x.danach)} g`) : ""}</span>
               ${p.ende != null ? `<span class="pille ws-uhr">fertig um ${wsUhr(p.ende)}${new Date(p.ende).toDateString() !== heute ? ` (${new Date(p.ende).toLocaleDateString("de-DE", { weekday: "short" })})` : ""}</span>` : `<span class="pille ws-ohne-dauer">Dauer fehlt</span>`}
               ${pj.map((pr) => `<span class="pille ws-pj-pille" style="--pj:${esc(pr.farbe)}">${esc(pr.icon)} ${esc(pr.name)}</span>`).join("")}</span>
@@ -6728,11 +7104,14 @@ const WerkstattAnsicht = {
       const k = g.kosten || {};
       const datum = x.start || g.am;
       const m = (datum || "").slice(0, 7);
-      const eintrag = { uid, name: x.name || (x.hand && x.hand.name) || "Druck", datum, g: g.g, fil: k.filament, strom: k.strom, kwh: k.kwh, ergebnis: g.ergebnis };
+      // Ältere Buchungen ohne Preis: mit dem heutigen (ggf. voreingestellten) Preis der Rolle nachrechnen
+      let fil = k.filament, vor = !!k.voreingestellt;
+      if (fil == null) { const p = this._preisProGramm(this._daten.rollen.find((r) => r.id === g.rolle)); fil = (g.g || 0) * p.wert; vor = p.voreingestellt; }
+      const eintrag = { uid, name: x.name || (x.hand && x.hand.name) || "Druck", datum, g: g.g, fil, vor, strom: k.strom, kwh: k.kwh, ergebnis: g.ergebnis };
       drucke.push(eintrag);
       const mo = (monate[m] = monate[m] || { fil: 0, strom: 0, kwh: 0, n: 0, g: 0, ohnePreis: 0 });
-      mo.fil += k.filament || 0; mo.strom += k.strom || 0; mo.kwh += k.kwh || 0; mo.n++; mo.g += g.g || 0;
-      if (k.filament == null) mo.ohnePreis++;
+      mo.fil += fil || 0; mo.strom += k.strom || 0; mo.kwh += k.kwh || 0; mo.n++; mo.g += g.g || 0;
+      if (vor) mo.ohnePreis++;
     }
     return { monate, drucke: drucke.sort((a, b) => (b.datum || "").localeCompare(a.datum || "")) };
   },
@@ -6751,8 +7130,8 @@ const WerkstattAnsicht = {
             <small>${WS_MONATE[Number(k.slice(5, 7)) - 1]} ${k.slice(2, 4)}</small></div>`; }).join("")}</div>
           <div class="ws-legende"><span><i class="fil"></i>Filament</span><span><i class="strom"></i>Strom</span></div>`
           : `<p class="leise">Noch keine verbuchten Drucke. Kosten entstehen beim Verbuchen nach jedem Druck.</p>`}
-        ${ohnePreis ? `<div class="hinweis amber klein">${ohnePreis} Rollen haben keinen Preis, ihr Filament zählt mit 0 €. Preis eintragen: Rolle öffnen › Infos.</div>` : ""}
-        ${drucke.length ? `<h3>Letzte Drucke</h3><div class="info-liste">${drucke.slice(0, 8).map((d) => `<button class="info-zeile zeilen-knopf" data-aktion="zum-druck" data-uid="${esc(d.uid)}"><span>${esc(d.name)}<small class="norm">${d.datum ? new Date(d.datum).toLocaleDateString("de-DE") : ""} · ${zahl(d.g, 1)} g${d.kwh != null ? ` · ${zahl(d.kwh, 2)} kWh` : ""}</small></span><strong>${eur((d.fil || 0) + (d.strom || 0))}</strong></button>`).join("")}</div>` : ""}
+        ${ohnePreis ? `<div class="hinweis klein">${ohnePreis} Rollen haben keinen eigenen Preis, ihr Filament zählt mit ${zahl(PREIS_STANDARD_ROLLE, 2)} € je Rolle <span class="voreingestellt">voreingestellt</span>. Preis eintragen: Rolle öffnen › Infos.</div>` : ""}
+        ${drucke.length ? `<h3>Letzte Drucke</h3><div class="info-liste">${drucke.slice(0, 8).map((d) => `<button class="info-zeile zeilen-knopf" data-aktion="zum-druck" data-uid="${esc(d.uid)}"><span>${esc(d.name)}<small class="norm">${d.datum ? new Date(d.datum).toLocaleDateString("de-DE") : ""} · ${zahl(d.g, 1)} g${d.kwh != null ? ` · ${zahl(d.kwh, 2)} kWh` : ""}</small></span><strong>${eur((d.fil || 0) + (d.strom || 0))}${d.vor ? this._voreingestelltHtml({ voreingestellt: true }) : ""}</strong></button>`).join("")}</div>` : ""}
       </div>
       <div class="dr-karte"><h3 class="dr-titel">Einstellungen</h3>
         ${WS_EINSTELLUNGEN.map((f) => `<div class="mod-regler"><div class="r-kopf"><span>${esc(f.name)}</span><strong id="ws-e-${f.k}">${zahl(e[f.k], f.nk || 0)} ${f.e}</strong></div>
@@ -6930,7 +7309,7 @@ const NerdAnsicht = {
     const inhalt = { abgleich: () => this._neAbgleichHtml(), werte: () => this._neWerteHtml(), gesundheit: () => this._neGesundheitHtml() }[n.tab] || (() => this._neStatistikHtml());
     return `<div class="ne-seite">
       <div class="chips unter-tabs">${NE_TABS.map(([id, t]) => `<button class="chip ${n.tab === id ? "an" : ""}" data-aktion="ne-tab" data-id="${id}">${t}</button>`).join("")}</div>
-      <div class="wechsel-rein" data-einmal="ne-${n.tab}">${inhalt()}</div></div>`;
+      <div class="wechsel-rein" data-einmal="ne-${n.tab}">${inhalt()}${n.tab === "statistik" && this._shopNerdHtml ? this._shopNerdHtml() : ""}</div></div>`;
   },
 
   // Ein Datensatz je Druck: Ergebnis, Material, Rolle, Zeitpunkte
@@ -7052,7 +7431,7 @@ const NerdAnsicht = {
     let g = 0, druck_g = 0, fix_g = 0, n = 0;
     for (const x of Object.values(this._daten.drucke || {})) {
       const b = x.gebucht;
-      if (b && b.rolle === r.id && b.am > ab) { g += b.g; druck_g += b.druck_g || 0; fix_g += b.fix_g || 0; n++; }
+      if (b && b.rolle === r.id && b.am > ab) { g += b.g; druck_g += b.slicer_g != null ? b.slicer_g : (b.druck_g || 0) / (b.korr || 1); fix_g += b.fix_g || 0; n++; }
       if (b && b.wechsel && b.wechsel.rolle === r.id && b.am > ab) { g += b.wechsel.g; fix_g += b.wechsel.g; }
     }
     return { g, druck_g, fix_g, n };
@@ -7061,25 +7440,14 @@ const NerdAnsicht = {
     const n = this._ne, d = this._daten;
     const r = this._neRolle();
     if (!r || n.abWert == null) { this._toast("Bitte zuerst das Gewicht von der Waage einstellen."); return; }
-    const seit = this._neGebuchtSeit(r);
     const netto = Math.max(0, n.abWert - this._neSpuleG(r));
-    const echt = r.rest_g + seit.g - netto;
-    let faktor = seit.druck_g > 0 ? (echt - seit.fix_g) / seit.druck_g : null;
-    if (faktor != null && (faktor < 0.5 || faktor > 1.6)) {
-      this._toast(`Faktor ${zahl(faktor, 2)} ist unplausibel (Spulengewicht oder Waage prüfen). Gewicht übernommen, Faktor nicht gelernt.`);
-      faktor = null;
-    }
-    d.abgleich = [...(d.abgleich || []), { am: new Date().toISOString(), rolle: r.id, name: r.name, material: r.material, gebucht: seit.g, echt, faktor: faktor || 1 }].slice(-60);
-    if (faktor != null) {
-      // Mittel der letzten Abgleiche dieses Materials, vorsichtig begrenzt
-      const f = d.abgleich.filter((v) => v.material === r.material && v.faktor).slice(-5).map((v) => v.faktor);
-      d.einstellungen.korrektur = { ...d.einstellungen.korrektur, [r.material]: Math.min(1.3, Math.max(0.7, f.reduce((s, v) => s + v, 0) / f.length)) };
-    }
+    // Lernt wie beim Wiegen im Rollen-Detail: Faktor je Rolle und je Material (buchen.js)
+    const gelernt = this._wiegungLernen(r, netto);
     r.rest_g = netto;
     r.gewogen_am = new Date().toISOString();
     n.abWert = null;
     this._speichern();
-    if (faktor != null) this._toast(`${r.name}: ${zahl(netto)} g übernommen, Faktor für ${r.material} jetzt ${zahl(d.einstellungen.korrektur[r.material], 3)}.`);
+    this._toast(`${r.name}: ${zahl(netto)} g übernommen.${gelernt}`);
   },
 
   // ---- Eigene Werte gegen Vorschläge ----
@@ -7172,7 +7540,7 @@ const NerdAnsicht = {
         return;
       }
       case "ne-abgleich": this._neAbgleichen(); break;
-      case "ne-korr-weg": this._daten.einstellungen.korrektur = {}; this._speichern(); this._toast("Korrekturfaktoren zurückgesetzt."); return;
+      case "ne-korr-weg": this._daten.einstellungen.korrektur = {}; this._daten.einstellungen.korrektur_n = {}; this._daten.rollen.forEach((r) => delete r.korrektur); this._speichern(); this._toast("Korrekturfaktoren zurückgesetzt."); return;
       case "ne-heiz": this._neHeizLaden(); return;
       default: return;
     }
@@ -7202,11 +7570,47 @@ const NerdAnsicht = {
 };
 // ---------------------------------------------------------------------------
 // Querschnitt: globale Suche mit Querverweisen, Sicherung (wöchentliche
-// Erinnerung, Herunterladen, Einspielen), Bambu-Studio-Profil, „Mehr“-Menü am Handy
+// Erinnerung, Herunterladen, Einspielen, nächtliche Sicherung auf dem HA-Rechner),
+// Update-Prüfung, Bambu-Studio-Profil, „Mehr“-Menü am Handy
 // ---------------------------------------------------------------------------
 
 const SICHERUNG_TAGE = 7;
 const IMPORT_MAX_BYTES = 20 * 1048576;
+// Automatische Sicherung gilt als „läuft“, wenn die letzte höchstens so alt ist
+const SICHERUNG_AUTO_TAGE = 2;
+const SICHERUNG_AUTO_ZEIGEN = 5;
+// Fallback der Update-Prüfung ohne HACS: Versionsnummer direkt aus GitHub
+const UPDATE_MANIFEST = "https://raw.githubusercontent.com/Corineye/filament-werkstatt/main/custom_components/filament_werkstatt/manifest.json";
+
+// Versionsnummern vergleichen: 1 = a neuer, -1 = b neuer, 0 = gleich
+function versionVergleich(a, b) {
+  const teile = (v) => String(v || "").trim().replace(/^v/i, "").split(/[.\-+]/).map((x) => parseInt(x, 10) || 0);
+  const x = teile(a), y = teile(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+// „heute“, „gestern“ oder „Mo., 12.10.“
+function tagText(iso) {
+  const d = new Date(iso), h = new Date();
+  const tag = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((tag(h) - tag(d)) / 86400000);
+  if (diff === 0) return "heute";
+  if (diff === 1) return "gestern";
+  return d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+}
+const uhrzeitText = (iso) => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+
+// Versionshinweise (Markdown von GitHub) schlicht darstellen: Überschriften, fett, Listen
+function kleinMarkdown(md) {
+  return esc(String(md || "").trim().slice(0, 6000))
+    .replace(/^#{1,6}\s*(.+)$/gm, "<strong>$1</strong>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/^\s*[-*]\s+/gm, "• ");
+}
 
 // Filament-Profil für Bambu Studio (Datei › Importieren › Konfiguration importieren)
 function bambuProfil(r) {
@@ -7227,7 +7631,7 @@ function bambuProfil(r) {
     compatible_printers: ["Bambu Lab P1S 0.4 nozzle"],
   };
   if (w("k") != null) { p.pressure_advance = s(w("k")); p.enable_pressure_advance = ["1"]; }
-  if (r.preis_kg) p.filament_cost = s(r.preis_kg);
+  p.filament_cost = s(Math.round(preisProGramm(r).wert * 100000) / 100);   // €/kg, ohne eigenen Preis voreingestellt
   // Betttemperatur für die gewählte Platte (die anderen bleiben vom Basisprofil)
   const plattenKey = /textured|pei/i.test(platte) ? "textured_plate_temp" : /engineer/i.test(platte) ? "eng_plate_temp" : /cool/i.test(platte) ? "cool_plate_temp" : "hot_plate_temp";
   if (bett != null) { p[plattenKey] = s(bett); p[`${plattenKey}_initial_layer`] = s(bett); }
@@ -7306,6 +7710,9 @@ const ExtrasAnsicht = {
   _sicherungFaellig() {
     const e = this._daten && this._daten.einstellungen;
     if (!e || this._ansicht === "system") return false;
+    // Sichert Home Assistant jede Nacht selbst, braucht es keine Erinnerung zum Herunterladen
+    if (this._autoSich === undefined) { this._autoSichLaden(); return false; }
+    if (this._autoSichAktiv()) return false;
     const seit = tageSeit(e.sicherung_am || e.sicherung_start), spaeter = tageSeit(e.sicherung_spaeter);
     return (seit == null || seit >= SICHERUNG_TAGE) && (spaeter == null || spaeter >= 2);
   },
@@ -7378,10 +7785,184 @@ const ExtrasAnsicht = {
   _sicherungKarteHtml() {
     const e = this._daten ? this._daten.einstellungen : null;
     return `<div class="karte system oben-abstand"><h2>Sicherung</h2>
-      <p class="leise">Die Daten liegen in Home Assistant und sind damit in dessen Backups. Zusätzlich kannst du eine Datei herunterladen und später wieder einspielen.</p>
-      ${e ? `<p class="klein">Letzte Sicherung: ${e.sicherung_am ? new Date(e.sicherung_am).toLocaleString("de-DE") : "noch keine"}</p>` : ""}
-      <div class="knopf-reihe"><button class="knopf" data-aktion="sich-laden" ${e ? "" : "disabled"}>💾 Herunterladen</button>
+      <p class="leise">Die Daten liegen in Home Assistant und sind damit in dessen Backups. Jede Nacht legt Home Assistant zusätzlich eine Kopie im Medienordner ab. Außerdem kannst du eine Datei herunterladen und später wieder einspielen.</p>
+      ${this._autoSichHtml()}
+      <h3 class="sich-unter">Datei auf diesem Gerät</h3>
+      ${e ? `<p class="klein">Letzter Download: ${e.sicherung_am ? new Date(e.sicherung_am).toLocaleString("de-DE") : "noch keiner"}</p>` : ""}
+      <div class="knopf-reihe"><button class="knopf leise" data-aktion="sich-laden" ${e ? "" : "disabled"}>💾 Herunterladen</button>
         <label class="knopf leise datei-knopf">📂 Einspielen<input type="file" accept=".json,application/json" data-sys="import" hidden></label></div></div>`;
+  },
+
+  // ---- Automatische Sicherung im Medienordner (Integration, jede Nacht 03:00) ----
+  async _autoSichLaden() {
+    if (this._autoSichLaedt || !this._hass) return;
+    this._autoSichLaedt = true;
+    try {
+      this._autoSich = await this._hass.callWS({ type: "filament_werkstatt/sicherungen" });
+    } catch (e) {
+      this._autoSich = null;   // ältere Integration: nur Herunterladen
+    }
+    this._autoSichLaedt = false;
+    if (!this._modus && !this._dialog) this._zeichnen();
+  },
+  _autoSichAktiv() {
+    const s = this._autoSich;
+    if (!s || !s.automatisch || !s.liste || !s.liste.length) return false;
+    const alter = tageSeit(s.liste[0].zeit);
+    return alter != null && alter <= SICHERUNG_AUTO_TAGE;
+  },
+  _autoSichHtml() {
+    const s = this._autoSich;
+    if (s === undefined) {
+      this._autoSichLaden();
+      return `<div class="sich-auto"><div class="sich-auto-kopf"><span class="dot"></span><strong>Automatische Sicherung</strong> <span class="leise">wird geprüft …</span></div></div>`;
+    }
+    if (!s) {
+      return `<div class="sich-auto"><div class="sich-auto-kopf"><span class="dot aus"></span><strong>Automatische Sicherung:</strong> <span class="leise">nicht verfügbar</span></div>
+        <p class="klein leise">Die Integration ist zu alt oder nicht geladen. Herunterladen geht trotzdem.</p></div>`;
+    }
+    const l = s.liste || [], neu = l[0], aktiv = this._autoSichAktiv();
+    const status = !s.automatisch ? "aus, die Integration ist nicht geladen"
+      : neu ? `letzte ${tagText(neu.zeit)} ${uhrzeitText(neu.zeit)} · ${l.length} gespeichert`
+      : `noch keine, die erste kommt um ${esc(s.uhrzeit)}`;
+    const zeigen = this._autoSichAlle ? l : l.slice(0, SICHERUNG_AUTO_ZEIGEN);
+    const tagName = (iso) => {
+      const t = tagText(iso), datum = new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", ...(this._mobil ? {} : { year: "numeric" }) });
+      return t === "heute" || t === "gestern" ? `${t[0].toUpperCase()}${t.slice(1)}, ${datum}` : datum;
+    };
+    return `<div class="sich-auto">
+      <div class="sich-auto-kopf"><span class="dot ${aktiv ? "mint" : s.automatisch ? "amber" : "aus"}"></span><strong>Automatische Sicherung:</strong> <span>${status}</span></div>
+      <p class="klein leise">Jede Nacht um ${esc(s.uhrzeit)} im Medienordner unter „${esc(s.ordner)}“, die neuesten ${s.behalten} bleiben.${neu && !aktiv && s.automatisch ? " Die letzte ist älter als zwei Tage. War der Rechner aus?" : ""}</p>
+      ${l.length ? `<div class="sich-liste">${zeigen.map((e) => `<div class="sich-zeile${e.kaputt ? " kaputt" : ""}">
+          <div class="sich-text"><strong>${tagName(e.zeit)}</strong>
+            <small class="leise">${uhrzeitText(e.zeit)} Uhr · ${e.kaputt ? "beschädigt" : `${zahl(e.rollen)} Rollen · ${zahl(e.inventar || 0)} Teile`} · ${zahl(e.groesse / 1024)} KB</small></div>
+          <button class="knopf leise klein-knopf" data-aktion="sich-auto-wieder" data-id="${esc(e.datei)}" ${e.kaputt ? "disabled" : ""}>Wiederherstellen</button></div>`).join("")}</div>` : ""}
+      <div class="knopf-reihe"><button class="knopf" data-aktion="sich-auto-jetzt" ${this._autoSichLaeuft || !this._daten ? "disabled" : ""}>${this._autoSichLaeuft ? "Sichert …" : "☁️ Jetzt sichern"}</button>
+        ${l.length > SICHERUNG_AUTO_ZEIGEN ? `<button class="knopf leise" data-aktion="sich-auto-alle">${this._autoSichAlle ? "Weniger zeigen" : `Alle ${l.length} zeigen`}</button>` : ""}</div></div>`;
+  },
+  async _autoSichJetzt() {
+    if (this._autoSichLaeuft) return;
+    this._autoSichLaeuft = true;
+    this._zeichnen();
+    try {
+      // Erst offene Änderungen speichern, sonst sichert Home Assistant den alten Stand
+      if (this._ungespeichert) { clearTimeout(this._speicherTimer); await this._speichernJetzt(); }
+      this._autoSich = await this._hass.callWS({ type: "filament_werkstatt/sicherung_jetzt" });
+      this._autoSichLaeuft = false;
+      this._toast("Gesichert: Die Kopie liegt jetzt im Medienordner von Home Assistant.");
+    } catch (e) {
+      this._autoSichLaeuft = false;
+      this._toast(`Sichern fehlgeschlagen: ${e.message || e}`);
+    }
+  },
+  // Wiederherstellen über denselben Weg wie „Einspielen“ (Rückfrage, Zwischenspeicher)
+  async _autoSichWieder(datei) {
+    try {
+      const r = await this._hass.callWS({ type: "filament_werkstatt/sicherung_lesen", datei });
+      const e = ((this._autoSich && this._autoSich.liste) || []).find((x) => x.datei === datei);
+      this._import = { daten: sicherungPruefen(r.daten), name: `Automatische Sicherung vom ${e ? new Date(e.zeit).toLocaleString("de-DE") : datei.slice(0, 10)}` };
+      this._dialog = "sich-import";
+    } catch (e) {
+      this._toast(`Sicherung nicht lesbar: ${e.message || e}`);
+      return;
+    }
+    this._zeichnen();
+  },
+
+  // ---- Nach Updates suchen (HACS-Update-Entität, sonst GitHub) ----
+  async _updateSuchen() {
+    const u = { laeuft: true };
+    this._upd = u;
+    this._zeichnen();
+    const hass = this._hass;
+    let info = { version: VERSION, entity_id: null };
+    try { info = { ...info, ...(await hass.callWS({ type: "filament_werkstatt/update" })) }; } catch (e) { /* ältere Integration: GitHub */ }
+    try {
+      const eid = info.entity_id;
+      if (eid && hass.states[eid]) {
+        u.quelle = "hacs"; u.entity = eid;
+        // HACS fragt GitHub sonst nur alle paar Stunden: jetzt neu prüfen lassen
+        try { await hass.callService("homeassistant", "update_entity", { entity_id: eid }); } catch (e) { /* dann der letzte bekannte Stand */ }
+        await new Promise((r) => setTimeout(r, 600));
+        const a = (this._hass.states[eid] || hass.states[eid]).attributes || {};
+        u.installiert = a.installed_version || info.version;
+        u.neueste = a.latest_version || u.installiert;
+        u.zusammenfassung = a.release_summary || "";
+        u.url = a.release_url || "";
+        if (versionVergleich(u.neueste, u.installiert) > 0) {
+          try { u.notizen = await this._hass.callWS({ type: "update/release_notes", entity_id: eid }); } catch (e) { /* ohne Notizen */ }
+        }
+      } else {
+        u.quelle = "github";
+        const r = await fetch(`${UPDATE_MANIFEST}?t=${Date.now()}`, { cache: "no-store" });
+        if (!r.ok) throw new Error(`GitHub antwortet mit ${r.status}`);
+        u.installiert = info.version;
+        u.neueste = (await r.json()).version;
+        if (!u.neueste) throw new Error("Keine Versionsnummer auf GitHub gefunden");
+        u.url = "https://github.com/Corineye/filament-werkstatt/releases";
+      }
+      u.neuer = versionVergleich(u.neueste, u.installiert) > 0;
+    } catch (e) {
+      u.fehler = e.message || String(e);
+    }
+    u.laeuft = false;
+    u.am = new Date().toISOString();
+    if (this._upd === u) this._zeichnen();
+  },
+  async _updateInstallieren() {
+    const u = this._upd;
+    if (!u || !u.entity || u.installiert_laeuft) return;
+    if (!confirm(`Version ${u.neueste} jetzt über HACS installieren? Danach muss Home Assistant neu starten.`)) return;
+    u.installiert_laeuft = true; u.fehler = null;
+    this._zeichnen();
+    try {
+      await this._hass.callService("update", "install", { entity_id: u.entity });
+      u.neustart = true; u.installiert = u.neueste; u.neuer = false;
+    } catch (e) {
+      u.fehler = `Installieren fehlgeschlagen: ${e.message || e}`;
+    }
+    u.installiert_laeuft = false;
+    this._zeichnen();
+  },
+  async _haNeustart() {
+    if (!confirm("Home Assistant jetzt neu starten? Für ein bis zwei Minuten ist dann nichts erreichbar.")) return;
+    const u = this._upd || (this._upd = {});
+    try {
+      await this._hass.callService("homeassistant", "restart", {});
+    } catch (e) {
+      // Beim Neustart reißt die Verbindung oft ab, das ist kein Fehler. Fehlende Rechte schon.
+      if (/unauthori|admin/i.test(`${e.code || ""} ${e.message || ""}`)) { this._toast("Neu starten dürfen nur Administratoren."); return; }
+    }
+    u.neustart_laeuft = true;
+    this._zeichnen();
+  },
+  _updateKarteHtml() {
+    const u = this._upd;
+    // Installierte Version neuer als die laufende Seite: schon heruntergeladen, Neustart fehlt
+    const neustart = !!(u && (u.neustart || (u.installiert && !u.neuer && versionVergleich(u.installiert, VERSION) > 0)));
+    let inhalt = "";
+    if (u && u.neustart_laeuft) {
+      inhalt = `<div class="hinweis mint">🔄 Home Assistant startet neu … Danach die Seite neu laden.</div>`;
+    } else if (u && !u.laeuft && !u.fehler && u.neueste) {
+      const status = neustart ? `<span class="pille amber">Neustart nötig</span>` : u.neuer ? `<span class="pille amber">Update verfügbar</span>` : `<span class="pille mint">Aktuell</span>`;
+      inhalt = `<div class="info-liste upd-liste">
+          <div class="info-zeile"><span>Installiert</span><strong>${esc(u.installiert)}</strong></div>
+          <div class="info-zeile"><span>Neueste Version</span><strong>${esc(u.neueste)} ${status}</strong></div>
+          <div class="info-zeile"><span>Geprüft über</span><strong>${u.quelle === "hacs" ? "HACS" : "GitHub"}</strong></div></div>
+        ${u.neuer && (u.zusammenfassung || u.notizen) ? `<div class="upd-notizen">${u.zusammenfassung ? `<p><strong>${esc(u.zusammenfassung)}</strong></p>` : ""}${u.notizen ? `<div class="upd-md">${kleinMarkdown(u.notizen)}</div>` : ""}</div>` : ""}
+        ${u.neuer && u.url ? `<p class="klein"><a class="upd-link" href="${esc(u.url)}" target="_blank" rel="noopener">Änderungen auf GitHub ansehen ↗</a></p>` : ""}
+        ${u.neuer && u.quelle !== "hacs" ? `<div class="hinweis">Keine HACS-Update-Entität gefunden. So aktualisierst du: in HACS „Filament-Werkstatt“ öffnen, „Herunterladen“ wählen und danach Home Assistant neu starten.</div>` : ""}
+        ${neustart ? `<div class="hinweis amber">Version ${esc(u.installiert)} ist installiert. Damit sie aktiv wird, muss Home Assistant neu starten.</div>` : ""}`;
+    }
+    if (u && u.fehler) inhalt += `<div class="hinweis amber">${esc(u.fehler)}</div>`;
+    const knoepfe = [];
+    if (!u || !u.neustart_laeuft) knoepfe.push(`<button class="knopf ${u && (u.neuer || neustart) ? "leise" : ""}" data-aktion="upd-suchen" ${u && (u.laeuft || u.installiert_laeuft) ? "disabled" : ""}>${u && u.laeuft ? "Sucht …" : "🔎 Nach Updates suchen"}</button>`);
+    if (u && u.neuer && u.quelle === "hacs" && !neustart) knoepfe.push(`<button class="knopf amber" data-aktion="upd-installieren" ${u.installiert_laeuft ? "disabled" : ""}>${u.installiert_laeuft ? "Wird installiert …" : "⬇️ Jetzt aktualisieren"}</button>`);
+    if (neustart && !u.neustart_laeuft) knoepfe.push(`<button class="knopf amber" data-aktion="upd-neustart">🔄 Home Assistant neu starten</button>`);
+    return `<div class="karte system oben-abstand upd-karte"><h2>Updates</h2>
+      <p class="leise">Diese Seite läuft mit Version ${VERSION}.${u && u.am && !u.laeuft ? ` Zuletzt geprüft um ${uhrzeitText(u.am)} Uhr.` : " Prüft über HACS (sonst direkt bei GitHub), ob es eine neuere Version gibt."}</p>
+      ${inhalt}
+      <div class="knopf-reihe">${knoepfe.join("")}</div></div>`;
   },
 
   // ---- Neue Version erkennen (nach einem HACS-Update) ----
@@ -7448,6 +8029,12 @@ const ExtrasAnsicht = {
       case "sich-laden": this._sicherungLaden(); return true;
       case "sich-spaeter": this._daten.einstellungen.sicherung_spaeter = new Date().toISOString(); this._speichern(); break;
       case "sich-import-ok": this._importAusfuehren(); return true;
+      case "sich-auto-jetzt": this._autoSichJetzt(); return true;
+      case "sich-auto-wieder": this._autoSichWieder(el.dataset.id); return true;
+      case "sich-auto-alle": this._autoSichAlle = !this._autoSichAlle; break;
+      case "upd-suchen": this._updateSuchen(); return true;
+      case "upd-installieren": this._updateInstallieren(); return true;
+      case "upd-neustart": this._haNeustart(); return true;
       case "profil-export": {
         const r = this._rolle();
         if (!r) return true;
@@ -11483,10 +12070,872 @@ const StartAnsicht = {
 
 // ============================================================================
 // Shop: Preisrechner, Produkte, Aufträge, Kleinunternehmer-Grenze, Düsenvergleich
+// Daten: this._daten.shop = { einstellungen, produkte, auftraege } (alles optional,
+// fehlende Felder bekommen die Standardwerte unten)
 // ============================================================================
+
+const SH_TABS = [["rechner", "🧮 Rechner"], ["produkte", "📦 Produkte"], ["auftraege", "🧾 Aufträge"], ["einstellungen", "⚙️ Einstellungen"]];
+
+// Reihenfolge = Ablauf eines Auftrags
+const SH_STATUS = [
+  { id: "angefragt", name: "angefragt", farbe: "grau" },
+  { id: "bestellt", name: "bestellt", farbe: "blau" },
+  { id: "druck", name: "im Druck", farbe: "amber" },
+  { id: "fertig", name: "fertig", farbe: "tuerkis" },
+  { id: "versendet", name: "versendet", farbe: "lila" },
+  { id: "bezahlt", name: "bezahlt", farbe: "mint" },
+];
+const shStatus = (id) => SH_STATUS.find((s) => s.id === id) || SH_STATUS[0];
+const shStatusNr = (id) => Math.max(0, SH_STATUS.findIndex((s) => s.id === id));
+
+// Richtwerte (Stand Herbst 2026, bitte selbst prüfen): Gebühr in % vom Bruttopreis + fester Betrag je Verkauf
+const SH_PLATTFORMEN = [
+  { id: "direkt", name: "Direktverkauf / PayPal Freunde", kurz: "Direkt", prozent: 0, fix: 0 },
+  { id: "paypal", name: "PayPal Waren & Dienstleistungen", kurz: "PayPal", prozent: 2.49, fix: 0.35 },
+  { id: "etsy", name: "Etsy", prozent: 10.5, fix: 0.5 },
+  { id: "ebay", name: "eBay (gewerblich)", kurz: "eBay", prozent: 11, fix: 0.35 },
+  { id: "kleinanzeigen", name: "Kleinanzeigen", prozent: 0, fix: 0 },
+];
+// Ungefähre Preise Deutsche Post / DHL (Privatkunden, online frankiert)
+const SH_VERSAND = [
+  { id: "abholung", name: "Abholung / Übergabe", preis: 0 },
+  { id: "brief", name: "Brief / Warensendung (Maxibrief)", preis: 2.9 },
+  { id: "paeckchen_s", name: "Päckchen S", preis: 4.19 },
+  { id: "paeckchen_m", name: "Päckchen M", preis: 5.19 },
+  { id: "paket2", name: "Paket bis 2 kg", preis: 6.19 },
+];
+const SH_STANDARD = {
+  kwh_preis: 0.35, watt: 110,
+  drucker_preis: 699, drucker_h: 5000,
+  duese_preis: 15, duese_h: 500,
+  platte_preis: 40, platte_h: 1500,
+  satz_arbeit: 15, satz_konstruktion: 25,
+  aufschlag: 30, kleinunternehmer: true, verpackung: 0.5,
+  fehl_standard: 5,   // % Fehldrucke, solange es noch zu wenige eigene Drucke gibt
+};
+// Einstellungs-Regler, nach Gruppen (Untermenüs)
+const SH_EINST = [
+  { gruppe: "strom", titel: "⚡ Strom & Drucker", felder: [
+    { k: "kwh_preis", name: "Strompreis", e: "€/kWh", min: 0.1, max: 0.8, step: 0.01, nk: 2 },
+    { k: "watt", name: "Leistung beim Drucken (ohne Messung)", e: "W", min: 40, max: 400, step: 5 },
+    { k: "drucker_preis", name: "Druckerpreis", e: "€", min: 100, max: 3000, step: 1 },
+    { k: "drucker_h", name: "Lebensdauer Drucker", e: "h", min: 500, max: 20000, step: 100 },
+    { k: "duese_preis", name: "Düse", e: "€", min: 0, max: 80, step: 0.5, nk: 2 },
+    { k: "duese_h", name: "Lebensdauer Düse", e: "h", min: 50, max: 3000, step: 50 },
+    { k: "platte_preis", name: "Druckplatte", e: "€", min: 0, max: 150, step: 1 },
+    { k: "platte_h", name: "Lebensdauer Druckplatte", e: "h", min: 100, max: 6000, step: 50 },
+  ] },
+  { gruppe: "arbeit", titel: "🛠️ Arbeit & Aufschlag", felder: [
+    { k: "satz_arbeit", name: "Stundensatz Vorbereitung & Nacharbeit", e: "€/h", min: 0, max: 80, step: 0.5, nk: 2 },
+    { k: "satz_konstruktion", name: "Stundensatz Konstruktion", e: "€/h", min: 0, max: 120, step: 0.5, nk: 2 },
+    { k: "aufschlag", name: "Aufschlag (Standard für neue Produkte)", e: "%", min: 0, max: 200, step: 1 },
+    { k: "verpackung", name: "Verpackung je Stück", e: "€", min: 0, max: 5, step: 0.05, nk: 2 },
+    { k: "fehl_standard", name: "Fehldrucke, solange zu wenig eigene Daten", e: "%", min: 0, max: 30, step: 1 },
+  ] },
+];
+// Rechner-Regler
+const SH_REGLER = {
+  gewicht_g: { name: "Filament je Platte", e: "g", min: 0, max: 1000, step: 0.5, nk: 1 },
+  druck_h: { name: "Druckzeit je Platte", e: "h", min: 0, max: 48, step: 0.05, nk: 2, zeit: true },
+  stueck: { name: "Stück pro Platte", e: "Stk", min: 1, max: 60, step: 1 },
+  vorbereitung_min: { name: "Vorbereitung je Platte", e: "min", min: 0, max: 90, step: 1, info: "Slicen, Platte reinigen, Filament wechseln" },
+  nacharbeit_min: { name: "Nacharbeit je Stück", e: "min", min: 0, max: 120, step: 1, info: "Stützen entfernen, entgraten, montieren, einpacken" },
+  konstruktion_h: { name: "Konstruktionszeit", e: "h", min: 0, max: 60, step: 0.25, nk: 2 },
+  prototypen: { name: "Prototypen", e: "Stk", min: 0, max: 10, step: 1 },
+  proto_g: { name: "Filament je Prototyp", e: "g", min: 0, max: 500, step: 0.5, nk: 1 },
+  proto_h: { name: "Druckzeit je Prototyp", e: "h", min: 0, max: 24, step: 0.05, nk: 2, zeit: true },
+  menge: { name: "Wie oft verkaufst du das etwa?", e: "Stk", min: 1, max: 500, step: 1, info: "Die Entwicklungskosten werden auf diese Menge verteilt" },
+  aufschlag: { name: "Aufschlag", e: "%", min: 0, max: 200, step: 1 },
+  extra_eur: { name: "Sonstiges Zubehör je Stück", e: "€", min: 0, max: 30, step: 0.05, nk: 2 },
+};
+// Kostenteile im Balken (Farben in stil.js: .sh-f-<k>)
+const SH_TEILE = [
+  ["filament", "Filament"], ["strom", "Strom"], ["verschleiss", "Verschleiß"], ["fehl", "Fehldruck-Zuschlag"], ["zubehoer", "Zubehör"],
+  ["arbeit", "Arbeit"], ["entwicklung", "Entwicklung"], ["gebuehren", "Gebühren"], ["versand", "Versand & Verpackung"], ["mwst", "MwSt"], ["gewinn", "Gewinn"],
+];
+// Düsenvergleich: Annahmen für typische Teile (keine Messung!)
+const SH_DUESE06 = { zeit: 0.65, material: 1.07 };
+// § 19 UStG seit 2025: Vorjahr höchstens 25.000 €, laufendes Jahr höchstens 100.000 €
+const SH_GRENZE = { vorjahr: 25000, jahr: 100000 };
+
+const eur = (v, nk = 2) => (v == null || !isFinite(v) ? "–" : `${zahl(v, nk)} €`);
+// Auf ,99 aufrunden (12,30 → 12,99; 12,99 bleibt)
+function shRunden99(p) { return p <= 0 ? 0 : Math.ceil(p + 0.01 - 1e-9) - 0.01; }
+// „1h 23m 45s“, „2d 3h“ → Stunden
+function shZeitStunden(t) {
+  if (!t) return null;
+  const s = String(t);
+  const teil = (re) => { const m = s.match(re); return m ? Number(m[1]) : 0; };
+  const h = teil(/(\d+)\s*d/) * 24 + teil(/(\d+)\s*h/) + teil(/(\d+)\s*m(?!s)/) / 60 + teil(/(\d+)\s*s/) / 3600;
+  return h > 0 ? h : null;
+}
+function shDauer(h) {
+  if (h == null || !isFinite(h)) return "–";
+  const min = Math.round(h * 60);
+  return min >= 60 ? `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ""}` : `${min} min`;
+}
+const shHeute = () => new Date().toISOString().slice(0, 10);
+const shId = (vor) => `${vor}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+
 const ShopAnsicht = {
-  _shHtml() { return `<div class="karte"><h2>Shop</h2><p class="leise">Kommt gleich.</p></div>`; },
-  _shKlick(a, el) { this._zeichnen(); },
+  // ---- Daten und Zustand ----
+  _shDaten() {
+    const d = this._daten;
+    if (!d.shop || typeof d.shop !== "object") d.shop = {};
+    const s = d.shop;
+    if (!s.einstellungen) s.einstellungen = {};
+    if (!Array.isArray(s.produkte)) s.produkte = [];
+    if (!Array.isArray(s.auftraege)) s.auftraege = [];
+    return s;
+  },
+  _shE() {
+    const e = { ...SH_STANDARD, ...this._shDaten().einstellungen };
+    if (this._shDaten().einstellungen.kwh_preis == null && this._daten.einstellungen && this._daten.einstellungen.strompreis) e.kwh_preis = this._daten.einstellungen.strompreis;
+    return e;
+  },
+  _shPlattformen() { return this._shDaten().einstellungen.plattformen || SH_PLATTFORMEN; },
+  _shVersandListe() { return this._shDaten().einstellungen.versand || SH_VERSAND; },
+  _shPlattform(id) { const l = this._shPlattformen(); return l.find((x) => x.id === id) || l[0]; },
+  _shVersandArt(id) { const l = this._shVersandListe(); return l.find((x) => x.id === id) || l[0]; },
+  _shZustand() {
+    if (!this._sh) this._sh = { tab: "rechner", r: null, filter: "alle", sort: { k: "nr", ab: false }, menue: null, auftrag: null, auf: { strom: true }, quelle: "hand" };
+    if (!this._sh.r) this._sh.r = this._shNeuerEntwurf();
+    return this._sh;
+  },
+  _shNeuerEntwurf(werte = {}) {
+    const e = this._shE();
+    const r = this._daten.rollen.find((x) => x.id === this._daten.geladen) || this._daten.rollen.find((x) => x.id === this._daten.letzte_rolle) || this._daten.rollen[0] || {};
+    return { id: null, name: "", gewicht_g: 20, druck_h: 1, stueck: 1, rolleId: r.id || null, vorbereitung_min: 5, nacharbeit_min: 5,
+      konstruktion_h: 0, prototypen: 0, proto_g: null, proto_h: null, menge: 20, aufschlag: e.aufschlag, plattform: "direkt", versand: "abholung",
+      zubehoer: [], extra_eur: 0, quelle: "hand", ...JSON.parse(JSON.stringify(werte)) };
+  },
+
+  // Preis je Gramm: eigene Rolle (anderer Bereich liefert _preisProGramm), sonst 19,99 € je Rolle
+  _shPreisG(rolle) {
+    const p = this._preisProGramm?.(rolle);
+    if (p && p.wert > 0) return { wert: p.wert, voreingestellt: !!p.voreingestellt };
+    if (rolle && rolle.preis_kg) return { wert: rolle.preis_kg / 1000, voreingestellt: false };
+    return { wert: 19.99 / ((rolle && rolle.nenn_g) || 1000), voreingestellt: true };
+  },
+
+  // Aus den eigenen Drucken: mittlere Leistung (gemessene kWh) und Fehldruckquote
+  _shMess() {
+    const c = this._shMessCache;
+    if (c && Date.now() - c.t < 1500 && c.verlauf === this._drVerlauf) return c.v;
+    const e = this._shE();
+    const l = this._neDrucke ? this._neDrucke() : [];
+    let kwh = 0, std = 0, nStrom = 0, ok = 0, fehl = 0;
+    for (const x of l) {
+      const k = x.g && x.g.kosten;
+      if (k && k.kwh > 0 && x.dauer) { kwh += k.kwh; std += x.dauer; nStrom++; }
+      if (x.ergebnis === "ok") ok++; else if (x.ergebnis === "fehl") fehl++;
+    }
+    const v = {
+      kw: std >= 0.5 && kwh > 0 ? kwh / std : e.watt / 1000, kwGemessen: std >= 0.5 && kwh > 0, nStrom,
+      quote: ok + fehl >= 3 ? fehl / (ok + fehl) : e.fehl_standard / 100, quoteEigen: ok + fehl >= 3, nDrucke: ok + fehl, fehl,
+    };
+    this._shMessCache = { t: Date.now(), verlauf: this._drVerlauf, v };
+    return v;
+  },
+
+  // Was noch an Filament reserviert ist (Aufträge in der Warteschlange, noch nicht fertig)
+  _shReserviert(rolleId) {
+    return this._shDaten().auftraege.filter((a) => a.reservierung && a.reservierung.rolleId === rolleId && shStatusNr(a.status) < shStatusNr("fertig"))
+      .reduce((s, a) => s + (a.reservierung.g || 0), 0);
+  },
+
+  // ---- Rechnung ----
+  // opt.zeit / opt.material: Faktoren (Düsenvergleich), opt.preis: Gewinn bei diesem Preis statt beim empfohlenen
+  _shRechnen(p, opt = {}) {
+    const e = this._shE(), mess = this._shMess();
+    const st = Math.max(1, Math.round(p.stueck || 1));
+    const rolle = this._daten.rollen.find((r) => r.id === p.rolleId);
+    const pg = this._shPreisG(rolle);
+    const fz = opt.zeit || 1, fm = opt.material || 1;
+    const g = ((p.gewicht_g || 0) * fm) / st, h = ((p.druck_h || 0) * fz) / st;
+    const proH = mess.kw * e.kwh_preis;
+    const verschleissH = e.drucker_preis / Math.max(1, e.drucker_h) + e.duese_preis / Math.max(1, e.duese_h) + e.platte_preis / Math.max(1, e.platte_h);
+    const t = {};
+    t.filament = g * pg.wert;
+    t.strom = h * proH;
+    t.verschleiss = h * verschleissH;
+    const q = Math.min(0.5, Math.max(0, mess.quote));
+    t.fehl = ((t.filament + t.strom + t.verschleiss) * q) / (1 - q);
+    t.zubehoer = (p.zubehoer || []).reduce((s, z) => s + this._shTeilPreis(z.id) * (z.stk || 0), 0) + (p.extra_eur || 0);
+    t.arbeit = (((p.vorbereitung_min || 0) / st + (p.nacharbeit_min || 0)) / 60) * e.satz_arbeit;
+    const protoG = (p.proto_g != null ? p.proto_g : (p.gewicht_g || 0) / st) * fm, protoH = (p.proto_h != null ? p.proto_h : (p.druck_h || 0) / st) * fz;
+    const entwicklungGesamt = (p.konstruktion_h || 0) * e.satz_konstruktion + (p.prototypen || 0) * (protoG * pg.wert + protoH * (proH + verschleissH));
+    t.entwicklung = entwicklungGesamt / Math.max(1, p.menge || 1);
+    t.versand = this._shVersandArt(p.versand).preis + e.verpackung;
+    const kosten = Object.values(t).reduce((s, v) => s + v, 0);
+    const pf = this._shPlattform(p.plattform);
+    const m = e.kleinunternehmer ? 0 : 0.19;
+    const pct = (pf.prozent || 0) / 100, fix = pf.fix || 0;
+    const nenner = Math.max(0.05, 1 / (1 + m) - pct);
+    const preisFuer = (ziel) => (ziel + fix) / nenner;
+    const aufschlag = p.aufschlag != null ? p.aufschlag : e.aufschlag;
+    const mindest = preisFuer(kosten);
+    const empfohlen = shRunden99(preisFuer(kosten * (1 + aufschlag / 100)));
+    const bei = (P) => { const netto = P / (1 + m); const gebuehren = P > 0 ? P * pct + fix : 0; return { preis: P, mwst: P - netto, gebuehren, gewinn: netto - gebuehren - kosten }; };
+    const b = bei(opt.preis != null ? opt.preis : empfohlen);
+    return { g, h, st, t, kosten, mindest, empfohlen, preis: b.preis, gebuehren: b.gebuehren, mwst: b.mwst, gewinn: b.gewinn,
+      gewinnH: h > 0 ? b.gewinn / h : null, entwicklungGesamt, pg, mess, rolle, pf, m, bei, verschleissH, q };
+  },
+  _shTeilPreis(id) {
+    const t = (this._daten.inventar || []).find((x) => x.id === id);
+    if (!t || !t.preis) return 0;
+    return t.preis / this._shPackung(t);
+  },
+  _shPackung(t) { return t.packung_stk || t.packung || (t.kat === "einsatz" ? 50 : 1); },
+
+  // ---- Oberfläche ----
+  _shHtml() {
+    const s = this._shZustand();
+    this._shDaten();
+    if (!this._drVerlauf && !this._drVerlaufLaedt && this._drVerlaufLaden) this._drVerlaufLaden();
+    const offen = this._shDaten().auftraege.filter((a) => a.status !== "bezahlt").length;
+    const zahlen = { produkte: this._shDaten().produkte.length, auftraege: offen };
+    const inhalt = { produkte: () => this._shProdukteHtml(), auftraege: () => this._shAuftraegeHtml(), einstellungen: () => this._shEinstellungenHtml() }[s.tab] || (() => this._shRechnerHtml());
+    return `<div class="sh-seite">
+      <div class="chips unter-tabs" role="tablist">${SH_TABS.map(([id, n]) => `<button class="chip ${s.tab === id ? "an" : ""}" data-aktion="sh-tab" data-id="${id}">${n}${zahlen[id] ? ` <span class="zahl-punkt">${zahlen[id]}</span>` : ""}</button>`).join("")}</div>
+      <div class="wechsel-rein" data-einmal="sh-${s.tab}">${inhalt()}</div></div>`;
+  },
+
+  _shWertText(def, v) {
+    if (def.zeit) return shDauer(v);
+    return `${zahl(v, def.nk || 0)} ${def.e}`;
+  },
+  _shRegler(k, v, def = SH_REGLER[k], zusatz = "") {
+    return `<div class="mod-regler sh-regler"><div class="r-kopf"><span>${esc(def.name)}${def.info ? `<small class="leise sh-info">${esc(def.info)}</small>` : ""}</span><strong id="sh-w-${k}">${this._shWertText(def, v)}</strong></div>
+      <input type="range" min="${def.min}" max="${def.max}" step="${def.step}" value="${v}" data-sh="r-${k}" aria-label="${esc(def.name)}">${zusatz}</div>`;
+  },
+  _shAufKopf(id, titel, zusammenfassung) {
+    const an = !!this._sh.auf[id];
+    return `<button class="sh-auf-kopf ${an ? "an" : ""}" data-aktion="sh-auf" data-id="${id}" aria-expanded="${an}"><span>${titel}</span><small class="leise" id="sh-zf-${id}">${zusammenfassung}</small><i>›</i></button>`;
+  },
+
+  // ---- Rechner ----
+  _shRollenOptionen(sel) {
+    const rollen = this._daten.rollen.slice().sort((a, b) => a.material.localeCompare(b.material) || a.name.localeCompare(b.name, "de"));
+    return rollen.map((r) => {
+      const pg = this._shPreisG(r), res = this._shReserviert(r.id);
+      return `<option value="${esc(r.id)}" ${r.id === sel ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)} · ${zahl(pg.wert * 1000, 2)} €/kg${pg.voreingestellt ? " (Standard)" : ""}${res ? ` · ${zahl(res)} g reserviert` : ""}</option>`;
+    }).join("");
+  },
+  _shQuellen() {
+    const q = this._sh.quelle;
+    if (q === "bibliothek") return (this._wsModelle ? this._wsModelle() : []).map((m, i) => {
+      const d = m.drucke[0], h = d.start && d.ende ? (new Date(d.ende) - new Date(d.start)) / 3600000 : null;
+      return { id: `b${i}`, name: m.name.replace(/\.(gcode\.3mf|gcode|3mf|stl)$/i, ""), g: d.gewicht, h: h > 0 && h < 200 ? h : null, rolle: m.rolle, text: `${m.drucke.length}× gedruckt` };
+    });
+    if (q === "verlauf") return this._buAlle().filter((d) => d.status !== "laeuft").slice(0, 60).map((d) => {
+      const h = d.start && d.ende ? (new Date(d.ende) - new Date(d.start)) / 3600000 : null;
+      const g = this._buExtra(d.uid).gebucht;
+      return { id: d.uid, name: String(d.name || "Druck").replace(/\.(gcode\.3mf|gcode|3mf|stl)$/i, ""), g: d.gewicht, h: h > 0 && h < 200 ? h : null, rolle: g && g.rolle, text: d.zeit || "" };
+    });
+    if (q === "modelle") {
+      const l = [];
+      const m = this._mod;
+      if (m && !m.laedt && m.name) {
+        const info = m.art === "gcode" && m.gcode ? m.gcode.info : null;
+        l.push({ id: "offen", name: m.name.replace(/\.(gcode\.3mf|gcode|3mf|stl)$/i, ""), g: info && info.gramm ? info.gramm : null, h: info ? shZeitStunden(info.zeit) : null, rolle: m.rolleId, text: "gerade geöffnet" });
+      }
+      for (const z of this._modZuletzt || []) l.push({ id: `z-${z.name}`, name: z.name.replace(/\.(gcode\.3mf|gcode|3mf|stl)$/i, ""), g: null, h: null, text: "zuletzt geöffnet" });
+      return l;
+    }
+    return [];
+  },
+  _shRechnerHtml() {
+    const s = this._sh, p = s.r, e = this._shE();
+    const res = this._shRechnen(p);
+    const quellen = this._shQuellen();
+    const teile = (this._daten.inventar || []).filter((t) => t.preis);
+    const zubehoerZf = (p.zubehoer.length || p.extra_eur) ? eur(res.t.zubehoer) + " je Stück" : "keins";
+    const entwZf = p.konstruktion_h || p.prototypen ? `${eur(res.entwicklungGesamt)} → ${eur(res.t.entwicklung)} je Stück` : "keine";
+    return `<div class="sh-rechner">
+      <div class="sh-spalte">
+        <div class="sh-mini dr-karte" id="sh-mini">${this._shMiniHtml(res)}</div>
+        <div class="dr-karte sh-block">
+          <h3 class="dr-titel">${p.id ? `✎ Produkt bearbeiten` : "🧊 Was verkaufst du?"}</h3>
+          <label class="feld"><span>Name</span><input id="sh-name" data-sh="t-name" value="${esc(p.name)}" placeholder="z. B. Kabelhalter 3er-Set" maxlength="80"></label>
+          <div class="feld-titel">Werte übernehmen aus</div>
+          <div class="chips sh-quellen">${[["hand", "✍️ Von Hand"], ["bibliothek", "📚 Bibliothek"], ["modelle", "🧊 3D-Modelle"], ["verlauf", "🕘 Druckverlauf"]].map(([id, n]) => `<button class="chip ${s.quelle === id ? "an" : ""}" data-aktion="sh-quelle" data-id="${id}">${n}</button>`).join("")}</div>
+          ${s.quelle !== "hand" ? (quellen.length
+            ? `<label class="auswahl breit-auswahl sh-quelle-wahl"><span>${s.quelle === "bibliothek" ? "Modell aus der Bibliothek" : s.quelle === "modelle" ? "3D-Modell" : "Druck"}</span><select data-sh="quelle-wahl"><option value="" disabled selected>Bitte wählen …</option>${quellen.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}${x.g ? ` · ${zahl(x.g, 1)} g` : ""}${x.h ? ` · ${shDauer(x.h)}` : ""}${x.text ? ` · ${esc(x.text)}` : ""}</option>`).join("")}</select></label>`
+            : `<p class="leise klein">${s.quelle === "modelle" ? "Noch keine 3D-Modelle geöffnet." : "Noch keine Drucke im Verlauf."}</p>`) : ""}
+          <label class="auswahl breit-auswahl"><span>Rolle / Material</span><select data-sh="rolle">${this._shRollenOptionen(p.rolleId)}</select></label>
+          ${res.pg.voreingestellt ? `<p class="leise klein">Für diese Rolle ist kein Preis hinterlegt, gerechnet wird mit ${zahl(res.pg.wert * 1000, 2)} €/kg (19,99 € je Rolle).</p>` : ""}
+          ${this._shRegler("gewicht_g", p.gewicht_g)}${this._shRegler("druck_h", p.druck_h)}${this._shRegler("stueck", p.stueck)}
+        </div>
+        <div class="dr-karte sh-block">
+          <h3 class="dr-titel">🛠️ Arbeit</h3>
+          ${this._shRegler("vorbereitung_min", p.vorbereitung_min)}${this._shRegler("nacharbeit_min", p.nacharbeit_min)}
+          <p class="leise klein">Stundensatz ${eur(e.satz_arbeit)} /h, Konstruktion ${eur(e.satz_konstruktion)} /h (änderbar unter Einstellungen).</p>
+        </div>
+        <div class="dr-karte sh-block">
+          ${this._shAufKopf("entw", "💡 Entwicklung & Prototypen", entwZf)}
+          ${s.auf.entw ? `<div class="sh-auf-inhalt" data-einmal="sh-auf-entw">
+            ${this._shRegler("konstruktion_h", p.konstruktion_h)}${this._shRegler("prototypen", p.prototypen)}
+            ${p.prototypen ? `${this._shRegler("proto_g", p.proto_g != null ? p.proto_g : Math.round(((p.gewicht_g || 0) / Math.max(1, p.stueck)) * 2) / 2)}${this._shRegler("proto_h", p.proto_h != null ? p.proto_h : Math.round(((p.druck_h || 0) / Math.max(1, p.stueck)) * 20) / 20)}
+              <p class="leise klein">Ohne Änderung zählt jeder Prototyp wie ein fertiges Teil.</p>` : ""}
+            ${this._shRegler("menge", p.menge)}</div>` : ""}
+        </div>
+        <div class="dr-karte sh-block">
+          ${this._shAufKopf("zub", "🔩 Zubehör", zubehoerZf)}
+          ${s.auf.zub ? `<div class="sh-auf-inhalt" data-einmal="sh-auf-zub">
+            ${p.zubehoer.map((z) => { const t = (this._daten.inventar || []).find((x) => x.id === z.id); return t ? `<div class="sh-zub-zeile"><div><strong>${esc(teilName(t))}</strong><small class="leise">${eur(this._shTeilPreis(t.id), 3)} je Stück (${eur(t.preis)} für ${this._shPackung(t)})</small></div>
+              <div class="regler-zeile"><button class="rund" data-aktion="sh-zub" data-id="${esc(t.id)}" data-d="-1" aria-label="Weniger">−</button><strong class="sh-zub-zahl">${z.stk}×</strong><button class="rund" data-aktion="sh-zub" data-id="${esc(t.id)}" data-d="1" aria-label="Mehr">＋</button></div></div>` : ""; }).join("")}
+            ${teile.length ? `<label class="auswahl breit-auswahl"><span>Teil aus dem Inventar hinzufügen</span><select data-sh="teil-neu"><option value="" disabled selected>Teil wählen …</option>${teile.filter((t) => !p.zubehoer.some((z) => z.id === t.id)).map((t) => `<option value="${esc(t.id)}">${esc(teilName(t))} · ${eur(t.preis / this._shPackung(t), 3)} je Stück</option>`).join("")}</select></label>`
+              : `<p class="leise klein">Im Inventar hat noch kein Teil einen Preis.</p>`}
+            ${this._shRegler("extra_eur", p.extra_eur)}</div>` : ""}
+        </div>
+        <div class="dr-karte sh-block">
+          <h3 class="dr-titel">🏷️ Verkauf</h3>
+          ${this._shRegler("aufschlag", p.aufschlag)}
+          <div class="sh-zwei-wahl">
+            <label class="auswahl breit-auswahl"><span>Plattform</span><select data-sh="plattform">${this._shPlattformen().map((x) => `<option value="${esc(x.id)}" ${x.id === p.plattform ? "selected" : ""}>${esc(x.name)}${x.prozent || x.fix ? ` · ${zahl(x.prozent, 2)} % + ${zahl(x.fix, 2)} €` : " · keine Gebühr"}</option>`).join("")}</select></label>
+            <label class="auswahl breit-auswahl"><span>Versand</span><select data-sh="versand">${this._shVersandListe().map((x) => `<option value="${esc(x.id)}" ${x.id === p.versand ? "selected" : ""}>${esc(x.name)} · ${eur(x.preis)}</option>`).join("")}</select></label>
+          </div>
+          <p class="leise klein">Gebühren und Porto sind Richtwerte, bitte prüfen. ${e.kleinunternehmer ? "Kleinunternehmer: keine MwSt." : "Mit 19 % MwSt."}</p>
+        </div>
+      </div>
+      <div class="sh-spalte sh-ergebnis-spalte">
+        <div class="dr-karte sh-ergebnis" id="sh-ergebnis">${this._shErgebnisHtml(res)}</div>
+        <div class="dr-karte sh-duesen" id="sh-duesen">${this._shDuesenHtml(p, res)}</div>
+      </div></div>`;
+  },
+  _shMiniHtml(res) {
+    return `<div><small class="leise">Empfohlen</small><strong>${eur(res.empfohlen)}</strong></div>
+      <div><small class="leise">Mindestens</small><strong>${eur(res.mindest)}</strong></div>
+      <div><small class="leise">Gewinn</small><strong class="${res.gewinn < 0 ? "rot" : "sh-gewinn-text"}">${eur(res.gewinn)}</strong></div>`;
+  },
+  _shErgebnisHtml(res) {
+    const teile = { ...res.t, gebuehren: res.gebuehren, mwst: res.mwst, gewinn: Math.max(0, res.gewinn) };
+    const summe = Math.max(0.01, SH_TEILE.reduce((s, [k]) => s + (teile[k] || 0), 0));
+    const sichtbar = SH_TEILE.filter(([k]) => teile[k] > 0.0005);
+    const p = this._sh.r;
+    const hinweise = [];
+    hinweise.push(res.mess.kwGemessen ? `Strom: ${zahl(res.mess.kw * 1000)} W im Schnitt, gemessen bei ${res.mess.nStrom} Drucken.` : `Strom: ${zahl(res.mess.kw * 1000)} W angenommen (noch keine Messungen der Steckdose).`);
+    hinweise.push(res.mess.quoteEigen ? `Fehldrucke: ${zahl(res.q * 100, 1)} % aus deinen ${res.mess.nDrucke} verbuchten Drucken.` : `Fehldrucke: ${zahl(res.q * 100)} % angenommen (zu wenig verbuchte Drucke).`);
+    return `<h3 class="dr-titel">💶 Verkaufspreis${p.name ? ` · ${esc(p.name)}` : ""}</h3>
+      <div class="sh-preise">
+        <div class="sh-preis haupt-preis"><small>Empfohlener Preis</small><strong>${eur(res.empfohlen)}</strong><span class="leise klein">mit ${zahl(p.aufschlag)} % Aufschlag, auf ,99 gerundet</span></div>
+        <div class="sh-preis"><small>Mindestpreis</small><strong>${eur(res.mindest)}</strong><span class="leise klein">kein Gewinn, kein Verlust</span></div>
+        <div class="sh-preis"><small>Gewinn je Stück</small><strong class="${res.gewinn < 0 ? "rot" : "sh-gewinn-text"}">${eur(res.gewinn)}</strong><span class="leise klein">${res.gewinnH != null ? `${eur(res.gewinnH)} je Druckstunde` : "–"}</span></div>
+      </div>
+      <div class="sh-balken" role="img" aria-label="Zusammensetzung des Preises">${sichtbar.map(([k, n]) => `<span class="sh-f-${k}" style="width:${((teile[k] / summe) * 100).toFixed(2)}%" title="${esc(n)}: ${eur(teile[k])}"></span>`).join("")}</div>
+      <div class="sh-legende">${sichtbar.map(([k, n]) => `<div class="sh-leg-zeile"><i class="sh-f-${k}"></i><span>${esc(n)}</span><strong>${eur(teile[k])}</strong><small class="leise">${Math.round((teile[k] / summe) * 100)} %</small></div>`).join("")}</div>
+      <div class="info-liste sh-eckdaten">
+        <div class="info-zeile"><span>Filament je Stück</span><strong>${zahl(res.g, 1)} g · ${zahl(res.pg.wert * 1000, 2)} €/kg</strong></div>
+        <div class="info-zeile"><span>Druckzeit je Stück</span><strong>${shDauer(res.h)}</strong></div>
+        <div class="info-zeile"><span>Selbstkosten je Stück</span><strong>${eur(res.kosten)}</strong></div>
+        <div class="info-zeile"><span>Verschleiß je Druckstunde</span><strong>${eur(res.verschleissH, 3)}</strong></div>
+      </div>
+      <p class="leise klein sh-annahmen">${hinweise.map(esc).join(" ")}</p>
+      <div class="knopf-reihe oben-abstand">
+        ${p.id ? `<button class="knopf leise" data-aktion="sh-als-neu">Als neues Produkt</button><button class="knopf" data-aktion="sh-produkt-speichern">✓ Produkt aktualisieren</button>`
+          : `<button class="knopf leise" data-aktion="sh-zuruecksetzen">Zurücksetzen</button><button class="knopf" data-aktion="sh-produkt-speichern">📦 Als Produkt speichern</button>`}
+      </div>`;
+  },
+  _shDuesenHtml(p, r04) {
+    const r06 = this._shRechnen(p, { zeit: SH_DUESE06.zeit, material: SH_DUESE06.material, preis: r04.empfohlen });
+    const menge = p.menge || 1;
+    const ersparnisH = (r04.h - r06.h) * menge;
+    const diff = r06.gewinn - r04.gewinn;
+    const zeile = (name, a, b, besser) => `<span class="sh-dv-name">${name}</span><span>${a}</span><span class="sh-dv-06 ${besser ? "besser" : ""}">${b}</span>`;
+    return `<h3 class="dr-titel">🔻 Düsenvergleich 0,4 vs. 0,6 mm <span class="pille amber">Schätzung</span></h3>
+      <div class="sh-dv"><span></span><strong>0,4 mm</strong><strong class="sh-dv-06">0,6 mm</strong>
+        ${zeile("Druckzeit je Stück", shDauer(r04.h), shDauer(r06.h), r06.h < r04.h)}
+        ${zeile("Filament je Stück", `${zahl(r04.g, 1)} g`, `${zahl(r06.g, 1)} g`, false)}
+        ${zeile("Selbstkosten", eur(r04.kosten), eur(r06.kosten), r06.kosten < r04.kosten)}
+        ${zeile(`Gewinn bei ${eur(r04.empfohlen)}`, eur(r04.gewinn), eur(r06.gewinn), r06.gewinn > r04.gewinn)}
+        ${zeile("Gewinn je Druckstunde", r04.gewinnH != null ? eur(r04.gewinnH) : "–", r06.gewinnH != null ? eur(r06.gewinnH) : "–", r06.gewinnH > r04.gewinnH)}</div>
+      ${p.druck_h > 0 ? `<div class="hinweis ${diff >= 0 ? "mint" : "amber"} oben-abstand">Mit der 0,6er Düse sparst du je Stück etwa ${shDauer(r04.h - r06.h)}, bei ${zahl(menge)} Stück rund ${shDauer(ersparnisH)} Druckzeit.
+        Der Gewinn je Stück ändert sich um ${diff >= 0 ? "+" : ""}${eur(diff)}${r06.gewinnH != null && r04.gewinnH != null ? `, je Druckstunde von ${eur(r04.gewinnH)} auf ${eur(r06.gewinnH)}` : ""}.</div>` : ""}
+      <p class="leise klein">Annahme für typische Teile: etwa 30–40 % schneller (gerechnet: ${Math.round((1 - SH_DUESE06.zeit) * 100)} %) und 5–10 % mehr Material (gerechnet: ${Math.round((SH_DUESE06.material - 1) * 100)} %) durch dickere Linien und Schichten. Feine Details, Text und kleine Löcher werden gröber, bei sehr kleinen Teilen ist die Ersparnis geringer. Keine Messung, nur eine Schätzung.</p>`;
+  },
+  // Nach Regler-Bewegung nur die Ergebnisse neu schreiben (Regler bleibt unter dem Finger)
+  _shErgebnisAuffrischen() {
+    const p = this._sh.r, res = this._shRechnen(p), root = this.shadowRoot;
+    const setze = (id, html) => { const x = root.getElementById(id); if (x) x.innerHTML = html; };
+    setze("sh-ergebnis", this._shErgebnisHtml(res));
+    setze("sh-duesen", this._shDuesenHtml(p, res));
+    setze("sh-mini", this._shMiniHtml(res));
+    const zf = root.getElementById("sh-zf-entw");
+    if (zf) zf.textContent = p.konstruktion_h || p.prototypen ? `${eur(res.entwicklungGesamt)} → ${eur(res.t.entwicklung)} je Stück` : "keine";
+    const zz = root.getElementById("sh-zf-zub");
+    if (zz) zz.textContent = p.zubehoer.length || p.extra_eur ? `${eur(res.t.zubehoer)} je Stück` : "keins";
+  },
+
+  // ---- Produkte ----
+  _shVerkauft(id) {
+    return this._shDaten().auftraege.filter((a) => a.produktId === id && a.status !== "angefragt").reduce((s, a) => s + (a.menge || 0), 0);
+  },
+  _shProdukteHtml() {
+    const l = this._shDaten().produkte;
+    if (!l.length) return `<div class="leer-karte dr-karte"><span class="gross-icon">📦</span><strong>Noch keine Produkte</strong>
+      <span class="leise">Rechne im 🧮 Rechner einen Preis aus und tippe auf „Als Produkt speichern“. Preise rechnen sich hier immer mit den aktuellen Filamentpreisen und Einstellungen neu.</span>
+      <button class="knopf oben-abstand" data-aktion="sh-tab" data-id="rechner">Zum Rechner</button></div>`;
+    return `<div class="ws-kopfzeile"><p class="leise">Preise werden mit den aktuellen Filamentpreisen und Einstellungen neu gerechnet. Ändert sich etwas, siehst du die Differenz zum gespeicherten Preis.</p>
+      <button class="knopf" data-aktion="sh-neu-produkt">＋ Produkt</button></div>
+      <div class="sh-produkte">${l.map((p) => {
+        const res = this._shRechnen(p), r = res.rolle;
+        const diff = p.preis_gespeichert != null ? res.empfohlen - p.preis_gespeichert : 0;
+        const verkauft = this._shVerkauft(p.id);
+        return `<div class="sh-produkt dr-karte" data-einmal="sh-p-${esc(p.id)}">
+          <div class="sh-produkt-kopf">${r ? `<span class="farbtupfer" style="background:${esc(r.hex || "#3ee6a8")}"></span>` : `<span class="ws-icon">📦</span>`}
+            <div><strong>${esc(p.name || "Ohne Namen")}</strong><small class="leise">${r ? esc(r.name) : "Rolle fehlt"} · ${zahl(res.g, 1)} g · ${shDauer(res.h)} je Stück${p.stueck > 1 ? ` · ${p.stueck} pro Platte` : ""}</small></div></div>
+          <div class="sh-produkt-preis"><strong>${eur(res.empfohlen)}</strong>
+            ${Math.abs(diff) >= 0.005 ? `<span class="pille ${diff > 0 ? "amber" : "mint"}" title="Gespeichert war ${eur(p.preis_gespeichert)}">${diff > 0 ? "↑" : "↓"} ${eur(Math.abs(diff))} seit dem Speichern</span>` : `<span class="leise klein">empfohlen</span>`}</div>
+          <div class="sh-produkt-zahlen">
+            <div><small class="leise">Mindestpreis</small><span>${eur(res.mindest)}</span></div>
+            <div><small class="leise">Gewinn/Stück</small><span class="${res.gewinn < 0 ? "rot" : "sh-gewinn-text"}">${eur(res.gewinn)}</span></div>
+            <div><small class="leise">Gewinn/Druckstunde</small><span>${res.gewinnH != null ? eur(res.gewinnH) : "–"}</span></div>
+            <div><small class="leise">Verkauft</small><span>${zahl(verkauft)} Stk</span></div></div>
+          <div class="sh-produkt-knoepfe">
+            <button class="knopf klein-knopf" data-aktion="sh-auftrag-neu" data-produkt="${esc(p.id)}">🧾 Auftrag</button>
+            <button class="knopf leise klein-knopf" data-aktion="sh-produkt-bearbeiten" data-id="${esc(p.id)}">✎ Bearbeiten</button>
+            <button class="rund" data-aktion="sh-produkt-weg" data-id="${esc(p.id)}" aria-label="Produkt löschen" title="Löschen">🗑</button></div></div>`;
+      }).join("")}</div>`;
+  },
+
+  // ---- Aufträge ----
+  _shAuftragGewinn(a) {
+    const p = this._shDaten().produkte.find((x) => x.id === a.produktId);
+    if (!p || !a.menge) return null;
+    const einzel = (a.preis || 0) / a.menge;
+    const res = this._shRechnen(p, { preis: einzel });
+    return { gewinn: res.gewinn * a.menge, h: res.h * a.menge, kosten: res.kosten * a.menge };
+  },
+  _shJahresUmsatz(jahr) {
+    return this._shDaten().auftraege.filter((a) => a.status === "bezahlt" && String(a.bezahlt_am || a.datum || "").slice(0, 4) === String(jahr)).reduce((s, a) => s + (a.preis || 0), 0);
+  },
+  _shKuHtml() {
+    const e = this._shE(), jahr = new Date().getFullYear();
+    const dieses = this._shJahresUmsatz(jahr), vorjahr = this._shJahresUmsatz(jahr - 1);
+    const balken = (wert, grenze, titel, text) => {
+      const a = wert / grenze, kl = a >= 1 ? "rot" : a >= 0.8 ? "amber" : "";
+      return `<div class="sh-ku-zeile"><div class="sh-ku-kopf"><span>${titel}</span><strong class="${kl}">${eur(wert, 0)} <small class="leise">von ${zahl(grenze)} €</small></strong></div>
+        <div class="sh-ku-bahn"><span class="${kl}" style="width:${Math.min(100, Math.max(0.5, a * 100)).toFixed(1)}%"></span><i style="left:80%" title="80 %"></i></div>
+        <small class="leise">${text}${a >= 0.8 ? ` · <b class="${kl}">${Math.round(a * 100)} % erreicht</b>` : ""}</small></div>`;
+    };
+    const warn = dieses >= SH_GRENZE.vorjahr * 0.8 || dieses >= SH_GRENZE.jahr * 0.8 || vorjahr > SH_GRENZE.vorjahr;
+    return `<div class="dr-karte sh-ku ${warn ? "warn" : ""}">
+      <h3 class="dr-titel">🧾 Kleinunternehmer (§ 19 UStG) ${e.kleinunternehmer ? `<span class="pille mint">aktiv</span>` : `<span class="pille leise">aus, 19 % MwSt</span>`}</h3>
+      ${balken(dieses, SH_GRENZE.vorjahr, `Umsatz ${jahr}`, "Über 25.000 € in diesem Jahr: ab nächstem Jahr keine Kleinunternehmerregelung mehr")}
+      ${balken(dieses, SH_GRENZE.jahr, `Harte Grenze ${jahr}`, "Über 100.000 €: ab dem Umsatz, der die Grenze überschreitet, sofort MwSt")}
+      ${balken(vorjahr, SH_GRENZE.vorjahr, `Vorjahr ${jahr - 1}`, "Höchstens 25.000 € im Vorjahr")}
+      ${warn ? `<div class="hinweis amber">⚠️ Du näherst dich einer Grenze. Sprich rechtzeitig mit dem Finanzamt oder einer Steuerberatung.</div>` : ""}
+      <p class="leise klein">Gezählt werden bezahlte Aufträge aus dieser Liste. Andere Einnahmen deines Gewerbes zählen auch mit. Keine Steuerberatung.</p></div>`;
+  },
+  _shAuftraegeListe() {
+    const s = this._sh, l = this._shDaten().auftraege;
+    const produkte = this._shDaten().produkte;
+    const prodName = (a) => (produkte.find((p) => p.id === a.produktId) || {}).name || a.produkt || "";
+    const gefiltert = s.filter === "alle" ? l.slice() : s.filter === "offen" ? l.filter((a) => a.status !== "bezahlt") : l.filter((a) => a.status === s.filter);
+    const k = s.sort.k, r = s.sort.ab ? -1 : 1;
+    const wert = { nr: (a) => a.nr || 0, datum: (a) => a.datum || "", kunde: (a) => (a.kunde || "").toLowerCase(), produkt: (a) => prodName(a).toLowerCase(), menge: (a) => a.menge || 0,
+      preis: (a) => a.preis || 0, plattform: (a) => this._shPlattform(a.plattform).name.toLowerCase(), status: (a) => shStatusNr(a.status) }[k] || ((a) => a.nr || 0);
+    gefiltert.sort((a, b) => { const x = wert(a), y = wert(b); return (x < y ? -1 : x > y ? 1 : (a.nr || 0) - (b.nr || 0)) * r; });
+    return { liste: gefiltert, prodName };
+  },
+  _shStatusPille(a) {
+    const st = shStatus(a.status);
+    return `<button class="sh-status sh-st-${st.farbe} ${this._sh.menue === a.id ? "offen" : ""}" data-aktion="sh-status-menue" data-id="${esc(a.id)}" aria-expanded="${this._sh.menue === a.id}" title="Status ändern">${esc(st.name)}<i>▾</i></button>`;
+  },
+  _shStatusWahlHtml(a) {
+    return `<div class="sh-status-wahl" data-einmal="sh-sw-${esc(a.id)}">${SH_STATUS.map((st, i) => `<button class="sh-status sh-st-${st.farbe} ${st.id === a.status ? "an" : ""}" data-aktion="sh-status" data-id="${esc(a.id)}" data-status="${st.id}">${i + 1}. ${esc(st.name)}</button>`).join(`<span class="sh-pfeil">→</span>`)}</div>`;
+  },
+  _shReservierungHtml(a) {
+    if (!a.reservierung) return "";
+    const r = this._daten.rollen.find((x) => x.id === a.reservierung.rolleId);
+    const aktiv = shStatusNr(a.status) < shStatusNr("fertig");
+    return `<small class="sh-reserv ${aktiv ? "" : "erledigt"}" title="${aktiv ? "Filament ist für diesen Auftrag reserviert" : "Reservierung erledigt"}">${aktiv ? "🔒" : "✓"} ${zahl(a.reservierung.g, 1)} g${r ? ` ${esc(r.name)}` : ""}${aktiv ? " reserviert" : " verbraucht"}</small>`;
+  },
+  _shAuftraegeHtml() {
+    const s = this._sh, alle = this._shDaten().auftraege;
+    const jahr = new Date().getFullYear();
+    const gewinnJahr = alle.filter((a) => a.status === "bezahlt" && String(a.bezahlt_am || a.datum || "").startsWith(String(jahr))).reduce((x, a) => x + ((this._shAuftragGewinn(a) || {}).gewinn || 0), 0);
+    const offen = alle.filter((a) => a.status !== "bezahlt");
+    const offenSumme = offen.reduce((x, a) => x + (a.preis || 0), 0);
+    const { liste, prodName } = this._shAuftraegeListe();
+    const zaehl = (id) => alle.filter((a) => a.status === id).length;
+    const kachel = (w, t, k = "") => `<div class="stat ${k}"><strong>${w}</strong><span>${t}</span></div>`;
+    const spalten = [["nr", "Nr"], ["datum", "Datum"], ["kunde", "Kunde"], ["produkt", "Produkt"], ["menge", "Menge"], ["preis", "Preis"], ["plattform", "Plattform"], ["status", "Status"]];
+    const pfeil = (k) => (s.sort.k === k ? `<i class="sh-sort-pfeil">${s.sort.ab ? "▼" : "▲"}</i>` : `<i class="sh-sort-pfeil leer">▲</i>`);
+    const datum = (d) => (d ? new Date(d + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "–");
+    const knoepfe = (a) => {
+      const p = this._shDaten().produkte.find((x) => x.id === a.produktId);
+      return `${a.schlange && a.schlange.length ? `<span class="pille mint sh-in-schlange" title="Steht in der Warteschlange">📋 in Schlange</span>`
+        : p ? `<button class="mini mint-rand sh-schlange-knopf" data-aktion="sh-schlange" data-id="${esc(a.id)}" title="Drucke in die Warteschlange stellen und Filament reservieren">📋 In Warteschlange</button>` : ""}
+        <button class="rund" data-aktion="sh-auftrag-bearbeiten" data-id="${esc(a.id)}" aria-label="Auftrag bearbeiten" title="Bearbeiten">✎</button>`;
+    };
+    const tabelle = this._mobil
+      ? `<div class="sh-karten">${liste.map((a) => `<div class="sh-a-karte dr-karte" data-einmal="sh-a-${esc(a.id)}">
+          <div class="sh-a-kopf"><span class="sh-nr">#${a.nr}</span><strong>${esc(a.kunde || "Ohne Namen")}</strong><span class="sh-a-preis">${eur(a.preis)}</span></div>
+          <div class="sh-a-mitte"><span>${zahl(a.menge)}× ${esc(prodName(a) || "–")}</span><small class="leise">${datum(a.datum)} · ${esc(this._shPlattform(a.plattform).kurz || this._shPlattform(a.plattform).name)}</small>${this._shReservierungHtml(a)}</div>
+          <div class="sh-a-fuss">${this._shStatusPille(a)}<div class="sh-a-knoepfe">${knoepfe(a)}</div></div>
+          ${s.menue === a.id ? this._shStatusWahlHtml(a) : ""}</div>`).join("")}</div>`
+      : `<div class="sh-tabelle-rahmen dr-karte"><table class="sh-tabelle">
+          <thead><tr>${spalten.map(([k, n]) => `<th class="${["menge", "preis"].includes(k) ? "rechts" : ""} ${s.sort.k === k ? "an" : ""}"><button data-aktion="sh-sort" data-id="${k}">${n}${pfeil(k)}</button></th>`).join("")}<th aria-label="Aktionen"></th></tr></thead>
+          <tbody>${liste.map((a) => `<tr class="${s.menue === a.id ? "menue-offen" : ""}" data-einmal="sh-a-${esc(a.id)}">
+            <td class="sh-nr">#${a.nr}</td><td>${datum(a.datum)}</td><td><strong>${esc(a.kunde || "–")}</strong>${a.notiz ? `<small class="leise sh-notiz">${esc(a.notiz)}</small>` : ""}</td>
+            <td>${esc(prodName(a) || "–")}${this._shReservierungHtml(a)}</td><td class="rechts">${zahl(a.menge)}</td><td class="rechts sh-preis-zelle">${eur(a.preis)}</td>
+            <td><span class="sh-plattform" title="${esc(this._shPlattform(a.plattform).name)}">${esc(this._shPlattform(a.plattform).kurz || this._shPlattform(a.plattform).name)}</span></td><td>${this._shStatusPille(a)}</td>
+            <td class="sh-aktionen">${knoepfe(a)}</td></tr>
+            ${s.menue === a.id ? `<tr class="sh-status-zeile"><td colspan="9">${this._shStatusWahlHtml(a)}</td></tr>` : ""}`).join("")}</tbody></table></div>`;
+    return `<section class="stats sh-stats">
+        ${kachel(eur(this._shJahresUmsatz(jahr), 0), `Umsatz ${jahr} (bezahlt)`)}${kachel(eur(gewinnJahr, 0), `Gewinn ${jahr}`, gewinnJahr < 0 ? "rot" : "")}
+        ${kachel(offen.length, "offene Aufträge", offen.length ? "amber" : "")}${kachel(eur(offenSumme, 0), "noch offen")}${kachel(alle.length, "Aufträge gesamt")}</section>
+      <div class="sh-auftrag-oben">
+        <div class="sh-auftrag-links">
+          <div class="ws-kopfzeile"><div class="chips sh-filter">${[["alle", "Alle", alle.length], ["offen", "Offen", offen.length], ...SH_STATUS.map((st) => [st.id, st.name, zaehl(st.id)])].map(([id, n, z]) =>
+            `<button class="chip ${s.filter === id ? "an" : ""} ${id !== "alle" && id !== "offen" ? `sh-chip-${shStatus(id).farbe}` : ""}" data-aktion="sh-filter" data-id="${id}">${id !== "alle" && id !== "offen" ? `<i class="sh-punkt"></i>` : ""}${esc(n)}${z ? ` <small>${z}</small>` : ""}</button>`).join("")}</div>
+            <button class="knopf" data-aktion="sh-auftrag-neu">＋ Auftrag</button></div>
+          ${!alle.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">🧾</span><strong>Noch keine Aufträge</strong><span class="leise">Lege Anfragen und Bestellungen an, verfolge den Status bis „bezahlt“ und schicke die Drucke direkt in die Warteschlange.</span></div>`
+            : !liste.length ? `<p class="leise">Kein Auftrag mit diesem Status.</p>` : tabelle}
+        </div>
+        ${this._shKuHtml()}
+      </div>`;
+  },
+
+  // Auftrag anlegen / bearbeiten (Sheet)
+  _shAuftragOeffnen(a) {
+    const s = this._sh, l = this._shDaten().auftraege;
+    if (a) s.auftrag = { ...JSON.parse(JSON.stringify(a)), preisHand: true };
+    else {
+      const p = this._shDaten().produkte.find((x) => x.id === s.neuProdukt) || null;
+      s.auftrag = { id: null, nr: l.reduce((m, x) => Math.max(m, x.nr || 0), 0) + 1, datum: shHeute(), kunde: "", produktId: p ? p.id : "", produkt: "", menge: 1,
+        preis: p ? this._shRechnen(p).empfohlen : 0, plattform: p ? p.plattform : "direkt", status: "bestellt", notiz: "", preisHand: false };
+    }
+    s.neuProdukt = null;
+    this._dialog = "sh-auftrag";
+  },
+  _shAuftragPreisNeu() {
+    const a = this._sh.auftrag;
+    if (a.preisHand) return;
+    const p = this._shDaten().produkte.find((x) => x.id === a.produktId);
+    if (p) a.preis = Math.round(this._shRechnen(p).empfohlen * (a.menge || 1) * 100) / 100;
+  },
+  _shDialogHtml() {
+    if (this._dialog !== "sh-auftrag" || !this._sh || !this._sh.auftrag) return "";
+    const a = this._sh.auftrag, produkte = this._shDaten().produkte;
+    const p = produkte.find((x) => x.id === a.produktId);
+    const einzel = p ? this._shRechnen(p).empfohlen : 0;
+    const maxPreis = Math.max(200, Math.ceil(Math.max(einzel * 50, (a.preis || 0) * 1.5) / 50) * 50);
+    return `<div class="schleier" data-aktion="dialog-zu" data-einmal="sh-schleier"></div>
+      <section class="sheet sh-sheet" role="dialog" aria-label="${a.id ? "Auftrag bearbeiten" : "Neuer Auftrag"}" data-einmal="sh-sheet">
+        <div class="griff"></div>
+        <header class="sheet-kopf"><div class="sheet-titel"><h2>${a.id ? `Auftrag #${a.nr}` : "Neuer Auftrag"}</h2><div class="sub">Nr. ${a.nr} · ${esc(shStatus(a.status).name)}</div></div>
+          <button class="icon-knopf" data-aktion="dialog-zu" aria-label="Schließen">✕</button></header>
+        <div class="sheet-inhalt">
+          <label class="feld"><span>Kunde</span><input id="sh-a-kunde" data-sh="a-kunde" value="${esc(a.kunde)}" placeholder="Name oder Benutzername" maxlength="80"></label>
+          <label class="feld"><span>Datum</span><input id="sh-a-datum" type="date" data-sh="a-datum" value="${esc(a.datum)}"></label>
+          <label class="auswahl breit-auswahl"><span>Produkt</span><select data-sh="a-produkt"><option value="" ${!a.produktId ? "selected" : ""}>Freier Posten (ohne Produkt)</option>${produkte.map((x) => `<option value="${esc(x.id)}" ${x.id === a.produktId ? "selected" : ""}>${esc(x.name || "Ohne Namen")} · ${eur(this._shRechnen(x).empfohlen)}</option>`).join("")}</select></label>
+          ${!a.produktId ? `<label class="feld"><span>Was wird verkauft?</span><input id="sh-a-produkt" data-sh="a-produkt-text" value="${esc(a.produkt)}" placeholder="z. B. Sonderanfertigung" maxlength="80"></label>` : ""}
+          ${this._shRegler("a-menge", a.menge, { name: "Menge", e: "Stk", min: 1, max: 50, step: 1 })}
+          ${this._shRegler("a-preis", a.preis, { name: "Preis gesamt", e: "€", min: 0, max: maxPreis, step: 0.01, nk: 2 },
+            `<small class="leise" id="sh-a-preis-hinweis">${p ? `Empfohlen: ${eur(einzel)} je Stück${a.preisHand ? ` · <button class="mini mint-rand sh-inline" data-aktion="sh-a-preis-empf">Empfohlenen Preis nehmen</button>` : ""}` : "Preis frei wählbar"}</small>`)}
+          <label class="auswahl breit-auswahl"><span>Plattform</span><select data-sh="a-plattform">${this._shPlattformen().map((x) => `<option value="${esc(x.id)}" ${x.id === a.plattform ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+          <div class="feld-titel oben-abstand">Status</div>
+          <div class="chips sh-status-chips">${SH_STATUS.map((st) => `<button class="sh-status sh-st-${st.farbe} ${st.id === a.status ? "an" : ""}" data-aktion="sh-a-status" data-status="${st.id}">${esc(st.name)}</button>`).join("")}</div>
+          <label class="feld"><span>Notiz (optional)</span><input id="sh-a-notiz" data-sh="a-notiz" value="${esc(a.notiz)}" maxlength="160" placeholder="Farbe, Wunsch, Adresse …"></label>
+          ${a.reservierung ? `<p>${this._shReservierungHtml(a)}</p>` : ""}
+        </div>
+        <footer class="sheet-fuss">${a.id ? `<button class="knopf leise sh-loeschen" data-aktion="sh-auftrag-weg">🗑 Löschen</button>` : ""}
+          <button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf" data-aktion="sh-auftrag-speichern">${a.id ? "Speichern" : "Anlegen"}</button></footer>
+      </section>`;
+  },
+
+  // Druckaufträge für die Warteschlange (je Platte einer) und Filament reservieren
+  _shInSchlange(a) {
+    const p = this._shDaten().produkte.find((x) => x.id === a.produktId);
+    if (!p) { this._toast("Nur Aufträge mit gespeichertem Produkt können in die Warteschlange."); return; }
+    const st = Math.max(1, p.stueck || 1), menge = Math.max(1, a.menge || 1);
+    const platten = Math.ceil(menge / st);
+    const ids = [];
+    let summe = 0;
+    for (let i = 0; i < platten; i++) {
+      const stk = Math.min(st, menge - i * st);
+      const g = Math.round(((p.gewicht_g || 0) * stk / st) * 10) / 10;
+      summe += g;
+      const id = shId("a");
+      ids.push(id);
+      this._daten.warteschlange.push({ id, name: `${p.name || "Produkt"} · Auftrag #${a.nr}${platten > 1 ? ` (${i + 1}/${platten})` : ""}`, gewicht: g || null,
+        zeit: p.druck_h ? shDauer((p.druck_h * stk) / st) : null, rolleId: p.rolleId, notiz: `${stk} Stück${a.kunde ? ` für ${a.kunde}` : ""}`,
+        am: new Date().toISOString(), quelle: "shop", auftrag: a.id });
+    }
+    a.schlange = ids;
+    a.reservierung = { rolleId: p.rolleId, g: Math.round(summe * 10) / 10, am: new Date().toISOString() };
+    if (shStatusNr(a.status) < shStatusNr("bestellt")) a.status = "bestellt";
+    this._speichern();
+    const r = this._daten.rollen.find((x) => x.id === p.rolleId);
+    const frei = r && r.rest_g != null ? r.rest_g - this._shReserviert(r.id) : null;
+    this._toast(`${platten} ${platten === 1 ? "Druck" : "Drucke"} in der Warteschlange, ${zahl(summe, 1)} g ${r ? r.name : ""} reserviert.${frei != null && frei < 0 ? ` Achtung: es fehlen ${zahl(-frei)} g!` : ""}`);
+  },
+
+  // ---- Einstellungen ----
+  _shEinstellungenHtml() {
+    const e = this._shE(), s = this._sh;
+    const gruppe = (g) => `<div class="dr-karte sh-block">${this._shAufKopf(g.gruppe, g.titel, g.felder.slice(0, 2).map((f) => this._shWertText(f, e[f.k])).join(" · "))}
+      ${s.auf[g.gruppe] ? `<div class="sh-auf-inhalt" data-einmal="sh-auf-${g.gruppe}">${g.felder.map((f) => this._shRegler(`e-${f.k}`, e[f.k], f)).join("")}</div>` : ""}</div>`;
+    return `<div class="ws-kopfzeile"><p class="leise">Standardwerte für den Rechner. Änderungen gelten sofort für alle Produkte.</p>
+        <button class="knopf leise" data-aktion="sh-standard">↺ Auf Standard zurücksetzen</button></div>
+      <div class="sh-einst">
+        <div class="sh-spalte">
+          ${SH_EINST.map(gruppe).join("")}
+          <div class="dr-karte sh-block"><h3 class="dr-titel">🧾 Steuer</h3>
+            <div class="sh-schalter-zeile"><div><strong>Kleinunternehmer (§ 19 UStG)</strong><small class="leise">Keine Mehrwertsteuer auf der Rechnung. Aus: 19 % MwSt werden eingerechnet.</small></div>
+              <button class="sh-schalter ${e.kleinunternehmer ? "an" : ""}" data-aktion="sh-ku" role="switch" aria-checked="${e.kleinunternehmer}" aria-label="Kleinunternehmer"><span></span></button></div></div>
+        </div>
+        <div class="sh-spalte">
+          <div class="dr-karte sh-block">${this._shAufKopf("plattformen", "🏪 Plattform-Gebühren", "Richtwerte, bitte prüfen")}
+            ${s.auf.plattformen ? `<div class="sh-auf-inhalt" data-einmal="sh-auf-pl"><div class="hinweis amber klein">Richtwerte, bitte prüfen. Gebühren ändern sich oft und hängen vom Konto ab (privat/gewerblich).</div>
+              ${this._shPlattformen().map((x, i) => `<div class="sh-preset"><strong>${esc(x.name)}</strong>
+                ${this._shRegler(`pl-${i}-prozent`, x.prozent, { name: "Anteil vom Preis", e: "%", min: 0, max: 25, step: 0.01, nk: 2 })}
+                ${this._shRegler(`pl-${i}-fix`, x.fix, { name: "Fest je Verkauf", e: "€", min: 0, max: 3, step: 0.01, nk: 2 })}</div>`).join("")}</div>` : ""}</div>
+          <div class="dr-karte sh-block">${this._shAufKopf("versand", "📦 Versand", "Richtwerte, bitte prüfen")}
+            ${s.auf.versand ? `<div class="sh-auf-inhalt" data-einmal="sh-auf-vs"><div class="hinweis amber klein">Richtwerte, bitte prüfen. Ungefähre Preise für Privatkunden (online frankiert). Verpackung kommt je Stück dazu.</div>
+              ${this._shVersandListe().map((x, i) => this._shRegler(`vs-${i}`, x.preis, { name: x.name, e: "€", min: 0, max: 20, step: 0.01, nk: 2 })).join("")}</div>` : ""}</div>
+          <div class="dr-karte sh-block"><h3 class="dr-titel">📈 Aus deinen Drucken</h3>${this._shMessHtml()}</div>
+        </div></div>`;
+  },
+  _shMessHtml() {
+    const m = this._shMess(), e = this._shE();
+    return `<div class="info-liste">
+      <div class="info-zeile"><span>Leistung beim Drucken<small class="norm">${m.kwGemessen ? `gemessen bei ${m.nStrom} Drucken` : "noch keine Messung, Annahme aus den Einstellungen"}</small></span><strong>${zahl(m.kw * 1000)} W</strong></div>
+      <div class="info-zeile"><span>Strom je Druckstunde</span><strong>${eur(m.kw * e.kwh_preis, 3)}</strong></div>
+      <div class="info-zeile"><span>Fehldruckquote<small class="norm">${m.quoteEigen ? `${m.fehl} von ${m.nDrucke} verbuchten Drucken` : "zu wenig verbuchte Drucke, Standardwert"}</small></span><strong>${zahl(m.quote * 100, 1)} %</strong></div></div>`;
+  },
+
+  // ---- Nerd: Verkaufsstatistik (wird im Nerd-Bereich eingeblendet, nur mit Aufträgen) ----
+  _shopNerdHtml() {
+    if (!this._daten || !this._daten.shop || !(this._daten.shop.auftraege || []).length) return "";
+    const alle = this._daten.shop.auftraege.filter((a) => a.status !== "angefragt");
+    const produkte = this._shDaten().produkte;
+    // Umsatz je Monat (letzte 12 Monate, bezahlte Aufträge)
+    const jetzt = new Date(), monate = [];
+    for (let i = 11; i >= 0; i--) { const d = new Date(jetzt.getFullYear(), jetzt.getMonth() - i, 1); monate.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`); }
+    const umsatz = Object.fromEntries(monate.map((m) => [m, 0]));
+    for (const a of alle) if (a.status === "bezahlt") { const m = String(a.bezahlt_am || a.datum || "").slice(0, 7); if (m in umsatz) umsatz[m] += a.preis || 0; }
+    const max = Math.max(1, ...Object.values(umsatz));
+    // Gewinn und Stückzahl je Produkt
+    const je = {};
+    let gewinnSumme = 0, stunden = 0;
+    for (const a of alle) {
+      const name = (produkte.find((p) => p.id === a.produktId) || {}).name || a.produkt || "Freier Posten";
+      const x = (je[name] = je[name] || { name, stk: 0, gewinn: 0, umsatz: 0, h: 0 });
+      x.stk += a.menge || 0; x.umsatz += a.preis || 0;
+      const g = this._shAuftragGewinn(a);
+      if (g) { x.gewinn += g.gewinn; x.h += g.h; gewinnSumme += g.gewinn; stunden += g.h; }
+    }
+    const liste = Object.values(je);
+    const nachGewinn = liste.slice().sort((a, b) => b.gewinn - a.gewinn).slice(0, 8);
+    const maxG = Math.max(0.01, ...nachGewinn.map((x) => Math.abs(x.gewinn)));
+    const best = liste.slice().sort((a, b) => b.stk - a.stk).slice(0, 5);
+    return `<div class="dr-karte sh-nerd oben-abstand" data-einmal="sh-nerd">
+      <h3 class="dr-titel">🛒 Verkaufsstatistik</h3>
+      <section class="stats sh-stats">
+        <div class="stat"><strong>${eur(alle.reduce((s, a) => s + (a.status === "bezahlt" ? a.preis || 0 : 0), 0), 0)}</strong><span>Umsatz bezahlt</span></div>
+        <div class="stat"><strong>${eur(gewinnSumme, 0)}</strong><span>Gewinn geschätzt</span></div>
+        <div class="stat"><strong>${zahl(alle.reduce((s, a) => s + (a.menge || 0), 0))}</strong><span>Stück verkauft</span></div>
+        <div class="stat"><strong>${stunden > 0 ? eur(gewinnSumme / stunden) : "–"}</strong><span>Gewinn je Druckstunde</span></div></section>
+      <div class="ws-zwei">
+        <div><h3>Umsatz je Monat</h3>
+          <div class="ws-saeulen sh-saeulen">${monate.map((m) => `<div class="ws-saeule" title="${eur(umsatz[m])}"><strong>${umsatz[m] ? zahl(umsatz[m]) : ""}</strong>
+            <div class="ws-saeule-bahn"><span class="sh-umsatz" style="height:${(umsatz[m] / max) * 100}%"></span></div><small>${WS_MONATE[Number(m.slice(5, 7)) - 1]}</small></div>`).join("")}</div></div>
+        <div><h3>Gewinn je Produkt</h3>
+          <div class="ne-balken-liste">${nachGewinn.map((x) => `<div class="ne-balken-zeile"><span>${esc(x.name)}</span>
+            <div class="ne-balken"><span style="width:${Math.max(2, Math.round((Math.abs(x.gewinn) / maxG) * 100))}%" class="${x.gewinn < 0 ? "rot" : ""}"></span></div><small>${eur(x.gewinn)}${x.h > 0 ? ` · ${eur(x.gewinn / x.h)}/h` : ""}</small></div>`).join("")}</div>
+          <h3>Bestseller</h3>
+          <div class="info-liste">${best.map((x, i) => `<div class="info-zeile"><span>${["🥇", "🥈", "🥉", "4.", "5."][i]} ${esc(x.name)}</span><strong>${zahl(x.stk)} Stk · ${eur(x.umsatz, 0)}</strong></div>`).join("")}</div></div>
+      </div></div>`;
+  },
+
+  // ---- Ereignisse ----
+  _shKlick(a, el) {
+    const s = this._shZustand(), shop = this._shDaten();
+    const auftrag = el.dataset.id ? shop.auftraege.find((x) => x.id === el.dataset.id) : null;
+    if (a !== "sh-status-menue" && a !== "sh-status") s.menue = null;
+    switch (a) {
+      case "sh-tab": s.tab = el.dataset.id; if (this._dialog && this._dialog.startsWith("sh-")) this._dialog = null; break;
+      case "sh-auf": s.auf[el.dataset.id] = !s.auf[el.dataset.id]; break;
+      case "sh-quelle": s.quelle = el.dataset.id; if (s.quelle === "modelle" && this._modZuletztLaden && !this._modZuletzt) this._modZuletztLaden(); break;
+      case "sh-zub": {
+        const z = s.r.zubehoer.find((x) => x.id === el.dataset.id);
+        if (!z) return;
+        z.stk = Math.max(0, Math.min(99, z.stk + Number(el.dataset.d)));
+        if (!z.stk) s.r.zubehoer = s.r.zubehoer.filter((x) => x !== z);
+        break;
+      }
+      case "sh-zuruecksetzen": s.r = this._shNeuerEntwurf(); s.quelle = "hand"; break;
+      case "sh-produkt-speichern": case "sh-als-neu": {
+        const p = s.r;
+        p.name = (p.name || "").trim();
+        if (!p.name) { this._toast("Bitte gib dem Produkt einen Namen."); const f = this.shadowRoot.getElementById("sh-name"); if (f) f.focus(); return; }
+        const res = this._shRechnen(p);
+        const daten = { ...JSON.parse(JSON.stringify(p)), preis_gespeichert: res.empfohlen, geaendert_am: new Date().toISOString() };
+        const i = a === "sh-produkt-speichern" && p.id ? shop.produkte.findIndex((x) => x.id === p.id) : -1;
+        if (i >= 0) shop.produkte[i] = { ...shop.produkte[i], ...daten };
+        else shop.produkte.push({ ...daten, id: shId("p"), angelegt_am: new Date().toISOString() });
+        this._speichern();
+        this._toast(`„${p.name}“ gespeichert: ${eur(res.empfohlen)}.`);
+        s.r = this._shNeuerEntwurf(); s.quelle = "hand"; s.tab = "produkte";
+        break;
+      }
+      case "sh-neu-produkt": s.r = this._shNeuerEntwurf(); s.quelle = "hand"; s.tab = "rechner"; break;
+      case "sh-produkt-bearbeiten": {
+        const p = shop.produkte.find((x) => x.id === el.dataset.id);
+        if (!p) return;
+        s.r = this._shNeuerEntwurf(p); s.quelle = "hand"; s.tab = "rechner";
+        break;
+      }
+      case "sh-produkt-weg": {
+        const i = shop.produkte.findIndex((x) => x.id === el.dataset.id);
+        if (i < 0 || !confirm(`Produkt „${shop.produkte[i].name}“ löschen? Aufträge bleiben erhalten.`)) return;
+        const [weg] = shop.produkte.splice(i, 1);
+        for (const x of shop.auftraege) if (x.produktId === weg.id && !x.produkt) x.produkt = weg.name;   // Name im Auftrag behalten
+        this._speichern();
+        this._toast(`„${weg.name}“ gelöscht.`);
+        break;
+      }
+      case "sh-filter": s.filter = el.dataset.id; break;
+      case "sh-sort": s.sort = { k: el.dataset.id, ab: s.sort.k === el.dataset.id ? !s.sort.ab : ["datum", "nr", "preis", "menge"].includes(el.dataset.id) }; break;
+      case "sh-status-menue": s.menue = s.menue === el.dataset.id ? null : el.dataset.id; break;
+      case "sh-status": {
+        if (!auftrag) return;
+        this._shStatusSetzen(auftrag, el.dataset.status);
+        s.menue = null;
+        this._speichern();
+        break;
+      }
+      case "sh-auftrag-neu": s.neuProdukt = el.dataset.produkt || null; this._shAuftragOeffnen(null); break;
+      case "sh-auftrag-bearbeiten": if (!auftrag) return; this._shAuftragOeffnen(auftrag); break;
+      case "sh-a-status": s.auftrag.status = el.dataset.status; break;
+      case "sh-a-preis-empf": s.auftrag.preisHand = false; this._shAuftragPreisNeu(); break;
+      case "sh-auftrag-speichern": {
+        const n = s.auftrag;
+        if (!n.kunde.trim() && !n.produktId && !n.produkt.trim()) { this._toast("Bitte Kunde oder Produkt angeben."); return; }
+        const { preisHand, ...daten } = n;
+        daten.kunde = daten.kunde.trim(); daten.produkt = (daten.produkt || "").trim();
+        if (n.id) {
+          const i = shop.auftraege.findIndex((x) => x.id === n.id);
+          if (i >= 0) { const alt = shop.auftraege[i]; shop.auftraege[i] = { ...alt, ...daten }; if (alt.status !== daten.status) this._shStatusSetzen(shop.auftraege[i], daten.status); }
+        } else {
+          const neu = { ...daten, id: shId("o"), angelegt_am: new Date().toISOString() };
+          if (neu.status === "bezahlt") neu.bezahlt_am = shHeute();
+          shop.auftraege.push(neu);
+        }
+        s.auftrag = null; this._dialog = null; s.tab = "auftraege";
+        this._speichern();
+        break;
+      }
+      case "sh-auftrag-weg": {
+        const n = s.auftrag;
+        const i = shop.auftraege.findIndex((x) => x.id === n.id);
+        if (i < 0 || !confirm(`Auftrag #${n.nr} löschen?`)) return;
+        const [weg] = shop.auftraege.splice(i, 1);
+        s.auftrag = null; this._dialog = null;
+        this._speichern();
+        this._toast(`Auftrag #${weg.nr} gelöscht${weg.reservierung ? ", Reservierung aufgehoben" : ""}.`);
+        break;
+      }
+      case "sh-schlange": if (!auftrag) return; this._shInSchlange(auftrag); break;
+      case "sh-ku": shop.einstellungen.kleinunternehmer = !this._shE().kleinunternehmer; this._speichern(); break;
+      case "sh-standard":
+        if (!confirm("Alle Shop-Einstellungen auf die Standardwerte zurücksetzen?")) return;
+        shop.einstellungen = {}; this._shMessCache = null; this._speichern();
+        this._toast("Shop-Einstellungen zurückgesetzt.");
+        break;
+      default: return;
+    }
+    this._zeichnen();
+  },
+  _shStatusSetzen(a, status) {
+    a.status = status;
+    if (status === "bezahlt" && !a.bezahlt_am) a.bezahlt_am = shHeute();
+    if (status !== "bezahlt") delete a.bezahlt_am;
+  },
+
+  _shEingabe(t) {
+    const k = t.dataset && t.dataset.sh;
+    if (!k || !this._sh) return false;
+    const s = this._sh, root = this.shadowRoot;
+    const zeige = (id, text) => { const x = root.getElementById(id); if (x) x.textContent = text; };
+    if (k === "t-name") { s.r.name = t.value; return true; }
+    if (k.startsWith("a-") && s.auftrag) {
+      const a = s.auftrag, f = k.slice(2);
+      if (f === "kunde") a.kunde = t.value;
+      else if (f === "datum") a.datum = t.value || shHeute();
+      else if (f === "notiz") a.notiz = t.value;
+      else if (f === "produkt-text") a.produkt = t.value;
+      return true;
+    }
+    if (!k.startsWith("r-")) return true;
+    const r = k.slice(2), v = Number(t.value);
+    if (r === "a-menge" && s.auftrag) {
+      s.auftrag.menge = v; zeige("sh-w-a-menge", `${zahl(v)} Stk`);
+      if (!s.auftrag.preisHand) {
+        this._shAuftragPreisNeu();
+        zeige("sh-w-a-preis", eur(s.auftrag.preis));
+        const pr = root.querySelector('[data-sh="r-a-preis"]'); if (pr) pr.value = s.auftrag.preis;
+      }
+    } else if (r === "a-preis" && s.auftrag) {
+      s.auftrag.preis = v; s.auftrag.preisHand = true; zeige("sh-w-a-preis", eur(v));
+    } else if (r.startsWith("e-")) {
+      const f = SH_EINST.flatMap((g) => g.felder).find((x) => x.k === r.slice(2));
+      if (!f) return true;
+      this._shDaten().einstellungen[f.k] = v; this._shMessCache = null;
+      zeige(`sh-w-${r}`, this._shWertText(f, v));
+    } else if (r.startsWith("pl-")) {
+      const [, i, feld] = r.split("-");
+      const e = this._shDaten().einstellungen;
+      if (!e.plattformen) e.plattformen = JSON.parse(JSON.stringify(SH_PLATTFORMEN));
+      e.plattformen[Number(i)][feld] = v;
+      zeige(`sh-w-${r}`, feld === "prozent" ? `${zahl(v, 2)} %` : eur(v));
+    } else if (r.startsWith("vs-")) {
+      const e = this._shDaten().einstellungen;
+      if (!e.versand) e.versand = JSON.parse(JSON.stringify(SH_VERSAND));
+      e.versand[Number(r.slice(3))].preis = v;
+      zeige(`sh-w-${r}`, eur(v));
+    } else if (SH_REGLER[r]) {
+      s.r[r] = v;
+      zeige(`sh-w-${r}`, this._shWertText(SH_REGLER[r], v));
+      this._shErgebnisAuffrischen();
+    }
+    return true;
+  },
+  _shAenderung(t) {
+    const k = t.dataset && t.dataset.sh;
+    if (!k || !this._sh) return false;
+    const s = this._sh;
+    if (k.startsWith("r-e-") || k.startsWith("r-pl-") || k.startsWith("r-vs-")) { this._speichern(); return true; }
+    // Prototyp-Vorgaben hängen an Gewicht, Zeit und Stückzahl: nach dem Loslassen neu zeichnen
+    if (k === "r-prototypen" || (this._sh.r.prototypen && ["r-stueck", "r-gewicht_g", "r-druck_h"].includes(k))) { this._zeichnen(); return true; }
+    if (k.startsWith("r-") || k.startsWith("t-") || k.startsWith("a-kunde") || k.startsWith("a-notiz") || k.startsWith("a-produkt-text")) return true;
+    if (k === "a-datum") { s.auftrag.datum = t.value || shHeute(); return true; }
+    if (k === "rolle") s.r.rolleId = t.value;
+    else if (k === "plattform") s.r.plattform = t.value;
+    else if (k === "versand") s.r.versand = t.value;
+    else if (k === "teil-neu") { if (t.value && !s.r.zubehoer.some((z) => z.id === t.value)) s.r.zubehoer.push({ id: t.value, stk: 1 }); }
+    else if (k === "quelle-wahl") {
+      const x = this._shQuellen().find((q) => q.id === t.value);
+      if (!x) return true;
+      s.r.name = x.name;
+      if (x.g) s.r.gewicht_g = Math.round(x.g * 2) / 2;
+      if (x.h) s.r.druck_h = Math.round(x.h * 20) / 20;
+      if (x.rolle && this._daten.rollen.some((r) => r.id === x.rolle)) s.r.rolleId = x.rolle;
+      s.r.quelle = s.quelle;
+      this._toast(x.g || x.h ? `Übernommen: ${x.name}${x.g ? ` · ${zahl(x.g, 1)} g` : ""}${x.h ? ` · ${shDauer(x.h)}` : ""}` : `Name übernommen. Gewicht und Druckzeit bitte einstellen (aus dem Slicer).`);
+    } else if (k === "a-produkt") {
+      s.auftrag.produktId = t.value;
+      const p = this._shDaten().produkte.find((x) => x.id === t.value);
+      if (p) { s.auftrag.plattform = p.plattform || s.auftrag.plattform; s.auftrag.preisHand = false; this._shAuftragPreisNeu(); }
+    } else if (k === "a-plattform") s.auftrag.plattform = t.value;
+    else return false;
+    this._zeichnen();
+    return true;
+  },
 };
 
 // ============================================================================
@@ -11846,7 +13295,7 @@ const NotizAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.14.0";
+const VERSION = "0.15.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
@@ -11890,6 +13339,13 @@ const zahl = (v, nk = 0) =>
   v == null || Number.isNaN(v) ? "–" : Number(v).toLocaleString("de-DE", { minimumFractionDigits: nk, maximumFractionDigits: nk });
 const feldNk = (f) => f.nk ?? 0;
 const gramm = (g) => (g >= 1000 && g % 1000 === 0 ? `${g / 1000} kg` : `${zahl(g)} g`);
+// Datum als JJJJ-MM-TT in Ortszeit, und zurück (Mitternacht Ortszeit)
+const heuteDatum = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const datumAusText = (t) => { const [j, m, d] = String(t).slice(0, 10).split("-").map(Number); return new Date(j, m - 1, d).getTime(); };
+// Kauflink: nur vollständige http/https-Adressen
+function kauflinkOk(v) {
+  try { const u = new URL(v); return (u.protocol === "https:" || u.protocol === "http:") && !!u.hostname; } catch (e) { return false; }
+}
 const sorteName = (r) => (r.art && r.art.startsWith(r.material) ? r.art : `${r.material} ${r.art || ""}`.trim());
 
 function wert(rolle, k) {
@@ -12236,9 +13692,12 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._spuleUebernehmen(r);
     let text = "Gespeichert.";
     if (mitGewicht || c.gewogen) {
-      r.rest_g = Math.max(0, c.brutto - c.spule_g);
+      const netto = Math.max(0, c.brutto - c.spule_g);
+      // Gewogen statt nur angeschaut: mit dem Verbuchten vergleichen und die Korrektur lernen
+      const gelernt = c.gewogen && this._modus === "detail" ? this._wiegungLernen(r, netto) : "";
+      r.rest_g = netto;
       r.gewogen_am = new Date().toISOString();
-      text = `Restgewicht ${zahl(r.rest_g)} g gespeichert.`;
+      text = `Restgewicht ${zahl(r.rest_g)} g gespeichert.${gelernt}`;
     }
     this._rechnerStarten(r);
     this._speichern();
@@ -12269,6 +13728,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (a.startsWith("st-")) { this._stKlick(a, el); return; }
     if (a.startsWith("sh-")) { this._shKlick(a, el); return; }
     if (a.startsWith("nb-")) { this._nbKlick(a, el); return; }
+    if (a.startsWith("fi-")) { this._fiKlick(a, el); return; }
     if (this._exKlick(a, el)) return;
     if (this._klappLaeuft && (a === "zeile" || a === "gruppe")) return;
     if (a === "zeile" && el.dataset.k.startsWith("inv-")) {
@@ -12307,6 +13767,7 @@ class FilamentWerkstattPanel extends HTMLElement {
         this._offeneZeilen.clear();
         this._rechner = null;
         this._sheetScroll = 0;
+        this._linkBearbeiten = false;
         break;
       case "neu": this._ansicht === "modelle" ? (this._dialog = "mod-laden") : this._ansicht === "inventar" ? this._invNeuStarten() : this._neuStarten(); break;
       case "schliessen": if (!this._schliessen()) return; break;
@@ -12485,6 +13946,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       id: "neu", name: "", hersteller: "", material, art, farbe: "", farbcode: "", hex: "#3ee6a8",
       nenn_g: 1000, rest_g: null, spule: null, probiert: false, voll: true, eigen: {}, vorschlag: richtwerteFuer(material, art),
       preset: "", pa_profil: "", filament_setting: "", notiz: "", herstellerNeu: false,
+      geoeffnet: "heute", geoeffnet_datum: heuteDatum(),
     };
     this._modus = "neu";
     this._entwurf = this._neu.eigen;
@@ -12517,6 +13979,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       ...this._entwurfText, notiz: "", angelegt_am: new Date().toISOString(),
     };
     if (n.voll) rolle.gewogen_am = rolle.angelegt_am;
+    if (n.geoeffnet === "heute") rolle.geoeffnet_am = heuteDatum();
+    else if (n.geoeffnet === "datum" && n.geoeffnet_datum) rolle.geoeffnet_am = n.geoeffnet_datum;
     this._spuleUebernehmen(rolle);
     this._daten.rollen.push(rolle);
     this._speichern();
@@ -12532,6 +13996,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._drEingabe(t)) return;
     if (this._ksEingabe(t) || this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
     if (this._nbEingabe(t)) return;
+    if (this._shEingabe(t)) return;
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
       clearTimeout(this._suchTimer);
@@ -12556,8 +14021,8 @@ class FilamentWerkstattPanel extends HTMLElement {
       const rolle = this._rolle();
       const v = Number(t.value);
       const anzeige = this.shadowRoot.getElementById(`info-${t.dataset.info}`);
-      if (anzeige) anzeige.textContent = v === 0 ? "nicht gesetzt" : `${zahl(v, 2)} €`;
       rolle[t.dataset.info] = v === 0 ? null : v;
+      if (anzeige) anzeige.innerHTML = this._preisAnzeigeHtml(rolle);
     }
   }
 
@@ -12569,11 +14034,23 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._drAenderung(t)) return;
     if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
     if (this._nbAenderung(t)) return;
+    if (this._shAenderung(t)) return;
     if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
     if (t.dataset.info) this._speichern();
     if (t.id === "notiz") { this._rolle().notiz = t.value; this._speichern(); }
+    if (t.dataset.fiDatum) {
+      // Datumsfelder Feuchte: leer = noch verschlossen bzw. nie getrocknet
+      const r = this._rolle();
+      const v = /^\d{4}-\d{2}-\d{2}$/.test(t.value) ? t.value : null;
+      if (v && v > heuteDatum()) { this._toast("Das Datum liegt in der Zukunft."); return; }
+      if (v) r[t.dataset.fiDatum] = v; else delete r[t.dataset.fiDatum];
+      this._speichern();
+      this._zeichnen();
+      return;
+    }
+    if (t.dataset.neu === "geoeffnet_datum") { this._neu.geoeffnet_datum = t.value; return; }
     if (t.dataset.platte != null) {
       this._entwurf.platte = t.value;
       const zeile = this.shadowRoot.querySelector('[data-zeile="platte"]');
@@ -13222,6 +14699,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       return `<button class="kachel ${r.probiert ? "" : "offen"} ${geladen ? "geladen" : ""}" data-aktion="oeffnen" data-id="${esc(r.id)}">
         ${geladen ? `<span class="badge-geladen">● geladen</span>` : ""}
         ${r.probiert ? "" : `<span class="badge-offen">noch nicht probiert</span>`}
+        ${this._feuchteHinweis(r)?.faellig ? `<span class="badge-trocknen" title="${esc(this._feuchteHinweis(r).text)}">💧 Trocknen?</span>` : ""}
         ${r.achtung ? `<span class="achtung-punkt kachel-achtung" title="Nach Fehldruck: testen und genau hinschauen">!</span>` : ""}
         <div class="kachel-spule">${spuleSvg(r)}</div>
         <div class="kachel-name">${esc(r.name)}</div>
@@ -13270,6 +14748,7 @@ class FilamentWerkstattPanel extends HTMLElement {
           ${r.achtung && this._tab === "einstellungen" ? `<div class="hinweis rot-hinweis achtung-hinweis"><span class="achtung-punkt">!</span><div><strong>Nach einem Fehldruck: testen und genau hinschauen.</strong>
             <small>${esc(r.achtung.grund || "")}${r.achtung.geaendert && r.achtung.geaendert.length ? ` · geändert: ${esc(r.achtung.geaendert.join(", "))}` : ""}</small></div>
             <button class="mini" data-aktion="bu-achtung-weg" data-id="${esc(r.id)}">Test hat geklappt</button></div>` : ""}
+          ${this._tab === "einstellungen" ? this._feuchteHinweisHtml(r) : ""}
           ${this._tab === "einstellungen" ? this._letzterDruckHtml(r) + this._einstellungenHtml(r) : this._tab === "rest" ? this._restHtml(r) : this._infosHtml(r)}
         </div>
         ${fuss ? `<footer class="sheet-fuss">${fuss}</footer>` : ""}
@@ -13399,7 +14878,22 @@ class FilamentWerkstattPanel extends HTMLElement {
         <button class="knopf rot-knopf" data-aktion="rest-verwerfen" ${this._rechnerGeaendert() ? "" : "disabled"}>Änderung verwerfen</button>
         <button class="knopf" data-aktion="rest-speichern">Als Restgewicht speichern</button>
       </div>
-      <p class="leise klein mitte">Schließt du mit ✕, wird automatisch gespeichert.</p>`;
+      <p class="leise klein mitte">Schließt du mit ✕, wird automatisch gespeichert.</p>
+      ${this._korrekturBlockHtml(r)}`;
+  }
+
+  // Gelernte Korrektur für das Slicer-Gewicht (aus dem Vergleich Waage ↔ Verbuchtes)
+  _korrekturBlockHtml(r) {
+    const k = this._korrektur(r);
+    const eigen = k.quelle === "rolle";
+    return `<div class="korrektur-block ${k.quelle ? "an" : ""}">
+      <span class="korr-icon">📐</span>
+      <div class="korr-text"><strong>${esc(this._korrekturText(r))}</strong>
+        <small class="leise">${k.quelle
+          ? `Beim Verbuchen wird das Slicer-Gewicht × ${zahl(k.faktor, 3)} gerechnet.${eigen ? "" : " Noch kein Wert für diese Rolle, darum der des Materials."}`
+          : "Wiegst du die Rolle, nachdem Drucke verbucht wurden, lerne ich, wie gut das Slicer-Gewicht stimmt."}</small></div>
+      ${eigen ? `<button class="mini" data-aktion="fi-korr-weg">Zurücksetzen</button>` : ""}
+    </div>`;
   }
 
   _spuleBlockHtml(r) {
@@ -13448,14 +14942,130 @@ class FilamentWerkstattPanel extends HTMLElement {
         ${zeile("Farbe", `${r.farbe} (${farbfamilie(r)})`)}${zeile("Farbcode", r.farbcode)}${zeile("Spulengröße", gramm(r.nenn_g || 1000))}
       </div>
       <div class="rechner-block">
-        <div class="r-kopf"><span>Preis pro kg</span><strong id="info-preis_kg">${r.preis_kg ? `${zahl(r.preis_kg, 2)} €` : "nicht gesetzt"}</strong></div>
+        <div class="r-kopf"><span>Preis pro kg</span><strong id="info-preis_kg">${this._preisAnzeigeHtml(r)}</strong></div>
         <input type="range" min="0" max="80" step="0.5" value="${r.preis_kg || 0}" data-info="preis_kg">
+        ${this._kauflinkHtml(r)}
       </div>
+      ${this._sterneHtml(r)}
+      ${this._feuchteBlockHtml(r)}
       <h3>Notizen</h3>
       <textarea id="notiz" rows="4" maxlength="2000" placeholder="z. B. Schichthöhe, Besonderheiten …">${esc(r.notiz)}</textarea>
       <h3>Bambu Studio</h3>
       <p class="leise klein">Filament-Profil mit deinen Werten (Temperaturen, Lüfter, Flow, K-Faktor, Volumenstrom) als Datei. In Bambu Studio über Datei › Importieren › Konfiguration importieren laden.</p>
       <button class="knopf leise breit" data-aktion="profil-export">⬇ Profil für Bambu Studio</button>`;
+  }
+
+  // ---- Preis, Kauflink, Sterne, Feuchte -----------------------------------
+  _preisAnzeigeHtml(r) {
+    if (r.preis_kg) return `${zahl(r.preis_kg, 2)} € <small class="leise">· ${zahl(r.preis_kg / 10, 1)} ct/g</small>`;
+    const p = this._preisProGramm(r);
+    return `${zahl(p.wert * 1000, 2)} €${this._voreingestelltHtml(p)}`;
+  }
+
+  _kauflinkHtml(r) {
+    if (this._linkBearbeiten) {
+      return `<div class="kauflink bearbeiten"><label class="feld"><span>Kauflink</span>
+          <input id="kauflink" class="text" type="url" inputmode="url" value="${esc(r.kauflink || "")}" placeholder="https://…" autocomplete="off"></label>
+        <div class="knopf-reihe">${r.kauflink ? `<button class="knopf leise" data-aktion="fi-link-weg">Entfernen</button>` : ""}
+          <button class="knopf leise" data-aktion="fi-link-abbrechen">Abbrechen</button>
+          <button class="knopf" data-aktion="fi-link-speichern">Speichern</button></div></div>`;
+    }
+    // Den Link selbst nie zeigen, nur einen Knopf
+    return `<div class="kauflink">${r.kauflink && kauflinkOk(r.kauflink)
+      ? `<a class="kauf-knopf" href="${esc(r.kauflink)}" target="_blank" rel="noopener noreferrer">🛒 Hier klicken zum Kaufen</a>`
+      : `<span class="leise klein">Kein Kauflink angegeben</span>`}
+      <button class="mini mint-rand" data-aktion="fi-link-bearbeiten">${r.kauflink ? "✎ Link ändern" : "＋ Kauflink"}</button></div>`;
+  }
+
+  _sterneHtml(r) {
+    const n = r.bewertung || 0;
+    return `<div class="sterne-block"><span>Wie zufrieden bin ich mit dem Filament?</span>
+      <div class="sterne" role="radiogroup" aria-label="Bewertung">${[1, 2, 3, 4, 5].map((i) =>
+        `<button class="stern ${i <= n ? "an" : ""}" data-aktion="fi-stern" data-n="${i}" role="radio" aria-checked="${i === n}" aria-label="${i} von 5 Sternen">★</button>`).join("")}</div>
+      <small class="leise">${n ? ["", "Gar nicht", "Eher nicht", "Geht so", "Zufrieden", "Begeistert"][n] : "Noch nicht bewertet"}</small></div>`;
+  }
+
+  // Wie lange ist die Rolle offen bzw. seit dem letzten Trocknen? null = verschlossen
+  _feuchteStand(r) {
+    if (!r) return null;
+    const offen = r.geoeffnet_am || null, trocken = r.getrocknet_am || null;
+    const basis = [offen, trocken].filter(Boolean).sort().pop();
+    if (!basis) return null;
+    const tage = Math.max(0, Math.round((datumAusText(heuteDatum()) - datumAusText(basis)) / 86400000));
+    const grenze = feuchteTage(r.material);
+    return { tage, grenze, rest: grenze - tage, getrocknet: !!trocken && trocken >= (offen || "") };
+  }
+  // Für Kachel, Detail und Startseite: { text, faellig, stufe } oder null (nichts zu tun)
+  _feuchteHinweis(r) {
+    const st = this._feuchteStand(r);
+    if (!st || (r.rest_g != null && r.rest_g <= 0)) return null;
+    const seit = st.getrocknet ? `Vor ${st.tage} Tagen getrocknet` : `Seit ${st.tage} Tagen offen`;
+    if (st.tage >= st.grenze) return { text: `${seit}, ${r.material} nach ca. ${st.grenze} Tagen trocknen`, faellig: true, stufe: "amber", tage: st.tage, grenze: st.grenze };
+    if (st.tage >= st.grenze * 0.8) return { text: `${seit}, in ${st.rest} ${st.rest === 1 ? "Tag" : "Tagen"} trocknen`, faellig: false, stufe: "", tage: st.tage, grenze: st.grenze };
+    return null;
+  }
+  _feuchteHinweisHtml(r) {
+    const h = this._feuchteHinweis(r);
+    if (!h) return "";
+    const t = wert(r, "tr_temp").v, d = wert(r, "tr_dauer").v;
+    return `<div class="hinweis feuchte-hinweis ${h.faellig ? "amber" : ""}"><span class="feuchte-icon">💧</span>
+      <div><strong>${h.faellig ? "Trocknen?" : "Bald trocknen"}</strong><small>${esc(h.text)}${t ? ` · ${zahl(t)} °C für ${zahl(d, 1)} h` : ""}</small></div>
+      <button class="mini" data-aktion="fi-getrocknet">Heute getrocknet</button></div>`;
+  }
+  _feuchteBlockHtml(r) {
+    const st = this._feuchteStand(r);
+    const datum = (k, name) => `<label class="datum-feld"><span>${name}</span>
+      <input type="date" class="text" data-fi-datum="${k}" value="${esc(r[k] || "")}" max="${heuteDatum()}"></label>`;
+    return `<h3>💧 Feuchte</h3>
+      ${this._feuchteHinweisHtml(r)}
+      <div class="rechner-block feuchte-block">
+        <div class="feuchte-daten">${datum("geoeffnet_am", "Geöffnet am")}${datum("getrocknet_am", "Zuletzt getrocknet am")}</div>
+        <p class="leise klein">${st
+          ? `${st.getrocknet ? `Vor ${st.tage} Tagen getrocknet` : `Seit ${st.tage} ${st.tage === 1 ? "Tag" : "Tagen"} offen`}. ${esc(r.material)} nach ca. ${st.grenze} Tagen offen trocknen${st.rest > 0 ? ` (noch ${st.rest} ${st.rest === 1 ? "Tag" : "Tage"})` : ""}.`
+          : `Noch verschlossen. ${esc(r.material)} sollte nach dem Öffnen nach ca. ${feuchteTage(r.material)} Tagen getrocknet werden.`}</p>
+        <div class="chips">${r.geoeffnet_am ? "" : `<button class="chip" data-aktion="fi-heute" data-k="geoeffnet_am">Heute geöffnet</button>`}
+          <button class="chip" data-aktion="fi-getrocknet">Heute getrocknet</button></div>
+      </div>`;
+  }
+
+  _fiKlick(a, el) {
+    const r = this._rolle();
+    switch (a) {
+      case "fi-stern": {
+        const n = Number(el.dataset.n);
+        if (r.bewertung === n) delete r.bewertung; else r.bewertung = n;   // gleicher Stern nochmal: löschen
+        this._speichern();
+        break;
+      }
+      case "fi-link-bearbeiten": this._linkBearbeiten = true; break;
+      case "fi-link-abbrechen": this._linkBearbeiten = false; break;
+      case "fi-link-weg": delete r.kauflink; this._linkBearbeiten = false; this._speichern(); break;
+      case "fi-link-speichern": {
+        const feld = this.shadowRoot.getElementById("kauflink");
+        const v = (feld.value || "").trim();
+        if (!v) delete r.kauflink;
+        else if (!kauflinkOk(v)) {
+          this._toast("Bitte einen vollständigen Link mit http:// oder https:// eingeben.");
+          const neu = this.shadowRoot.getElementById("kauflink");
+          if (neu) { neu.value = v; neu.classList.add("fehler"); neu.focus(); }
+          return;
+        } else r.kauflink = v;
+        this._linkBearbeiten = false;
+        this._speichern();
+        break;
+      }
+      case "fi-heute": r[el.dataset.k] = heuteDatum(); this._speichern(); break;
+      case "fi-getrocknet":
+        r.getrocknet_am = heuteDatum();
+        if (!r.geoeffnet_am) r.geoeffnet_am = r.getrocknet_am;
+        this._speichern();
+        this._toast(`${r.name}: heute getrocknet, die Erinnerung beginnt von vorn.`);
+        return;
+      case "fi-korr-weg": this._korrekturZuruecksetzen(r); return;
+      case "fi-neu-offen": this._neu.geoeffnet = el.dataset.id; break;
+      default: return;
+    }
+    this._zeichnen();
   }
 
   // ---- Filament hinzufügen ------------------------------------------------
@@ -13512,6 +15122,13 @@ class FilamentWerkstattPanel extends HTMLElement {
             <div class="chips"><button class="chip ${n.voll ? "an" : ""}" data-aktion="neu-voll" data-id="ja">Ja, voll</button>
               <button class="chip ${n.voll ? "" : "an"}" data-aktion="neu-voll" data-id="nein">Nein, später wiegen</button></div>
           </div>
+          <div class="rechner-block">
+            <div class="r-kopf"><span>Heute geöffnet?</span></div>
+            <div class="chips">${[["heute", "Heute"], ["datum", "Datum wählen"], ["zu", "Noch verschlossen"]].map(([id, t]) =>
+              `<button class="chip ${n.geoeffnet === id ? "an" : ""}" data-aktion="fi-neu-offen" data-id="${id}">${t}</button>`).join("")}</div>
+            ${n.geoeffnet === "datum" ? `<label class="datum-feld"><span>Geöffnet am</span><input type="date" class="text" data-neu="geoeffnet_datum" value="${esc(n.geoeffnet_datum || "")}" max="${heuteDatum()}"></label>` : ""}
+            <p class="leise klein">Ab dem Öffnen zieht das Filament Feuchtigkeit. ${esc(n.material)} sollte nach ca. ${feuchteTage(n.material)} Tagen getrocknet werden, ich erinnere dich daran.</p>
+          </div>
           ${this._spuleBlockHtml(n)}
 
           <h3 class="abschnitt">3 · Druckeinstellungen, Trocknen, Druckbett</h3>
@@ -13541,6 +15158,7 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._dialog === "dr-schalten") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-s"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-s">${this._drSchaltDialogHtml()}</div>`;
     if (this._dialog === "dr-temp") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-t"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-t">${this._drTempDialogHtml()}</div>`;
     if (this._dialog === "dr-luefter") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr-l"></div><div class="dialog" role="dialog" data-einmal="dialog-dr-l">${this._drLuefterDialogHtml()}</div>`;
+    if (this._dialog.startsWith("sh-")) return this._shDialogHtml();
     if (this._dialog === "dr-druck") return `<div class="schleier oben" data-aktion="dialog-zu" data-einmal="schleier-dr"></div><div class="dialog" role="dialog" data-einmal="dialog-dr">${this._drDialogHtml()}</div>`;
     const drDialog = this._drDialogeHtml();   // weitere Drucker-Dialoge (Strom-Sheet, Steuerung)
     if (drDialog) return drDialog;
@@ -13598,7 +15216,7 @@ class FilamentWerkstattPanel extends HTMLElement {
       <p class="leise">Prüft, ob die Seite alles in Home Assistant erreicht. Version ${VERSION}.</p>
       <ul class="check">${liste}</ul>
       <button class="knopf" data-aktion="pruefen" ${c && c.laeuft ? "disabled" : ""}>${c && c.laeuft ? "Prüft …" : "Neu prüfen"}</button>
-    </div>${this._sicherungKarteHtml()}`;
+    </div>${this._updateKarteHtml()}${this._sicherungKarteHtml()}`;
   }
 }
 

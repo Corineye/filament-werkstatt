@@ -101,7 +101,6 @@ window.hass = { states, callService: async (domain, dienst, data) => {
   throw new Error("unbekannt " + m.type);
 }};
 window.speicher = speicher;
-<<<<<<< HEAD
 // ---- Drucker v0.12 (Steuerung, Raumklima, Stromdiagramme) ------------------------------------
 // Knöpfe/Auswahl/Licht wie ha-bambulab, Raumsensoren, Leistungs-Verlauf und Energie-Statistik der Steckdose.
 // ?raum=kalt|feucht stellt das Raumklima für Screenshots um.
@@ -182,7 +181,6 @@ window.speicher = speicher;
     }, 600);
   };
 })();
-=======
 // ---- Integration: automatische Sicherung und Update-Prüfung ----
 // ?sich=auto  → die Integration sichert jede Nacht (sonst wie früher: Befehl unbekannt)
 // ?upd=hacs   → HACS-Update-Entität mit neuer Version, ?upd=github → keine Entität (GitHub)
@@ -215,7 +213,6 @@ window.speicher = speicher;
     return wsAlt(m);
   };
 }
->>>>>>> worktree-agent-a6579dea0b984a975
 </script>
 <script type="module">
 await import("../custom_components/filament_werkstatt/frontend/filament-werkstatt.js");

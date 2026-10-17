@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.14.0";
+const VERSION = "0.15.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
@@ -702,13 +702,9 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._modEingabe(t)) return;
     if (this._buEingabe(t)) return;
     if (this._drEingabe(t)) return;
-<<<<<<< HEAD
     if (this._ksEingabe(t) || this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
     if (this._nbEingabe(t)) return;
-=======
-    if (this._hiEingabe(t) || this._wsEingabe(t) || this._neEingabe(t)) return;
     if (this._shEingabe(t)) return;
->>>>>>> worktree-agent-ab1dfc9d22c67adb4
     if (t.id === "global-suche") {
       this._sucheQ = t.value;
       clearTimeout(this._suchTimer);
@@ -745,11 +741,8 @@ class FilamentWerkstattPanel extends HTMLElement {
     if (this._buAenderung(t)) return;
     if (this._drAenderung(t)) return;
     if (this._hiAenderung(t) || this._wsAenderung(t) || this._neAenderung(t)) return;
-<<<<<<< HEAD
     if (this._nbAenderung(t)) return;
-=======
     if (this._shAenderung(t)) return;
->>>>>>> worktree-agent-ab1dfc9d22c67adb4
     if (t.dataset.sys === "import") { this._sicherungEinlesen(t.files && t.files[0]); t.value = ""; return; }
     if (t.dataset.filter != null) { this._f[t.dataset.filter] = t.value; this._zeichnen(); return; }
     if (t.id === "sortierung") { this._sort = t.value; this._zeichnen(); return; }
