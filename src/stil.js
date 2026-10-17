@@ -1681,4 +1681,101 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
 .mobil .pl-detail-kopf { flex-direction: column; align-items: flex-start; }
 .mobil .pl-bild { width: 110px; }
 @media (prefers-reduced-motion: reduce) { .hi-lauf { animation: none; } .hi-pfeil, .pl-zelle { transition: none; } }
+/* ==== Drucker v0.12: Titelbild, Zeitleiste, Steuerung, Raumklima, Druckwarnung, Stromdiagramme ==== */
+#dr-bild-karte:empty, #dr-raum:empty { display: none; }
+/* Titelbild statt Kamera */
+.dr-bild { position: relative; aspect-ratio: 4 / 3; border-radius: 14px; overflow: hidden; display: grid; place-items: center;
+  background: radial-gradient(60% 60% at 50% 55%, rgba(62,230,168,.16), transparent 70%), linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px) 0 0 / 22px 22px,
+    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px) 0 0 / 22px 22px, rgba(0,0,0,.35); border: 1px solid var(--rand); }
+.mobil .dr-bild { aspect-ratio: 1 / 1; max-height: 340px; width: 100%; }
+.dr-bild img { max-width: 88%; max-height: 88%; object-fit: contain; display: block; filter: drop-shadow(0 12px 28px rgba(0,0,0,.55)); animation: dr-bild-rein .5s ease; }
+.dr-bild-karte.aktiv .dr-bild img { animation: dr-bild-rein .5s ease, dr-schweben 6s ease-in-out .5s infinite; }
+@keyframes dr-bild-rein { from { opacity: 0; transform: scale(.94); } }
+@keyframes dr-schweben { 50% { transform: translateY(-5px); } }
+.dr-bild .dr-kamera-leer { display: grid; justify-items: center; gap: 8px; height: auto; }
+.dr-bild-leer-icon { font-size: 42px; color: rgba(62,230,168,.35); line-height: 1; }
+.dr-bild-name { margin: 10px 0 0; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+/* Zeitleiste im Statuskasten */
+.dr-status { flex-wrap: wrap; }
+.mobil .dr-status { flex-wrap: nowrap; }
+.mobil .dr-zeitleiste { align-self: stretch; }
+.dr-zeitleiste { flex-basis: 100%; display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--rand); text-align: left; }
+.dr-zl-kopf, .dr-zl-fuss { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--leise); }
+.dr-zl-kopf strong, .dr-zl-fuss strong { color: var(--text); }
+.dr-zl-ende strong { color: var(--mint); font-size: 15px; }
+.dr-zl-balken { position: relative; height: 12px; border-radius: 6px; background: rgba(255,255,255,.07); overflow: hidden; }
+.dr-zl-balken i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; transition: width .8s ease;
+  background: linear-gradient(90deg, rgba(62,230,168,.55), var(--mint)); box-shadow: 0 0 12px rgba(62,230,168,.5); overflow: hidden; }
+.dr-zl-balken i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+  transform: translateX(-100%); animation: dr-glanz 2.4s ease-in-out infinite; }
+.dr-zl-balken b { position: absolute; left: 0; bottom: 0; height: 2px; background: rgba(255,255,255,.55); transition: width .8s ease; }
+.dr-zeitleiste.pausiert .dr-zl-balken i { background: linear-gradient(90deg, rgba(255,181,71,.5), var(--amber)); box-shadow: none; }
+.dr-zeitleiste.pausiert .dr-zl-balken i::after { display: none; }
+@keyframes dr-glanz { to { transform: translateX(100%); } }
+/* Steuerung */
+.dr-steuer-reihe { display: flex; gap: 10px; flex-wrap: wrap; }
+.dr-steuer-knopf { flex: 1 1 0; min-width: 104px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 14px; border-radius: 14px;
+  font-weight: 600; background: rgba(0,0,0,.22); border: 1px solid var(--rand); transition: background .15s, border-color .15s, transform .1s, box-shadow .2s; }
+.dr-steuer-knopf:hover:not(:disabled) { background: var(--flaeche-hover); border-color: rgba(62,230,168,.4); }
+.dr-steuer-knopf:active:not(:disabled) { transform: scale(.97); }
+.dr-steuer-icon { font-size: 16px; width: 18px; display: inline-grid; place-items: center; }
+.dr-bild-karte .dr-bild { max-height: 420px; width: 100%; }
+.dr-steuer-knopf.rot { color: var(--rot); border-color: rgba(255,107,107,.45); background: rgba(255,107,107,.08); }
+.dr-steuer-knopf.rot:hover:not(:disabled) { background: rgba(255,107,107,.18); border-color: rgba(255,107,107,.7); }
+.dr-steuer-knopf.mint { color: #062018; background: var(--mint); border-color: var(--mint); }
+.dr-licht.an { color: #ffe9a8; border-color: rgba(255,214,102,.55); background: rgba(255,214,102,.12); box-shadow: 0 0 18px rgba(255,214,102,.18); }
+.dr-tempo { display: grid; gap: 4px; margin-top: 14px; }
+.dr-tempo .chips { margin-top: 2px; }
+.dr-tempo .chip:disabled.an { opacity: 1; }
+.dr-tempo-wild.an { color: var(--amber); background: var(--amber-weich); border-color: rgba(255,181,71,.5); }
+.mobil .dr-tempo .chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mobil .dr-tempo .chip { padding: 7px 4px; text-align: center; }
+/* Druckwarnung */
+.dr-druck-warnung { display: grid; gap: 2px; margin: 0; border-width: 1px; border-style: solid; animation: dr-puls 2.4s ease-in-out infinite; }
+.dr-druck-warnung strong { color: var(--rot); }
+@keyframes dr-puls { 50% { box-shadow: 0 0 0 4px rgba(255,107,107,.12); } }
+/* Raumklima */
+.dr-raum-werte { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+.dr-raum-wert { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.2); border: 1px solid var(--rand); }
+.dr-raum-icon { grid-row: span 2; font-size: 20px; }
+.dr-raum-wert strong { font-size: 18px; }
+.dr-raum-wert small { font-size: 11px; color: var(--leise); }
+.dr-raum-wert.kalt strong { color: #8fd3ff; }
+.dr-raum-wert.feucht strong { color: var(--amber); }
+.dr-raum-skala { grid-column: 1 / -1; position: relative; height: 4px; margin-top: 8px; border-radius: 2px;
+  background: linear-gradient(90deg, rgba(255,255,255,.08) var(--gut-a), rgba(62,230,168,.35) var(--gut-a), rgba(62,230,168,.35) var(--gut-b), rgba(255,255,255,.08) var(--gut-b)); }
+.dr-raum-skala i { position: absolute; top: -3px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--text); box-shadow: 0 0 8px rgba(255,255,255,.5); transition: left .8s ease; }
+.dr-raum-warnung { margin: 8px 0 0; }
+.dr-raum-ok { margin: 0; color: var(--mint); }
+/* Strom: Werte antippbar */
+.dr-strom-knopf { position: relative; cursor: pointer; text-align: left; color: inherit; padding: 0; border-radius: 12px; transition: transform .1s; }
+.dr-strom-knopf > div { transition: border-color .15s, background .15s; }
+.dr-strom-knopf:hover > div { border-color: rgba(62,230,168,.45); background: var(--mint-weich); }
+.dr-strom-knopf:active { transform: scale(.98); }
+/* Strom-Sheet mit Diagrammen */
+.dr-strom-bereiche { margin-bottom: 14px; }
+.dr-strom-summen { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 0 6px; }
+.mobil .dr-strom-summen { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dr-strom-inhalt { animation: blende .25s ease; }
+.dr-diagramm { margin-top: 14px; padding: 12px 12px 6px; border-radius: 14px; background: rgba(0,0,0,.22); border: 1px solid var(--rand); }
+.dr-dg-kopf { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-height: 22px; }
+.dr-dg-kopf h3 { margin: 0; font-size: 14px; white-space: nowrap; }
+.dr-dg-info { font-size: 12px; text-align: right; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; color: var(--leise); }
+.dr-dg-info strong { color: var(--mint); font-size: 14px; }
+.dr-dg-info small { color: var(--amber); }
+.dr-diagramm svg { display: block; margin-top: 6px; touch-action: pan-y; overflow: visible; cursor: crosshair; user-select: none; -webkit-user-select: none; }
+.dr-dg-gitter { stroke: rgba(255,255,255,.07); stroke-width: 1; }
+.dr-dg-strich { stroke: rgba(255,255,255,.25); }
+.dr-dg-achse { fill: var(--leise); font-size: 10px; }
+.dr-dg-einheit { font-weight: 700; }
+.dr-dg-wert { fill: var(--amber); font-size: 10px; font-weight: 600; }
+.dr-dg-linie { fill: none; stroke: var(--mint); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 4px rgba(62,230,168,.6)); }
+.dr-dg-flaeche { animation: blende .5s ease; }
+.dr-dg-saeule { fill: rgba(62,230,168,.55); transform-box: fill-box; transform-origin: bottom; animation: dr-wachsen .45s cubic-bezier(.2,.9,.3,1.1) both; transition: fill .15s; }
+.dr-dg-saeule.an { fill: var(--mint); filter: drop-shadow(0 0 6px rgba(62,230,168,.7)); }
+@keyframes dr-wachsen { from { transform: scaleY(0); } }
+.dr-dg-zeiger { stroke: rgba(255,255,255,.45); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.dr-dg-punkt { fill: var(--grund); stroke: var(--mint); stroke-width: 2.5; pointer-events: none; }
+.dr-dg-laedt { display: grid; justify-items: center; gap: 12px; padding: 60px 0; }
+.dr-strom-fuss { margin: 12px 0 0; }
 `;

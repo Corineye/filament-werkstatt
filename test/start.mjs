@@ -206,7 +206,7 @@ o.on("pageerror", (e) => fehler.push(e.message));
 await o.goto(`http://localhost:${process.env.TEST_PORT || 8765}/test/test.html?ansicht=start&drucker=aus`);
 await o.waitForTimeout(900);
 pruefe((await el(o).locator(".st-drucker").textContent()).includes("Drucker ist aus"), "Drucker aus: Kachel sagt es");
-pruefe((await el(o).locator(".st-klima").count()) === 0, "Ohne Raumklima-Funktion keine Klimakachel");
+pruefe((await el(o).locator(".st-klima").count()) === 1, "Klimakachel erscheint, sobald der Drucker-Bereich Sensorwerte liefert");
 await o.screenshot({ path: `${out}/start-drucker-aus-desktop.png` });
 
 console.log("Fehler:", fehler.length ? fehler : "keine");
