@@ -817,6 +817,556 @@ function suchPunkte(anfrage, text) {
   }
   return summe;
 }
+
+// ---------------------------------------------------------------------------
+// v0.12 Hilfe: zwei Spulen trocknen, Konstruktion, Slicer-Lexikon, Druckplatten
+// ---------------------------------------------------------------------------
+
+// ---- Trockner mit zwei Plätzen ----
+// Sovol heizt höchstens auf 70 °C. „ideal“ = Wert, den das Material eigentlich bräuchte.
+const TROCKNER_MAX = 70;
+const TROCKNEN_MATERIALIEN = [
+  { id: "PLA", name: "PLA", ...TROCKNEN.PLA },
+  { id: "WOOD", name: "Wood-PLA", ...TROCKNEN.PLA, tr_temp: 45 },
+  { id: "PETG", name: "PETG", ...TROCKNEN.PETG },
+  { id: "TPU", name: "TPU", ...TROCKNEN.TPU },
+  { id: "ASA", name: "ASA", ...TROCKNEN.ASA },
+  { id: "ABS", name: "ABS", ...TROCKNEN.ABS },
+  { id: "PC", name: "PC", ...TROCKNEN.PC },
+  { id: "PA", name: "PA / Nylon", tr_temp: 70, tr_dauer: 12, tr_feuchte: 10, ideal: 80 },
+];
+// Ab mehr als diesem Abstand lohnt sich ein gemeinsamer Lauf nicht mehr
+const TROCKNEN_GRENZE = 15;
+
+// Zwei Plätze zusammenführen. a/b = { name, material, temp, dauer, feuchte, ideal?, id? } oder null.
+// Ergebnis: modus (leer|einzeln|zusammen|getrennt), laeufe [{ temp, dauer, feuchte, material, name, plaetze }], hinweise [{ art, text }]
+function trocknenKombi(a, b) {
+  const hinweise = [];
+  const lauf = (x, plaetze) => ({ temp: Math.min(TROCKNER_MAX, x.temp), dauer: x.dauer, feuchte: x.feuchte, material: x.material, name: x.name, plaetze });
+  const zuHeiss = (x) => {
+    if (x.ideal && x.ideal > TROCKNER_MAX) hinweise.push({ art: "amber", text: `${x.name} bräuchte eigentlich ${x.ideal} °C. Der Sovol schafft nur ${TROCKNER_MAX} °C: lieber etwas länger trocknen und direkt aus dem Trockner drucken.` });
+  };
+  if (!a && !b) return { modus: "leer", laeufe: [], hinweise };
+  if (!a || !b) {
+    const x = a || b;
+    zuHeiss(x);
+    return { modus: "einzeln", laeufe: [lauf(x, [a ? 1 : 2])], hinweise };
+  }
+  zuHeiss(a); zuHeiss(b);
+  if (a.id && a.id === b.id) hinweise.push({ art: "rot", text: "Dieselbe Rolle steht in beiden Plätzen. Wähle für einen Platz eine andere Rolle." });
+  const [kalt, warm] = a.temp <= b.temp ? [a, b] : [b, a];
+  const nr = (x) => (x === a ? 1 : 2);
+  const abstand = warm.temp - kalt.temp;
+  if (abstand > TROCKNEN_GRENZE) {
+    hinweise.push({ art: "rot", text: `${kalt.name} (${kalt.temp} °C) und ${warm.name} (${warm.temp} °C) liegen ${abstand} °C auseinander. Bei ${warm.temp} °C wird ${kalt.name} weich und die Windungen verkleben, bei ${kalt.temp} °C wird ${warm.name} kaum trocken. Besser zwei Läufe nacheinander.` });
+    hinweise.push({ art: "mint", text: "Die zuerst getrocknete Rolle warm in einen Beutel mit Trockenmittel packen, bis die zweite fertig ist." });
+    return { modus: "getrennt", laeufe: [lauf(kalt, [nr(kalt)]), lauf(warm, [nr(warm)])], hinweise };
+  }
+  // Gemeinsam: Temperatur der empfindlicheren Rolle, Zeit der längeren.
+  // Wer unter seinem Richtwert trocknet, braucht etwas länger.
+  const laenger = Math.max(a.dauer, b.dauer);
+  const plus = abstand >= 10 ? 2 : abstand >= 5 ? 1 : 0;
+  if (plus) hinweise.push({ art: "amber", text: `${warm.name} trocknet bei ${kalt.temp} °C, also ${abstand} °C unter seinem Richtwert, darum ${plus} h mehr als die längere Zeit (${zahl(laenger, laenger % 1 ? 1 : 0)} h).${abstand >= 10 ? ` Knistert ${warm.name} sehr stark, lieber getrennt trocknen.` : ""}` });
+  else hinweise.push({ art: "mint", text: "Passt gut zusammen: beide Rollen trocknen fast bei derselben Temperatur." });
+  hinweise.push({ art: "mint", text: `Temperatur der empfindlicheren Rolle (${kalt.name}), Zeit der längeren, Feuchteziel der anspruchsvolleren.` });
+  return { modus: "zusammen", laeufe: [{ temp: Math.min(TROCKNER_MAX, kalt.temp), dauer: laenger + plus, feuchte: Math.min(a.feuchte, b.feuchte), material: kalt.material, name: kalt.name, plaetze: [1, 2] }], hinweise };
+}
+
+// Trockner-Display für ein Ergebnis: gleiche Form wie die große Zeichnung, Spulen in Rollenfarbe.
+// w = Lauf, plaetze = [{ farbe } | null, …], aktiv = Plätze, die in diesem Lauf trocknen, frei = Text für den anderen Platz
+function trocknerKombiSvg(w, plaetze, aktiv, frei = "danach") {
+  const l = 'stroke="#8da49a" stroke-width="1.5" fill="none"';
+  const spule = (cx, p, nr) => {
+    if (!p || !aktiv.includes(nr)) return `<circle cx="${cx}" cy="110" r="54" stroke="#5d726a" stroke-width="1.5" stroke-dasharray="5 5" fill="none"/>
+      <text x="${cx}" y="110" class="tr-kombi-leer" text-anchor="middle" dominant-baseline="central">${p ? frei : "leer"}</text>`;
+    const klar = !p.farbe || p.farbe === "transparent";
+    return `<circle cx="${cx}" cy="110" r="54" stroke="#ffb547" stroke-width="2" fill="rgba(255,181,71,.08)"/>
+      <circle cx="${cx}" cy="110" r="44" fill="${klar ? "#cfe9df" : esc(p.farbe)}" opacity="${klar ? 0.2 : 0.85}" stroke="rgba(255,255,255,.25)"/>
+      <circle cx="${cx}" cy="110" r="14" fill="#0b1210" stroke="#ffb547" stroke-opacity=".6"/>
+      <text x="${cx}" y="110" class="tr-kombi-nr" text-anchor="middle" dominant-baseline="central">${nr}</text>`;
+  };
+  const mat = String(w.material || "").slice(0, 6);
+  const min = Math.round(w.dauer * 60);
+  const zeit = `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+  const werte = [[92, mat, "Material"], [162, `< ${w.feuchte} %`, "Feuchte"], [232, `${w.temp}°`, "Soll"], [296, "--", "Ist"], [360, zeit, "Zeit"]];
+  return `<svg viewBox="0 0 440 290" class="tr-kombi-bild" role="img" aria-label="Trockner-Display: ${esc(mat)}, ${w.temp} Grad, ${zeit} Stunden">
+    <rect x="20" y="20" width="400" height="250" rx="22" ${l}/>
+    <rect x="34" y="32" width="372" height="160" rx="14" stroke="#5cc8ff" stroke-opacity=".4" stroke-width="1.4" fill="rgba(92,200,255,.05)"/>
+    ${spule(130, plaetze[0], 1)}${spule(310, plaetze[1], 2)}
+    <rect x="60" y="206" width="330" height="54" rx="10" fill="rgba(0,0,0,.35)" stroke="#3ee6a8" stroke-opacity=".5"/>
+    ${werte.map(([x, t, n]) => `<text x="${x}" y="225" class="tr-wert" data-kombi="${n}" text-anchor="middle" dominant-baseline="central">${esc(t)}</text>
+      <text x="${x}" y="247" class="tr-kombi-name" text-anchor="middle" dominant-baseline="central">${n}</text>`).join("")}
+  </svg>`;
+}
+
+// ---- Konstruktion: Zeichnungen (120 × 80, gleicher Stil wie die Fehlerbilder) ----
+const KN_M = "#3ee6a8", KN_R = "#ff6b6b", KN_A = "#ffb547", KN_L = "#8da49a", KN_F = "rgba(62,230,168,.16)", KN_D = "#0b1210";
+const knBild = (inhalt) => `<svg viewBox="0 0 120 80" class="kn-bild" aria-hidden="true">${inhalt}</svg>`;
+const knTxt = (x, y, t, farbe = KN_L, groesse = 8) => `<text x="${x}" y="${y}" fill="${farbe}" font-size="${groesse}" font-family="ui-monospace, monospace" text-anchor="middle">${t}</text>`;
+const KN_BETT = `<rect x="0" y="70" width="120" height="10" fill="#2a3330"/>`;
+const KN_BILD = {
+  passungen: knBild(`<rect x="22" y="12" width="76" height="56" rx="6" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.4"/>
+    <circle cx="60" cy="40" r="19" fill="${KN_D}" stroke="${KN_M}" stroke-width="1.2"/><circle cx="60" cy="40" r="15.5" fill="${KN_A}" opacity=".85"/>
+    <path d="M75.5 40 H79" stroke="#fff" stroke-width="1.4"/><path d="M86 26 L79 37" stroke="${KN_L}" stroke-width=".8"/>${knTxt(98, 24, "Spalt", KN_L, 7)}`),
+  tropfen: knBild(`${[18, 26, 34, 42, 50, 58, 66].map((y) => `<path d="M14 ${y} H106" stroke="${KN_M}" stroke-opacity=".2"/>`).join("")}
+    <rect x="14" y="12" width="92" height="58" rx="4" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <path d="M60 22.2 L69.9 32.1 A14 14 0 1 1 50.1 32.1 Z" fill="${KN_D}" stroke="${KN_M}" stroke-width="1.4"/>
+    <circle cx="60" cy="42" r="14" fill="none" stroke="${KN_R}" stroke-dasharray="2 2" opacity=".7"/>${knTxt(86, 28, "45°", KN_A)}${knTxt(110, 78, "Z↑", KN_L, 7)}`),
+  einsaetze: knBild(`<path d="M14 72 H106 V28 H72 V54 H48 V28 H14 Z" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <rect x="51" y="5" width="18" height="18" rx="1.5" fill="${KN_A}"/>${[9, 13, 17, 21].map((y) => `<path d="M51 ${y} l18 -2" stroke="#7a5200" stroke-width="1"/>`).join("")}
+    <path d="M60 25 V30" stroke="${KN_A}" stroke-width="1.2"/><path d="M57 27 l3 3 3 -3" stroke="${KN_A}" fill="none"/>
+    <path d="M48 62 H72" stroke="${KN_L}"/>${knTxt(60, 70, "Ø Loch", KN_L, 7)}<path d="M80 28 V54" stroke="${KN_L}"/><path d="M77 28 H83 M77 54 H83" stroke="${KN_L}"/>${knTxt(94, 44, "L+1", KN_L, 7)}`),
+  schrauben: knBild(`<rect x="16" y="14" width="88" height="22" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/><rect x="16" y="38" width="88" height="34" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <rect x="52" y="14" width="16" height="22" fill="${KN_D}"/><rect x="56.5" y="38" width="7" height="26" fill="${KN_D}"/>
+    <rect x="49" y="4" width="22" height="10" rx="2" fill="${KN_A}"/><rect x="56" y="14" width="8" height="46" fill="${KN_A}" opacity=".9"/>
+    ${[18, 24, 30, 36, 42, 48, 54].map((y) => `<path d="M56 ${y} l8 2" stroke="#7a5200"/>`).join("")}${knTxt(33, 28, "Durchg.", KN_L, 7)}${knTxt(33, 58, "Kern", KN_L, 7)}`),
+  magnete: knBild(`<rect x="14" y="34" width="92" height="38" rx="3" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/><rect x="38" y="34" width="44" height="11" fill="${KN_D}" stroke="${KN_M}"/>
+    <rect x="40" y="10" width="40" height="10" rx="2" fill="#b8c4bf"/><rect x="40" y="10" width="20" height="10" rx="2" fill="${KN_R}" opacity=".85"/>${knTxt(50, 18, "N", "#fff", 7)}${knTxt(70, 18, "S", KN_D, 7)}
+    <path d="M60 23 V30" stroke="${KN_L}"/><path d="M57 27 l3 3 3 -3" stroke="${KN_L}" fill="none"/>${knTxt(98, 28, "+0,15", KN_A, 7)}`),
+  muttern: knBild(`<rect x="14" y="6" width="92" height="60" rx="4" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <polygon points="60,16 77.3,26 77.3,46 60,56 42.7,46 42.7,26" fill="${KN_D}" stroke="${KN_M}" stroke-width="1.2"/>
+    <polygon points="60,19 74.7,27.5 74.7,44.5 60,53 45.3,44.5 45.3,27.5" fill="${KN_A}" opacity=".85"/><circle cx="60" cy="36" r="6" fill="${KN_D}"/>
+    <path d="M42.7 61 H77.3" stroke="${KN_L}"/><path d="M42.7 58 V64 M77.3 58 V64" stroke="${KN_L}"/>${knTxt(60, 76, "SW + 0,2", KN_A, 7)}`),
+  ueberhang: knBild(`${KN_BETT}<path d="M14 70 V40 L44 10 H58 V70 Z" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.4"/>
+    <path d="M66 70 V44 L106 34 V42 L74 70 Z" fill="rgba(255,107,107,.15)" stroke="${KN_R}" stroke-width="1.4"/>
+    <path d="M14 22 V40" stroke="${KN_L}" stroke-dasharray="2 2"/><path d="M14 28 A12 12 0 0 1 22.5 31.5" fill="none" stroke="${KN_A}" stroke-width="1.2"/>
+    ${knTxt(34, 62, "45° ✓", KN_M)}${knTxt(96, 62, "✗", KN_R, 12)}`),
+  bruecken: knBild(`${KN_BETT}<rect x="14" y="26" width="16" height="44" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/><rect x="90" y="26" width="16" height="44" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <rect x="14" y="20" width="92" height="6" fill="${KN_M}" opacity=".85"/><path d="M30 26 Q60 42 90 26" stroke="${KN_R}" stroke-dasharray="3 2" fill="none"/>
+    <path d="M32 56 H88" stroke="${KN_L}"/><path d="M32 53 V59 M88 53 V59" stroke="${KN_L}"/>${knTxt(60, 52, "≤ 20 mm", KN_A)}`),
+  fasen: knBild(`${KN_BETT}<path d="M10 70 V22 H52 V62 L44 70 Z" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.4"/>
+    <path d="M68 70 V22 H110 V58 Q110 70 98 70 Z" fill="rgba(255,107,107,.12)" stroke="${KN_R}" stroke-width="1.4"/>${knTxt(31, 48, "Fase ✓", KN_M)}${knTxt(89, 44, "Radius", KN_R)}${knTxt(89, 56, "✗", KN_R, 10)}`),
+  waende: knBild(`<rect x="10" y="18" width="100" height="44" rx="4" fill="none" stroke="${KN_L}" stroke-dasharray="3 3"/>
+    ${[0, 1, 2].map((i) => `<ellipse cx="${36 + i * 24}" cy="38" rx="12" ry="7" fill="${i === 0 ? KN_A : KN_M}" opacity="${i === 0 ? 0.9 : 0.75}"/>`).join("")}
+    <path d="M24 54 H96" stroke="${KN_L}"/><path d="M24 51 V57 M96 51 V57" stroke="${KN_L}"/>${knTxt(60, 72, "3 × Linienbreite", KN_L, 7)}`),
+  details: knBild(`${KN_BETT}<rect x="14" y="30" width="14" height="40" fill="${KN_M}" opacity=".8"/><rect x="40" y="30" width="7" height="40" fill="${KN_M}" opacity=".8"/>
+    <rect x="62" y="30" width="3.5" height="40" fill="${KN_A}" opacity=".9"/><rect x="84" y="30" width="1.5" height="40" fill="${KN_R}"/>
+    ${knTxt(21, 24, "2", KN_L, 7)}${knTxt(43.5, 24, "1", KN_L, 7)}${knTxt(64, 24, "0,5", KN_A, 7)}${knTxt(85, 24, "0,2", KN_R, 7)}${knTxt(106, 52, "mm", KN_L, 7)}`),
+  schichten: knBild(`${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="30" y="${13 + i * 9}" width="60" height="8" rx="3" fill="${KN_M}" opacity=".7"/>`).join("")}
+    <path d="M16 39 H27 M93 39 H104" stroke="${KN_M}" stroke-width="2"/><path d="M20 35 l-4 4 4 4 M100 35 l4 4 -4 4" stroke="${KN_M}" stroke-width="2" fill="none"/>
+    <path d="M60 2 V10 M60 69 V77" stroke="${KN_R}" stroke-width="2"/><path d="M56 6 l4 -4 4 4 M56 73 l4 4 4 -4" stroke="${KN_R}" stroke-width="2" fill="none"/>
+    <path d="M34 39.5 l7 -2 7 2 7 -2 7 2" stroke="${KN_R}" stroke-width="1.4" fill="none"/>`),
+  ausrichtung: knBild(`${KN_BETT}<path d="M8 70 V58 H48 V70 Z M8 58 V36 H18 V58" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.3"/>
+    ${knTxt(34, 46, "✓", KN_M, 12)}<path d="M70 70 H80 V18 H70 Z M80 70 H106 V60 H80" fill="rgba(255,107,107,.12)" stroke="${KN_R}" stroke-width="1.3"/>
+    ${[28, 36, 44, 52].map((y) => `<path d="M70 ${y} H80" stroke="${KN_R}" stroke-opacity=".5"/>`).join("")}${knTxt(96, 44, "✗", KN_R, 12)}`),
+  schnapp: knBild(`<rect x="10" y="50" width="40" height="22" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/>
+    <path d="M40 50 V18 L48 12 H52 V50 Z" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.2"/><path d="M48 12 L58 18 L52 24 Z" fill="${KN_M}" opacity=".8"/>
+    <path d="M52 50 q0 -4 4 -4" stroke="${KN_A}" stroke-width="1.4" fill="none"/>${knTxt(88, 30, "L ≥ 5 × t", KN_A)}${knTxt(88, 44, "liegend", KN_L, 7)}${knTxt(88, 54, "drucken", KN_L, 7)}`),
+  gewinde: knBild(`<rect x="34" y="8" width="52" height="12" rx="2" fill="${KN_A}"/>
+    <path d="M42 20 ${[0, 1, 2, 3, 4, 5, 6].map((i) => `L36 ${24 + i * 7} L42 ${27.5 + i * 7}`).join(" ")} L42 72 H78 ${[6, 5, 4, 3, 2, 1, 0].map((i) => `L78 ${27.5 + i * 7} L84 ${24 + i * 7}`).join(" ")} L78 20 Z" fill="${KN_A}" opacity=".8"/>
+    ${knTxt(104, 48, "≥ M8", KN_M, 8)}`),
+  warping: knBild(`${KN_BETT}<rect x="24" y="18" width="72" height="44" rx="8" fill="${KN_F}" stroke="${KN_M}" stroke-width="1.4"/>
+    ${[[24, 18], [96, 18], [24, 62], [96, 62]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="9" fill="rgba(255,181,71,.12)" stroke="${KN_A}" stroke-width="1.2"/>`).join("")}${knTxt(60, 44, "R ≥ 3", KN_M)}`),
+};
+
+// Konstruktionstipps für FDM (Werte für den P1S mit 0,4-mm-Düse, gut kalibriert).
+// werte: [Bezeichnung, Wert]; dyn: Tabelle wird aus Corins Inventar berechnet (hilfe.js)
+const KN_GRUPPEN = [["alle", "Alle"], ["passung", "Passungen & Löcher"], ["verbindung", "Verbinden"], ["geometrie", "Form & Überhänge"], ["festigkeit", "Festigkeit & Ausrichtung"]];
+const KONSTRUKTION = [
+  { id: "passungen", g: "passung", titel: "Passungen und Toleranzen", kurz: "Wie viel Spalt zwei Teile brauchen",
+    punkte: ["Der Spalt gilt pro Seite: eine Welle mit 10 mm Ø braucht für eine Schiebepassung ein Loch mit 10,3–10,4 mm.",
+      "Senkrechte Löcher drucken etwa 0,1–0,2 mm zu klein, weil die Düse in Kurven nach innen drückt. Dafür gibt es in Bambu Studio die X-Y-Loch-Kompensation.",
+      "Einmal einen Toleranztest (Stufen 0,1 / 0,2 / 0,3 mm) mit deinem Material drucken, dann kennst du deine Werte.",
+      "PETG und TPU brauchen etwas mehr Spalt als PLA, weil sie weicher fließen und leicht Fäden ziehen."],
+    werte: [["Presspassung (hält ohne Kleber)", "0 – 0,05 mm"], ["Feste Passung (mit Druck fügen)", "0,1 mm"], ["Schiebepassung (läuft leicht)", "0,15 – 0,2 mm"],
+      ["Spielpassung (locker, Deckel)", "0,3 mm"], ["Print-in-Place (Scharnier im Druck)", "0,3 – 0,5 mm"], ["Senkrechter Spalt (Z)", "≥ 1 Schichthöhe, besser 2"]] },
+  { id: "tropfen", g: "passung", titel: "Liegende Löcher: Tropfenform", kurz: "Waagrechte Löcher ohne Stützen",
+    punkte: ["Ein liegendes Loch hat oben einen flachen Überhang, der durchhängt. Ab etwa 5–6 mm Ø wird es oben unrund.",
+      "Lösung: die Oberseite als 45°-Spitze ausführen (Tropfen) oder oben flach abschneiden, sodass eine kurze Brücke entsteht.",
+      "Die Spitze zeigt immer nach oben (+Z), also bei der Konstruktion die spätere Druckrichtung beachten.",
+      "Für Achsen und Schrauben ist die Tropfenspitze egal: sie liegen unten und an den Seiten an."],
+    werte: [["Bis Ø 5 mm", "rund geht meist"], ["Ab Ø 6 mm", "Tropfen 45° oder flache Decke"], ["Senkrechte Löcher", "immer am genauesten"]] },
+  { id: "einsaetze", g: "verbindung", titel: "Gewindeeinsätze (Einschmelzmuttern)", kurz: "Lochmaß für deine Messing-Einsätze", dyn: "einsatz",
+    punkte: ["Loch-Ø etwas kleiner als der Außen-Ø der Rändelung: Startwert Außen-Ø − 0,5 mm. Mit einem Teststreifen ±0,1 mm prüfen.",
+      "Lochtiefe = Länge des Einsatzes + 1 mm, damit verdrängtes Material Platz hat.",
+      "Oben eine kleine Fase (0,5 mm) erleichtert das Ansetzen. Um den Einsatz mindestens 1,5–2 mm Wand, im Slicer 4 Wandlinien.",
+      "Lötkolben: PLA etwa 210–230 °C, PETG 230–250 °C, ASA 240–260 °C. Senkrecht und langsam eindrücken, nicht drehen.",
+      "Den Rechner oben nutzen: er zeigt die Maße für deine Einsätze aus dem Inventar."] },
+  { id: "schrauben", g: "verbindung", titel: "Schrauben: Durchgangs- und Kernlöcher", kurz: "Loch für durchgesteckte und eingedrehte Schrauben", dyn: "schraube",
+    punkte: ["Durchgangsloch: Normmaß (mittel) + 0,2 mm, weil gedruckte Löcher kleiner werden.",
+      "Direkt in Kunststoff schrauben: Kernloch etwa 0,8 × Gewinde-Ø. Hält für wenige Montagen, besser sind Einsätze oder Muttern.",
+      "Für Zylinderköpfe eine Senkung mit Kopf-Ø + 0,5 mm vorsehen. Liegt die Senkung unten, mit einer Opferschicht (0,2 mm) drucken und danach durchstechen.",
+      "Um Schraubenlöcher mindestens 3 Wandlinien, damit die Schraube nicht in die Füllung schneidet."] },
+  { id: "magnete", g: "verbindung", titel: "Magnettaschen", kurz: "Taschen für deine Magnete", dyn: "magnet",
+    punkte: ["Tasche: Magnet-Ø + 0,1–0,2 mm, Tiefe: Magnetdicke + 0,1–0,2 mm. Für Presssitz + 0,1, für Kleber + 0,2.",
+      "Eingeschlossene Magnete: Druck in Bambu Studio an der Schicht über der Tasche anhalten (Pause), Magnete einlegen, weiterdrucken. Polung vorher markieren!",
+      "Über der Tasche mindestens 0,4–0,6 mm (2–3 Schichten) Material, sonst bricht die Decke durch.",
+      "Magnete verlieren ab etwa 80 °C dauerhaft Kraft. Kein Problem beim Drucken, aber nicht auf ein heißes Bett legen."] },
+  { id: "muttern", g: "verbindung", titel: "Sechskant-Muttertaschen", kurz: "Muttern sicher einlassen", dyn: "mutter",
+    punkte: ["Tasche: Schlüsselweite (über die flachen Seiten) + 0,2–0,3 mm, Tiefe: Mutternhöhe + 0,2 mm.",
+      "Waagrechte Mutter im Druck: eine flache Seite nach oben legen, dann ist die Decke eine kurze Brücke.",
+      "Seitlich einschiebbare Muttern (Schlitz) halten beim Schrauben gut und lassen sich tauschen.",
+      "Senkrecht über einer Mutter: erst die Tasche, darüber eine Opferschicht, damit das Schraubenloch sauber druckt."] },
+  { id: "ueberhang", g: "geometrie", titel: "Überhänge: die 45°-Regel", kurz: "Was ohne Stützen geht",
+    punkte: ["Bis 45° zur Senkrechten druckt jede Schicht noch zur Hälfte auf der vorherigen. Mit gutem Lüfter gehen beim P1S mit PLA oft 55–60°.",
+      "Steilere Überhänge mit Fasen oder einem Stützwinkel konstruieren statt Stützen zu drucken.",
+      "Rundungen auf der Unterseite werden zum Ende hin flach. Eine 45°-Fase am Ende hilft.",
+      "PETG, ASA und TPU vertragen weniger Überhang als PLA, weil sie mit weniger Lüfter gedruckt werden."],
+    werte: [["PLA", "bis 50–60°"], ["PETG", "bis 45°"], ["ASA / ABS", "bis 40–45°"], ["TPU", "bis 35–40°"]] },
+  { id: "bruecken", g: "geometrie", titel: "Brücken", kurz: "Frei gespannte Strecken zwischen zwei Stützen",
+    punkte: ["Eine Brücke spannt sich zwischen zwei Auflagen. Kurze Brücken sind kein Problem, die erste Schicht hängt leicht durch.",
+      "Brücken möglichst gerade halten. Geschlossene Ringe (Decke über einem Loch) überbrückt Bambu Studio in Streifen.",
+      "Für saubere Brücken: Lüfter 100 %, langsam (Überbrückung 25–50 mm/s), Material trocken.",
+      "Lange Brücken mit einer Mittelstütze im Modell teilen, das ist oft schneller als Stützstrukturen."],
+    werte: [["PLA", "bis 20–30 mm gut"], ["PETG", "bis 10–15 mm"], ["ASA / ABS", "bis 10 mm"]] },
+  { id: "fasen", g: "geometrie", titel: "Fasen statt Rundungen unten", kurz: "Gegen Elefantenfuß und Überhänge",
+    punkte: ["Unten am Bett eine 45°-Fase (0,4–1 mm) statt einer Rundung: die Rundung beginnt als flacher Überhang direkt über dem Bett.",
+      "Die Fase gleicht auch den Elefantenfuß aus: die erste Schicht wird breit gedrückt, das Teil passt trotzdem.",
+      "Rundungen sind oben und an senkrechten Kanten in Ordnung, dort sehen sie sogar besser aus als Fasen.",
+      "Löcher, die unten am Bett liegen, ebenfalls leicht anfasen: sie werden durch den Elefantenfuß sonst zu eng."],
+    werte: [["Fase am Bett", "0,4 – 1 mm × 45°"], ["Rundungen", "oben / senkrecht frei wählbar"]] },
+  { id: "waende", g: "festigkeit", titel: "Wandstärke = Vielfache der Linienbreite", kurz: "Wände ohne Lücken planen",
+    punkte: ["Der Slicer füllt eine Wand mit ganzen Linien. Passt die Stärke nicht, entsteht eine schmale Lücke oder eine Füllung im Zickzack.",
+      "Faustregel: mindestens 2 Linien, für Funktionsteile 3–4 Linien. Den Rechner oben für deine Düse nutzen.",
+      "Bambu Studio (Wandgenerator Arachne) passt Linienbreiten an, trotzdem sind ganze Vielfache stabiler und schneller.",
+      "Dünne Rippen lieber etwas dicker als zu dünn: Festigkeit kommt beim FDM-Druck vor allem von den Wänden."] },
+  { id: "details", g: "geometrie", titel: "Kleinste Details", kurz: "Was mit der Düse noch druckbar ist",
+    punkte: ["In XY ist die kleinste Wand etwa eine Linienbreite (0,4-mm-Düse: rund 0,45 mm), stabil wird es ab 2 Linien.",
+      "In Z ist die Schichthöhe die kleinste Stufe. Höhen besser als Vielfache der Schichthöhe planen.",
+      "Erhabene Schrift: Strichstärke ≥ 0,5 mm (besser 0,8), Höhe ≥ 0,4 mm. Vertiefte Schrift: ≥ 0,6 mm breit, 0,4–0,6 mm tief.",
+      "Kleine Stifte unter 2 mm Ø brechen leicht ab und schmelzen beim Druck, weil die Schicht keine Zeit zum Abkühlen hat."],
+    werte: [["0,2-mm-Düse", "Details ab 0,25 mm"], ["0,4-mm-Düse", "Details ab 0,45 mm"], ["0,6-mm-Düse", "Details ab 0,65 mm"]] },
+  { id: "schichten", g: "festigkeit", titel: "Schichtrichtung und Festigkeit", kurz: "Teile sind zwischen den Schichten am schwächsten",
+    punkte: ["Gedruckte Teile sind nicht in alle Richtungen gleich fest: zwischen den Schichten (Z) halten sie nur etwa 50–70 % der Festigkeit in XY.",
+      "Die Hauptlast soll entlang der Schichten laufen, nicht die Schichten auseinanderziehen.",
+      "Mehr Wände helfen mehr als mehr Füllung. Höhere Düsentemperatur und weniger Lüfter verbessern die Schichthaftung.",
+      "Haken, Halter und Clips daher liegend drucken, nicht stehend."] },
+  { id: "ausrichtung", g: "festigkeit", titel: "Druckausrichtung", kurz: "Wie das Teil auf dem Bett liegt",
+    punkte: ["Größte flache Seite nach unten: beste Haftung, kaum Stützen.",
+      "Runde Löcher senkrecht stellen, dann werden sie wirklich rund und maßhaltig.",
+      "Sichtflächen nach oben oder zur Seite, die Unterseite übernimmt die Struktur der Platte.",
+      "Belastung entlang der Schichten (siehe Schichtrichtung). Im Zweifel ein Teil in zwei Teile aufteilen, die jeweils gut liegen."] },
+  { id: "schnapp", g: "verbindung", titel: "Schnapphaken", kurz: "Clips, die nicht brechen",
+    punkte: ["Biegearm mindestens 5–10 × so lang wie dick, Haken 0,5–1 mm Hinterschnitt.",
+      "Immer liegend drucken, damit der Arm entlang der Schichten biegt.",
+      "Am Fuß des Arms eine Rundung (Radius ≥ halbe Dicke) gegen Bruch.",
+      "PETG und PLA+ verzeihen mehr Biegung als normales PLA, das spröde bricht."],
+    werte: [["Länge : Dicke", "≥ 5 : 1, besser 10 : 1"], ["Hinterschnitt", "0,5 – 1 mm"], ["Fügewinkel", "30 – 45°"]] },
+  { id: "gewinde", g: "verbindung", titel: "Gedruckte Gewinde", kurz: "Wann Gewinde selbst drucken",
+    punkte: ["Gewinde ab etwa M8 lassen sich direkt drucken. Kleinere lieber mit Einsatz, Mutter oder nachschneiden.",
+      "Gewinde senkrecht drucken (Achse in Z), mit kleiner Schichthöhe (0,12–0,16 mm).",
+      "Spiel 0,2–0,3 mm zwischen Innen- und Außengewinde, Gewindeanfang anfasen.",
+      "Für Deckel und Dosen grobe Gewinde (Trapez, 3–4 mm Steigung) verwenden: robust und schnell."],
+    werte: [["Kleinstes Gewinde", "≈ M8"], ["Spiel", "0,2 – 0,3 mm"], ["Schichthöhe", "0,12 – 0,16 mm"]] },
+  { id: "warping", g: "geometrie", titel: "Verzug und Auflagefläche", kurz: "Große flache Teile ohne hochgezogene Ecken",
+    punkte: ["Spitze Ecken heben sich zuerst. Ecken in der Draufsicht runden (Radius ≥ 3 mm).",
+      "Bei ASA/ABS und großen PETG-Teilen: Rand (Brim) oder Randohren an den Ecken.",
+      "Lange, dünne Teile mit großer Auflage verziehen sich am stärksten. Teilen oder Rippen auf die Oberseite setzen.",
+      "Kleine Auflageflächen (Spitzen, Kugeln) unten abflachen, damit genug Fläche das Teil hält."] },
+];
+
+// ---- Slicer-Lexikon: Bambu Studio, Namen wie in der deutschen Oberfläche (englisch in Klammern) ----
+// Gruppen wie die Reiter in Bambu Studio (Prozess: Qualität, Stärke, Geschwindigkeit, Stützen, Sonstige; dazu Filament).
+// ab = Abschnitt im Reiter, was = was es macht, werte = typische Werte (P1S, 0,4-mm-Düse), wann = wann ändern
+const LEX_GRUPPEN = [
+  { id: "qualitaet", name: "Qualität", en: "Quality", icon: "✨" },
+  { id: "staerke", name: "Stärke", en: "Strength", icon: "🧱" },
+  { id: "tempo", name: "Geschwindigkeit", en: "Speed", icon: "⚡" },
+  { id: "stuetzen", name: "Stützen", en: "Support", icon: "🌲" },
+  { id: "sonstige", name: "Sonstige", en: "Others", icon: "🧩" },
+  { id: "filament", name: "Filament", en: "Filament", icon: "🧵" },
+];
+const LEXIKON = [
+  // Qualität
+  { g: "qualitaet", ab: "Schichthöhe", de: "Schichthöhe", en: "Layer height",
+    was: "Höhe jeder gedruckten Schicht. Bestimmt, wie fein Rundungen und Schrägen werden und wie lange der Druck dauert.",
+    werte: "0,4-mm-Düse: 0,08 – 0,28 mm. Standard 0,20 mm, fein 0,12 – 0,16 mm. Faustregel 25 – 75 % des Düsen-Ø.",
+    wann: "Feiner für Figuren, Schrift und flache Schrägen. Gröber für schnelle, robuste Funktionsteile. Halbe Schichthöhe ≈ doppelte Druckzeit." },
+  { g: "qualitaet", ab: "Schichthöhe", de: "Höhe der ersten Schicht", en: "Initial layer height",
+    was: "Dicke der ersten Schicht auf der Platte. Eine dickere erste Schicht verzeiht kleine Unebenheiten.",
+    werte: "0,2 mm (0,4-mm-Düse), 0,1 mm (0,2-mm-Düse), 0,3 mm (0,6-mm-Düse).",
+    wann: "Selten ändern. Bei Haftproblemen eher Platte reinigen als die Höhe anpassen." },
+  { g: "qualitaet", ab: "Breite der Linie", de: "Breite der Linie", en: "Line width",
+    was: "Wie breit eine gedruckte Linie ist, getrennt für Außenwand, Innenwand, Füllung, Oberfläche und Stützen.",
+    werte: "0,4-mm-Düse: Außenwand 0,42 mm, sonst 0,45 mm. Sinnvoll 100 – 120 % des Düsen-Ø.",
+    wann: "Breitere Füllung (0,5 mm) macht Teile stabiler und schneller. Schmalere Außenwand für feinste Details. Konstruktion: Wandstärken als Vielfache planen." },
+  { g: "qualitaet", ab: "Naht", de: "Nahtposition", en: "Seam position",
+    was: "Wo jede Schichtrunde beginnt und endet. An dieser Stelle entsteht eine kleine Naht.",
+    werte: "Ausgerichtet (Aligned, Standard), Nächste (Nearest), Rückseite (Back), Zufällig (Random).",
+    wann: "Rückseite für Sichtteile mit klarer Vorderseite. Zufällig verteilt die Naht, macht die Oberfläche aber rau. Die Naht lässt sich auch aufmalen." },
+  { g: "qualitaet", ab: "Naht", de: "Schrägnaht-Typ", en: "Scarf seam type",
+    was: "Lässt Anfang und Ende einer Runde schräg über mehrere Höhenstufen überlappen. Die Naht ist dann kaum zu sehen.",
+    werte: "Aus (Standard) oder für Konturen bzw. alle Wände. Dazu Schrägnaht Länge und Starthöhe.",
+    wann: "Für runde, glatte Sichtteile wie Vasen, Becher, Zylinder. Kostet etwas Zeit und braucht gut kalibrierten Fluss." },
+  { g: "qualitaet", ab: "Präzision", de: "Elefantenfußkompensation", en: "Elephant foot compensation",
+    was: "Zieht die erste Schicht etwas nach innen, weil sie beim Andrücken breiter wird als geplant.",
+    werte: "0,15 mm (Standard).",
+    wann: "Erhöhen (0,2 – 0,25), wenn die Unterkante wulstig ist oder Teile unten nicht passen. Besser zusätzlich eine kleine Fase ins Modell." },
+  { g: "qualitaet", ab: "Präzision", de: "X-Y-Loch-Kompensation", en: "X-Y hole compensation",
+    was: "Vergrößert (+) oder verkleinert (−) senkrechte Löcher in XY. Gedruckte Löcher werden meist etwas zu klein.",
+    werte: "0 mm (Standard). Typisch +0,05 bis +0,15 mm.",
+    wann: "Wenn Schrauben, Stifte oder Lager nicht in die Löcher passen. Wirkt nur auf senkrechte Löcher." },
+  { g: "qualitaet", ab: "Präzision", de: "Präzise Z-Höhe", en: "Precise Z height",
+    was: "Passt die letzten Schichten an, damit die Gesamthöhe genau dem Modell entspricht und nicht auf die Schichthöhe gerundet wird.",
+    werte: "Aus (Standard).",
+    wann: "Einschalten, wenn die Höhe genau stimmen muss, z. B. bei Teilen, die ineinander gesteckt werden." },
+  { g: "qualitaet", ab: "Glätten", de: "Glätten-Typ", en: "Ironing type",
+    was: "Die Düse fährt noch einmal heiß und mit sehr wenig Material über die Oberfläche und bügelt sie glatt.",
+    werte: "Kein Glätten (Standard), Nur oberste Oberfläche, Alle Oberflächen, Alle soliden Schichten.",
+    wann: "Für glatte, flache Deckflächen (Schilder, Deckel). Kostet deutlich Zeit. Nicht bei gewölbten Oberseiten." },
+  { g: "qualitaet", ab: "Glätten", de: "Glätten-Fluss", en: "Ironing flow",
+    was: "Wie viel Material beim Glätten noch fließt, um feine Rillen zu füllen.",
+    werte: "10 % (Standard), sinnvoll 8 – 15 %. Dazu Abstand der Glättlinien 0,1 mm und 20 – 30 mm/s.",
+    wann: "Mehr, wenn noch Rillen bleiben. Weniger, wenn sich Wülste bilden oder die Fläche glänzend verschmiert." },
+  { g: "qualitaet", ab: "Wandgenerator", de: "Wandgenerator", en: "Wall generator",
+    was: "Wie Wände berechnet werden: Klassisch mit fester Linienbreite oder Arachne mit veränderlicher Breite.",
+    werte: "Klassisch (Standard) oder Arachne.",
+    wann: "Arachne für dünne Stellen, Schrift und spitz zulaufende Teile, dort entstehen keine Lücken. Klassisch für gleichmäßige Außenflächen." },
+  { g: "qualitaet", ab: "Erweitert", de: "Reihenfolge der Wände", en: "Order of walls",
+    was: "Ob zuerst die inneren oder die äußeren Wände einer Schicht gedruckt werden.",
+    werte: "innen/außen (Standard), außen/innen, innen/außen/innen.",
+    wann: "außen/innen für genauere Außenmaße und schönere Flächen, aber schlechtere Überhänge. innen/außen/innen als Mittelweg." },
+  { g: "qualitaet", ab: "Überhänge", de: "Erkennen von Wandüberhängen", en: "Detect overhang wall",
+    was: "Erkennt überhängende Wände und druckt sie langsamer, mit Brückenfluss und mehr Kühlung.",
+    werte: "An (Standard).",
+    wann: "An lassen. Nur bei Sonderfällen (Spiralvase, Tests) ausschalten." },
+  // Stärke
+  { g: "staerke", ab: "Wände", de: "Wandlinien", en: "Wall loops",
+    was: "Anzahl der Linien in jeder Außenwand. Wände tragen den größten Teil der Festigkeit.",
+    werte: "2 (Standard). 3 – 4 für Funktionsteile, 4 – 6 bei Gewinden und Einsätzen.",
+    wann: "Erhöhen, wenn Teile brechen oder Schrauben in die Füllung schneiden. Hilft mehr als höhere Fülldichte." },
+  { g: "staerke", ab: "Wände", de: "Nur eine Wand auf den oberen Flächen", en: "Only one wall on top surfaces",
+    was: "Auf Deckflächen wird nur eine Wandlinie gedruckt, damit mehr Platz für ein sauberes Oberflächenmuster bleibt.",
+    werte: "An (Standard).",
+    wann: "Aus, wenn auf kleinen Deckflächen Lücken entstehen." },
+  { g: "staerke", ab: "Obere/Untere Schichten", de: "Obere Schalenschichten", en: "Top shell layers",
+    was: "Anzahl der geschlossenen Schichten oben. Zusammen mit „Dicke der oberen Schale“: es gilt der größere Wert.",
+    werte: "5 Schichten bzw. 1,0 mm (Standard bei 0,20 mm).",
+    wann: "Erhöhen, wenn die Füllung durchscheint oder die Oberfläche Löcher hat (vor allem bei wenig Fülldichte)." },
+  { g: "staerke", ab: "Obere/Untere Schichten", de: "Untere Schalenschichten", en: "Bottom shell layers",
+    was: "Anzahl der geschlossenen Schichten unten.",
+    werte: "3 Schichten (Standard).",
+    wann: "Mehr bei wasserdichten Gefäßen oder dünnen Bodenplatten, die belastet werden." },
+  { g: "staerke", ab: "Obere/Untere Schichten", de: "Muster der Oberfläche", en: "Top surface pattern",
+    was: "Linienmuster der obersten geschlossenen Schicht.",
+    werte: "Monotonische Linie (Standard), Monotonisch, Geradlinig, Konzentrisch und mehr.",
+    wann: "Konzentrisch für runde Deckel und Knöpfe. Monotonisch für gleichmäßigen Glanz ohne Streifen." },
+  { g: "staerke", ab: "Füllung", de: "Fülldichte", en: "Sparse infill density",
+    was: "Wie dicht das Innere gefüllt wird.",
+    werte: "15 % (Standard). Deko 5 – 15 %, Funktionsteile 20 – 40 %, stark belastet 40 – 60 %.",
+    wann: "Erst Wände erhöhen, dann Füllung. Über 50 % bringt kaum mehr Festigkeit, kostet aber viel Material." },
+  { g: "staerke", ab: "Füllung", de: "Füllmuster", en: "Sparse infill pattern",
+    was: "Form der inneren Füllung.",
+    werte: "Gitternetz (Grid), Gyroid, Kubisch, Adaptiv kubisch, Blitz (Lightning), Bienenwabe u. a. Standard je nach Version Gitternetz oder Kreuzschraffur.",
+    wann: "Gyroid: in alle Richtungen gleich fest, gut für PETG und TPU. Blitz: nur als Stütze für Deckflächen, für Deko. Kubisch: stabil und schnell." },
+  { g: "staerke", ab: "Füllung", de: "Überlappung Füllung/Wand", en: "Infill/Wall overlap",
+    was: "Wie weit die Füllung in die Wand hineinragt, damit beides verbunden ist.",
+    werte: "15 % (Standard).",
+    wann: "Erhöhen, wenn sich die Füllung von der Wand löst. Zu hoch drückt sich die Füllung außen durch." },
+  { g: "staerke", ab: "Erweitert", de: "Sicherstellung der vertikalen Wanddicke", en: "Ensure vertical shell thickness",
+    was: "Fügt an schrägen Flächen massive Füllung ein, damit die Wand dort nicht zu dünn wird.",
+    werte: "An bzw. „Alle“ (Standard).",
+    wann: "An lassen. Nur ausschalten, um bei Deko-Teilen Material zu sparen." },
+  // Geschwindigkeit
+  { g: "tempo", ab: "Geschwindigkeit der ersten Schicht", de: "Erste Schicht", en: "Initial layer",
+    was: "Druckgeschwindigkeit der ersten Schicht. Langsamer = bessere Haftung.",
+    werte: "50 mm/s (Standard). Bei Haftproblemen 20 – 30 mm/s, TPU 15 – 20 mm/s.",
+    wann: "Wenn die erste Schicht nicht haftet, sich Ecken lösen oder sehr kleine Teile umfallen." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Außenwand", en: "Outer wall",
+    was: "Geschwindigkeit der sichtbaren Außenwand. Hat den größten Einfluss auf das Aussehen.",
+    werte: "200 mm/s (Standard). Silk, Transparent, Holz: 40 – 120 mm/s.",
+    wann: "Langsamer für glänzendere, glattere Oberflächen und weniger Geisterbilder." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Innere Wand", en: "Inner wall",
+    was: "Geschwindigkeit der inneren Wandlinien.",
+    werte: "300 mm/s (Standard).",
+    wann: "Senken, wenn das Material den Volumenstrom nicht schafft (Lücken) oder die Außenwand wellig wird." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Füllung", en: "Sparse infill",
+    was: "Geschwindigkeit der inneren Füllung.",
+    werte: "270 mm/s (Standard). Wird oft durch die Maximale Volumengeschwindigkeit gebremst.",
+    wann: "Senken bei Schichtverschiebung oder wenn die Füllung löchrig ist." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Oberfläche", en: "Top surface",
+    was: "Geschwindigkeit der obersten Schicht.",
+    werte: "200 mm/s (Standard). Für glatte Deckflächen 60 – 120 mm/s.",
+    wann: "Langsamer bei Rillen oder Lücken in der Oberfläche." },
+  { g: "tempo", ab: "Geschwindigkeit der restlichen Schichten", de: "Überbrückung", en: "Bridge",
+    was: "Geschwindigkeit frei gespannter Linien über Lücken.",
+    werte: "50 mm/s (Standard), 25 – 50 mm/s.",
+    wann: "Langsamer, wenn Brücken durchhängen oder reißen." },
+  { g: "tempo", ab: "Überhanggeschwindigkeit", de: "Verlangsamen bei Überhängen", en: "Slow down for overhang",
+    was: "Druckt überhängende Wände je nach Überhang (10 – 25 %, 25 – 50 %, 50 – 75 %, 75 – 100 % der Linienbreite) langsamer.",
+    werte: "An. Typisch 0 / 50 / 30 / 10 mm/s für die vier Stufen.",
+    wann: "Werte senken, wenn sich Überhänge hochbiegen oder Kanten ausfransen." },
+  { g: "tempo", ab: "Beschleunigung", de: "Beschleunigung", en: "Acceleration",
+    was: "Wie schnell der Kopf auf Tempo kommt. Für normales Drucken, Außenwand, erste Schicht, Oberfläche getrennt.",
+    werte: "Normales Drucken 10 000, Außenwand 5 000, Oberfläche 2 000, erste Schicht 500 mm/s².",
+    wann: "Senken bei Schichtverschiebung, Geisterbildern oder hohen, dünnen Teilen, die wackeln." },
+  // Stützen
+  { g: "stuetzen", ab: "Stützen", de: "Stützstrukturen aktivieren", en: "Enable support",
+    was: "Schaltet automatische Stützen unter Überhängen ein.",
+    werte: "Aus (Standard).",
+    wann: "Wenn Überhänge steiler als etwa 45° oder freie Flächen in der Luft beginnen. Alternativ das Teil drehen oder Fasen konstruieren." },
+  { g: "stuetzen", ab: "Stützen", de: "Typ", en: "Type",
+    was: "Art der Stützen und ob sie automatisch oder nur an bemalten Stellen entstehen.",
+    werte: "Normal (auto), Baum (auto), Normal (manuell), Baum (manuell).",
+    wann: "Baum: weniger Material, leichter zu entfernen, gut bei Figuren. Normal: für große, flache Überhänge. Manuell: nur, wo du Stützen aufmalst." },
+  { g: "stuetzen", ab: "Stützen", de: "Stil", en: "Style",
+    was: "Feinform der Stützen, z. B. bei Baumstützen.",
+    werte: "Standard, Baum schlank, Baum stark, Baum-Hybrid, Baum Organisch.",
+    wann: "Organisch: lässt sich am leichtesten lösen. Stark: für hohe, schwere Überhänge. Hybrid: Baum mit flachen Stützbereichen." },
+  { g: "stuetzen", ab: "Stützen", de: "Schwellenwinkel", en: "Threshold angle",
+    was: "Ab welchem Winkel (gemessen von der Waagrechten) keine Stützen mehr nötig sind. Flachere Flächen werden gestützt.",
+    werte: "30° (Standard).",
+    wann: "Kleiner (20 – 25°) für weniger Stützen bei PLA. Größer (35 – 40°) bei PETG, ASA, TPU." },
+  { g: "stuetzen", ab: "Stützen", de: "Nur auf Druckplatte", en: "On build plate only",
+    was: "Stützen wachsen nur von der Platte, nicht auf dem Modell selbst.",
+    werte: "Aus (Standard).",
+    wann: "An, wenn Stützen auf Sichtflächen Spuren hinterlassen würden." },
+  { g: "stuetzen", ab: "Erweitert", de: "Oberer Z-Abstand", en: "Top Z distance",
+    was: "Abstand zwischen Stütze und Modell in der Höhe. Bestimmt, wie leicht die Stütze abgeht.",
+    werte: "0,2 mm (Standard bei 0,2-mm-Schichten). 0,1 – 0,15 für glattere Unterseiten.",
+    wann: "Größer, wenn Stützen zu fest sitzen. Kleiner, wenn die Unterseite durchhängt." },
+  { g: "stuetzen", ab: "Erweitert", de: "Stützen/Objekt XY-Abstand", en: "Support/object xy distance",
+    was: "Seitlicher Abstand zwischen Stütze und Modell.",
+    werte: "0,35 mm (Standard).",
+    wann: "Größer, wenn Stützen an senkrechten Wänden festkleben." },
+  { g: "stuetzen", ab: "Erweitert", de: "Obere Schnittstellschichten", en: "Top interface layers",
+    was: "Dichte Schichten oben auf der Stütze, direkt unter dem Modell. Ergeben eine glattere Unterseite.",
+    werte: "2 – 3 Schichten.",
+    wann: "Mehr für schönere Unterseiten, weniger für leichteres Entfernen." },
+  { g: "stuetzen", ab: "Erweitert", de: "Brücken nicht unterstützen", en: "Don't support bridges",
+    was: "Kurze Brücken werden nicht gestützt, weil sie frei gedruckt werden können.",
+    werte: "An (Standard).",
+    wann: "Aus, wenn lange Brücken durchhängen." },
+  { g: "stuetzen", ab: "Floß", de: "Floßschichten", en: "Raft layers",
+    was: "Druckt erst ein Gitter (Floß) und darauf das Modell.",
+    werte: "0 (Standard, kein Floß).",
+    wann: "Selten nötig. Bei winzigen Auflageflächen oder starkem Verzug, sonst lieber Rand (Brim)." },
+  // Sonstige
+  { g: "sonstige", ab: "Druckbetthaftung", de: "Randtyp", en: "Brim type",
+    was: "Ein Rand aus Linien rund um das Teil auf der ersten Schicht, damit es besser haftet.",
+    werte: "Automatisch (Standard), Keine Umrandung, Nur äußerer Rand, Nur innerer Rand, Äußerer und innerer Rand, Randohren (Brim ears).",
+    wann: "Äußerer Rand bei kleinen Auflageflächen, ASA/ABS und hohen Teilen. Randohren nur an den Ecken großer Teile." },
+  { g: "sonstige", ab: "Druckbetthaftung", de: "Randbreite", en: "Brim width",
+    was: "Wie breit der Rand ist.",
+    werte: "5 mm (Standard), 3 – 10 mm.",
+    wann: "Breiter bei starkem Verzug, schmaler, wenn er schwer abgeht." },
+  { g: "sonstige", ab: "Druckbetthaftung", de: "Lücke zwischen Rand und Objekt", en: "Brim-object gap",
+    was: "Abstand zwischen Rand und Teil. Entscheidet, wie leicht sich der Rand abtrennen lässt.",
+    werte: "0,1 mm (Standard).",
+    wann: "Größer (0,15 – 0,2), wenn der Rand zu fest sitzt und Spuren hinterlässt." },
+  { g: "sonstige", ab: "Spezialmodus", de: "Druckreihenfolge", en: "Print sequence",
+    was: "Mehrere Teile Schicht für Schicht gemeinsam oder Teil für Teil nacheinander drucken.",
+    werte: "Nach Ebene (Standard), Nach Objekt.",
+    wann: "Nach Objekt: ein Fehler ruiniert nicht alle Teile und es gibt weniger Fäden. Geht nur mit niedrigen Teilen und genug Abstand." },
+  { g: "sonstige", ab: "Spezialmodus", de: "Spiralvase", en: "Spiral vase",
+    was: "Druckt nur eine einzige Wand als durchgehende Spirale ohne Naht, ohne Füllung und Deckel.",
+    werte: "Aus (Standard).",
+    wann: "Für Vasen, Lampenschirme, Becher-Einsätze. Mit 0,6-mm-Düse werden die Wände stabiler." },
+  { g: "sonstige", ab: "Spezialmodus", de: "Zeitraffer", en: "Timelapse",
+    was: "Kamera-Zeitraffer: normal oder Smooth, bei dem der Kopf für jedes Bild zur Seite fährt.",
+    werte: "Normal (Standard), Smooth.",
+    wann: "Smooth braucht einen Reinigungsturm und verlängert den Druck. Nur für schöne Videos." },
+  { g: "sonstige", ab: "Fuzzy Skin", de: "Fuzzy Skin", en: "Fuzzy Skin",
+    was: "Lässt die Düse beim Außenwand-Drucken zufällig zittern. Ergibt eine raue, griffige Oberfläche, die Schichtlinien verdeckt.",
+    werte: "Aus (Standard). Fuzzy Skin Stärke 0,3 mm, Punktabstand 0,8 mm.",
+    wann: "Für Griffe, Gehäuse und Teile, deren Schichtlinien man nicht sehen soll. Lässt sich auch nur an Stellen aufmalen." },
+  { g: "sonstige", ab: "G-Code-Ausgabe", de: "Vermeiden von Wandüberquerungen", en: "Avoid crossing wall",
+    was: "Leerfahrten führen um Wände herum statt quer darüber.",
+    werte: "Aus (Standard).",
+    wann: "An bei Fäden oder Kratzspuren auf Oberflächen. Etwas längere Druckzeit." },
+  // Filament
+  { g: "filament", ab: "Drucktemperatur", de: "Düsentemperatur", en: "Nozzle temperature",
+    was: "Temperatur der Düse für die erste Schicht und die weiteren Schichten.",
+    werte: "PLA 210 – 230 °C, PETG 240 – 255 °C, ASA 260 – 270 °C, TPU 220 – 230 °C.",
+    wann: "Höher für bessere Schichthaftung und hohe Geschwindigkeit. Niedriger gegen Fäden und Glanzverlust. Mit Temperaturturm finden." },
+  { g: "filament", ab: "Drucktemperatur", de: "Druckbetttemperatur", en: "Bed temperature",
+    was: "Betttemperatur, getrennt für jede Plattenart (Cool Plate, Engineering, Smooth PEI, Textured PEI).",
+    werte: "PLA 55 – 65 °C, PETG 70 °C, ASA/ABS 90 – 100 °C, TPU 35 – 45 °C (Textured PEI).",
+    wann: "Höher bei Haftproblemen, niedriger bei Elefantenfuß. Mehr dazu im Reiter Druckplatten." },
+  { g: "filament", ab: "Grundlegende Informationen", de: "Flussverhältnis", en: "Flow ratio",
+    was: "Multipliziert die geförderte Materialmenge. Gleicht Durchmesser- und Dichteschwankungen aus.",
+    werte: "0,95 – 1,0. Bambu PLA 0,98, PETG 0,95.",
+    wann: "Kalibrieren bei jeder neuen Marke. Zu hoch: Wülste, raue Oberfläche. Zu niedrig: Lücken." },
+  { g: "filament", ab: "Grundlegende Informationen", de: "Pressure Advance aktivieren", en: "Enable pressure advance",
+    was: "Gleicht den Druck in der Düse beim Beschleunigen und Bremsen aus (K-Faktor). Sonst werden Ecken dick und Linienanfänge dünn.",
+    werte: "PLA 0,02, PETG 0,04, TPU 0 – 0,05. Ermittelt mit der Kalibrierung Flussdynamik.",
+    wann: "Kalibrieren bei neuem Material oder wenn Ecken ausbeulen." },
+  { g: "filament", ab: "Volumetrische Geschwindigkeitsbegrenzung", de: "Maximale Volumengeschwindigkeit", en: "Max volumetric speed",
+    was: "Obergrenze, wie viel mm³ Material pro Sekunde geschmolzen werden. Bremst alle Geschwindigkeiten passend ein.",
+    werte: "PLA 15 – 21, PETG 12 – 20 (HF bis 25), ASA 12 – 16, TPU 3 – 4 mm³/s.",
+    wann: "Senken bei Lücken trotz richtigem Fluss. Kalibrieren mit dem Max-Volumengeschwindigkeit-Test." },
+  { g: "filament", ab: "Kühlung", de: "Lüftergeschwindigkeit", en: "Fan speed",
+    was: "Bauteillüfter zwischen Minimum und Maximum, abhängig von der Schichtzeit (Minimale Lüftergeschwindigkeit, Schwellenwert für die maximale Lüftergeschwindigkeit).",
+    werte: "PLA 80 – 100 %, PETG 20 – 60 %, ASA/ABS 0 – 30 %, TPU 70 – 100 %.",
+    wann: "Mehr für Überhänge und Brücken. Weniger für bessere Schichthaftung und gegen Verzug." },
+  { g: "filament", ab: "Kühlung", de: "Verlangsamen für eine bessere Schichtkühlung", en: "Slow printing down for better layer cooling",
+    was: "Bremst kleine Schichten, damit jede Schicht Zeit zum Abkühlen hat (bis zur Minimalen Druckgeschwindigkeit).",
+    werte: "An (Standard), Schichtdauer ca. 4 – 8 s.",
+    wann: "An lassen. Wichtig für kleine Teile und Spitzen, die sonst weich werden." },
+  { g: "filament", ab: "Kühlung", de: "Hilfslüfter", en: "Auxiliary part cooling fan",
+    was: "Der große Seitenlüfter im P1S. Kühlt zusätzlich von der Seite.",
+    werte: "PLA 0 – 70 %, PETG, ASA, ABS 0 %.",
+    wann: "Für große Überhänge in PLA. Bei PETG und ASA aus, sonst Verzug und schwache Schichten." },
+  { g: "filament", ab: "Kühlung", de: "Zwangskühlung für Überhänge und Brücken", en: "Force cooling for overhang and bridge",
+    was: "Lüfter bei Überhängen und Brücken auf den eigenen Wert (Lüftergeschwindigkeit für Überhänge) setzen.",
+    werte: "An, 100 % für PLA. Bei PETG 60 – 90 %.",
+    wann: "An lassen. Bei ASA nur, wenn Überhänge sonst durchhängen." },
+  { g: "filament", ab: "Überschreibung", de: "Rückzugslänge", en: "Retraction length",
+    was: "Wie weit das Filament vor Leerfahrten zurückgezogen wird, damit nichts nachläuft.",
+    werte: "P1S: 0,8 mm (Standard). PETG 0,8 – 1,2 mm, TPU 0 – 0,4 mm.",
+    wann: "Erhöhen in 0,2-mm-Schritten bei Fäden (zuerst trocknen und Temperatur prüfen). Zu viel kann die Düse verstopfen." },
+  { g: "filament", ab: "Überschreibung", de: "Z-Hop beim Rückzug", en: "Z hop when retract",
+    was: "Hebt die Düse bei Leerfahrten an, damit sie nicht über das Teil kratzt.",
+    werte: "0,4 mm (Standard am P1S).",
+    wann: "Erhöhen bei Kratzern oder wenn die Düse an hochgebogenen Stellen hängen bleibt. Mehr Z-Hop = mehr Fäden." },
+  { g: "filament", ab: "Grundlegende Informationen", de: "Erweichungstemperatur", en: "Softening temperature",
+    was: "Ab dieser Temperatur wird das Filament weich. Bambu Studio warnt, wenn Bett oder Kammer wärmer sind (Tür öffnen).",
+    werte: "PLA ca. 45 °C, PETG ca. 65 – 70 °C, ASA/ABS ca. 95 – 100 °C.",
+    wann: "Nur bei eigenen Filamenten eintragen. Gilt auch als Grenze fürs Trocknen." },
+];
+
+// ---- Druckplatten (Namen wie PLATTEN in daten.js; Werte nach dem Bambu-Wiki, P1S-Bett max. 100 °C) ----
+const BETT_MAX_P1S = 100;
+const PLATTEN_INFO = [
+  { id: "cool", name: "Cool Plate/PLA Plate", kurz: "Cool Plate", farbe: "#2b2f31", muster: "glatt",
+    text: "Glatte, schwarze Platte für niedrige Betttemperaturen. Gedacht für PLA bei 35–45 °C, wenn die Kammer kühl bleiben soll.",
+    gut: ["PLA bei offener Tür und niedrigem Bett", "Glatte, glänzende Unterseiten"],
+    pflege: ["Vor jedem Druck dünn Klebestift auftragen: hilft beim Haften und beim Lösen.", "Kleber regelmäßig mit warmem Wasser abwaschen.", "Nicht über 60 °C heizen."],
+    vorsicht: "Für PETG, TPU, ASA, ABS nicht geeignet." },
+  { id: "supertack", name: "Bambu Cool Plate SuperTack", kurz: "SuperTack", farbe: "#1f2a27", muster: "glatt",
+    text: "Cool Plate mit besonders haftender Beschichtung. Hält PLA und PETG schon bei niedriger Temperatur ohne Kleber. Wärmer = haftet stärker.",
+    gut: ["PLA und PETG ohne Kleber", "Kleine Auflageflächen, hohe dünne Teile", "Glatte Unterseiten"],
+    pflege: ["Ohne Kleber verwenden. Mit Spülmittel und warmem Wasser reinigen.", "Weiche Oberfläche: Spachtel vorsichtig ansetzen. Kratzer stören nicht.", "Sitzt ein Teil zu fest: Platte auf 50 °C heizen und dann lösen."],
+    vorsicht: "Kein TPU (beschädigt die Platte). Kein Bambu PLA Silk. PLA mit PETG-Stützschnittstelle nur mit Floß." },
+  { id: "eng", name: "Engineering Plate", kurz: "Engineering", farbe: "#3a3f3c", muster: "matt",
+    text: "Glatte, matte Platte für technische Materialien. Braucht immer Kleber, der hier als Haft- und Trennmittel dient.",
+    gut: ["PETG, ASA, ABS, PC, PA mit Kleber", "Glatte Unterseiten bei Technik-Materialien"],
+    pflege: ["Klebestift vor jedem Druck dünn auftragen.", "Kleberreste mit warmem Wasser und Spülmittel abwaschen."],
+    vorsicht: "Für PLA nicht empfohlen. Ohne Kleber reißen PETG und TPU Stücke aus der Oberfläche." },
+  { id: "smooth", name: "Smooth PEI Plate / High Temp Plate", kurz: "Smooth PEI", farbe: "#c9a24a", muster: "glatt",
+    text: "Glatte PEI-Platte (goldgelb) für fast alle Materialien. Gibt spiegelglatte Unterseiten.",
+    gut: ["PLA ohne Kleber", "Glänzende Unterseiten", "PETG, TPU, ASA mit Kleber als Trennmittel"],
+    pflege: ["Mit Spülmittel und warmem Wasser waschen, zwischendurch Isopropanol.", "Kein Aceton auf PEI.", "Teile nach dem Abkühlen durch leichtes Biegen lösen."],
+    vorsicht: "PETG und TPU haften auf glattem PEI zu stark: immer Kleber als Trennschicht, sonst reißen sie die Beschichtung heraus." },
+  { id: "textured", name: "Textured PEI Plate", kurz: "Textured PEI", farbe: "#b8872f", muster: "struktur",
+    text: "Raue PEI-Platte, Standard am P1S. Haftet gut, Teile lösen sich nach dem Abkühlen fast von selbst. Unterseite bekommt eine feine Struktur.",
+    gut: ["Fast alles ohne Kleber: PLA, PETG, TPU, ASA, ABS", "Unterseiten ohne Fingerabdrücke", "PETG ohne Abreißen der Oberfläche"],
+    pflege: ["Wöchentlich mit Spülmittel und warmem Wasser waschen, gut abtrocknen.", "Nicht mit den Fingern auf die Druckfläche fassen.", "Kein Aceton. Verschlissene Stellen in der Mitte sind normal."],
+    vorsicht: "Sehr kleine Kontaktflächen haften schlechter als auf glatten Platten. Dann Rand (Brim) oder SuperTack." },
+];
+// Matrix Material × Platte: a = ok | kleber | nein, t = Betttemperatur in °C
+const PLATTEN_MATRIX = [
+  { m: "PLA", w: { cool: ["kleber", "35–45"], supertack: ["ok", "35–45"], eng: ["nein"], smooth: ["ok", "55–65"], textured: ["ok", "55–65"] } },
+  { m: "PETG", w: { cool: ["nein"], supertack: ["ok", "60–70"], eng: ["kleber", "70–80"], smooth: ["kleber", "70–80"], textured: ["ok", "70–80"] } },
+  { m: "TPU", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "30–35"], smooth: ["kleber", "35–45"], textured: ["ok", "35–45"] } },
+  { m: "ASA", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "90–100"], smooth: ["kleber", "90–100"], textured: ["ok", "90–100"] } },
+  { m: "ABS", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "90–100"], smooth: ["kleber", "90–100"], textured: ["ok", "90–100"] } },
+  { m: "PC", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "100"], smooth: ["kleber", "100"], textured: ["kleber", "100"] } },
+  { m: "PA", w: { cool: ["nein"], supertack: ["nein"], eng: ["kleber", "100"], smooth: ["kleber", "100"], textured: ["kleber", "100"] } },
+];
+// Kleine Zeichnung einer Platte (Draufsicht, leicht schräg)
+function platteSvg(p) {
+  const id = `pl-${p.id}`;
+  const muster = p.muster === "struktur"
+    ? `<pattern id="${id}" width="5" height="5" patternUnits="userSpaceOnUse"><circle cx="2.5" cy="2.5" r="1" fill="rgba(0,0,0,.28)"/><circle cx="0" cy="0" r=".6" fill="rgba(255,255,255,.18)"/></pattern>`
+    : `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,${p.muster === "matt" ? 0.06 : 0.22})"/><stop offset=".45" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(255,255,255,${p.muster === "matt" ? 0.03 : 0.1})"/></linearGradient>`;
+  return `<svg viewBox="0 0 120 80" class="pl-bild" aria-hidden="true"><defs>${muster}</defs>
+    <path d="M18 14 H102 L112 66 H8 Z" fill="${p.farbe}" stroke="rgba(255,255,255,.25)"/>
+    <path d="M18 14 H102 L112 66 H8 Z" fill="url(#${id})"/>
+    <path d="M8 66 H112 V70 H8 Z" fill="#555c58"/>
+    <rect x="52" y="8" width="16" height="6" rx="2" fill="#8da49a"/>
+  </svg>`;
+}
 // ---------------------------------------------------------------------------
 // Aussehen: dunkler Tech-Look, Mint-Akzente, Glas-Karten, Rasterhintergrund
 // ---------------------------------------------------------------------------
@@ -1866,6 +2416,144 @@ input[type=range]:active::-webkit-slider-thumb { background: var(--gelb); box-sh
 .dr-l-stift { position: absolute; top: 6px; right: 8px; font-style: normal; font-size: 11px; color: var(--leise); }
 .dr-stufen { margin: 12px 0 4px; }
 .dr-stufen .chip { min-width: 54px; }
+/* ---- Hilfe v0.12: Trockner mit zwei Plätzen, Konstruktion, Slicer-Lexikon, Druckplatten ---- */
+.hinweis.rot { color: #ffc2c2; background: rgba(255,107,107,.1); border-color: rgba(255,107,107,.35); }
+.pl-jetzt { color: var(--mint); }
+/* Aufklappbare Einträge */
+.hi-eintrag { border: 1px solid var(--rand); border-radius: 16px; background: var(--flaeche); backdrop-filter: blur(10px); transition: border-color .2s, background .2s, box-shadow .2s; min-width: 0; }
+.hi-eintrag:hover { border-color: rgba(62,230,168,.35); background: var(--flaeche-hover); }
+.hi-eintrag.auf { border-color: rgba(62,230,168,.45); box-shadow: 0 8px 28px rgba(0,0,0,.25), inset 0 0 0 1px rgba(62,230,168,.08); }
+.hi-eintrag-kopf { width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 12px; text-align: left; border-radius: 16px; }
+.hi-eintrag-kopf:focus-visible { outline: 2px solid rgba(62,230,168,.6); outline-offset: -2px; }
+.hi-pfeil { margin-left: auto; flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: var(--leise); font-size: 18px; transition: transform .22s ease, color .2s, background .2s; }
+.hi-eintrag.auf .hi-pfeil { transform: rotate(90deg); color: var(--mint); background: var(--mint-weich); }
+.hi-eintrag-text { display: none; padding: 0 14px 14px; }
+.hi-eintrag.auf .hi-eintrag-text { display: block; }
+/* Trockner: zwei Plätze */
+.hi-kombi-wahl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hi-kombi-wahl .breit-auswahl { margin: 0; }
+.hi-kombi-erg { margin-top: 14px; }
+.hi-kombi-hinweis { margin-bottom: 8px; }
+.hi-kombi-leer { margin: 6px 0 0; }
+.hi-laeufe { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); margin-top: 6px; }
+.hi-laeufe:not(.zwei) .hi-lauf { display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 4px 18px; align-items: center; }
+.hi-laeufe:not(.zwei) .hi-lauf h4 { grid-column: 1 / -1; }
+.hi-laeufe:not(.zwei) .hi-lauf-schritte { grid-template-columns: 1fr 1fr; margin: 0; }
+.mobil .hi-laeufe:not(.zwei) .hi-lauf { grid-template-columns: 1fr; }
+.mobil .hi-laeufe:not(.zwei) .hi-lauf-schritte { margin-top: 10px; }
+.hi-laeufe.zwei { grid-template-columns: 1fr 1fr; }
+.hi-lauf { padding: 12px; border-radius: 16px; background: rgba(0,0,0,.22); border: 1px solid var(--rand); animation: hi-lauf-rein .3s ease both; }
+@keyframes hi-lauf-rein { from { opacity: 0; transform: translateY(6px); } }
+.hi-lauf h4 { margin: 0 0 8px; font-size: 14px; color: var(--mint); }
+.tr-kombi-bild { width: 100%; max-width: 400px; height: auto; display: block; margin: 0 auto; }
+.tr-kombi-name { fill: var(--leise); font-size: 10px; letter-spacing: .4px; }
+.tr-kombi-nr { fill: #ffb547; font-size: 13px; font-weight: 700; }
+.tr-kombi-leer { fill: var(--leise); font-size: 13px; }
+.hi-lauf-schritte { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; counter-reset: schritt; }
+.hi-lauf-schritte li { counter-increment: schritt; display: grid; gap: 2px; padding: 8px 10px; border-radius: 12px; background: var(--flaeche); border: 1px solid var(--rand); font-size: 12px; min-width: 0; }
+.hi-lauf-schritte li span { color: var(--leise); }
+.hi-lauf-schritte li span::before { content: counter(schritt) ". "; color: var(--mint); font-weight: 700; }
+.hi-lauf-schritte strong { color: var(--amber); font-size: 15px; overflow-wrap: anywhere; }
+.hi-lauf-schritte small { font-size: 11px; }
+.hi-laeufe.zwei .hi-lauf-schritte { grid-template-columns: 1fr 1fr; }
+.mobil .hi-kombi-wahl, .mobil .hi-laeufe.zwei { grid-template-columns: 1fr; }
+.mobil .hi-lauf-schritte { grid-template-columns: 1fr 1fr; }
+/* Konstruktion */
+.kn-rechner { margin-bottom: 16px; align-items: stretch; }
+.kn-karte .chips { margin: 4px 0 10px; }
+.kn-karte .chip { padding: 6px 12px; }
+.kn-da { font-style: normal; color: var(--mint); font-size: 9px; vertical-align: 2px; }
+.kn-stufen .info-zeile { padding: 8px 14px; }
+.kn-stufen .kn-empf { background: var(--mint-weich); }
+.kn-stufen .kn-empf strong { color: var(--mint); }
+.kn-regler { margin: 14px 0 8px; }
+.kn-erg .hinweis { margin: 0; }
+.kn-erg strong { color: inherit; }
+.kn-einsatz-erg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.kn-gross { display: grid; gap: 2px; padding: 12px 14px; border-radius: 14px; background: var(--mint-weich); border: 1px solid rgba(62,230,168,.3); }
+.kn-gross span { font-size: 12px; color: var(--leise); }
+.kn-gross strong { font-size: 26px; color: var(--mint); line-height: 1.1; }
+.kn-gross small { font-size: 11px; }
+.kn-karte .info-liste .info-zeile { padding: 9px 14px; }
+.kn-karte > p.klein { margin: 10px 0 0; }
+.kn-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; align-items: start; }
+.mobil .kn-raster { grid-template-columns: 1fr; }
+.kn-bild { width: 96px; height: auto; flex: none; border-radius: 10px; background: rgba(0,0,0,.3); }
+.mobil .kn-bild { width: 84px; }
+.kn-kopf-text { display: grid; gap: 2px; min-width: 0; }
+.kn-kopf-text small { font-size: 12px; }
+.kn-punkte { margin-top: 4px; }
+.kn-werte { margin-top: 12px; }
+.kn-werte .info-zeile { padding: 8px 12px; font-size: 13px; }
+.kn-werte strong { color: var(--amber); text-align: right; }
+.kn-tab-titel { margin: 12px 0 6px; }
+.kn-tabelle { margin-top: 12px; border: 1px solid var(--rand); border-radius: 12px; overflow: hidden; font-size: 13px; }
+.kn-tz { display: grid; grid-template-columns: 1.3fr repeat(calc(var(--spalten) - 1), 1fr); gap: 6px; padding: 7px 12px; border-bottom: 1px solid var(--rand); align-items: center; }
+.kn-tz:last-child { border-bottom: none; }
+.kn-tz span { color: var(--amber); font-variant-numeric: tabular-nums; }
+.kn-tk { background: rgba(0,0,0,.25); }
+.kn-tk span { color: var(--leise); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+.mobil .kn-tz { padding: 7px 10px; font-size: 12px; }
+/* Slicer-Lexikon */
+.lex-werkzeug { display: flex; margin-bottom: 12px; }
+.lex-werkzeug .suche { max-width: 520px; }
+.lex-gruppen .chip small { margin-left: 6px; font-size: 11px; color: var(--leise); }
+.lex-gruppen .chip.an small { color: var(--mint); }
+.lex-gruppe { margin-bottom: 18px; }
+.lex-gruppe-titel { margin: 4px 0 10px; font-size: 15px; }
+.lex-gruppe-titel small { font-weight: 400; }
+.lex-liste { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px; align-items: start; }
+.mobil .lex-liste { grid-template-columns: 1fr; }
+.lex-eintrag .hi-eintrag-kopf { flex-wrap: wrap; row-gap: 2px; padding: 11px 14px; }
+.lex-name { display: grid; gap: 1px; min-width: 0; flex: 1 1 180px; }
+.lex-name small { color: var(--leise); font-size: 12px; }
+.lex-name small::before { content: "("; } .lex-name small::after { content: ")"; }
+.lex-ab { order: 3; flex-basis: 100%; font-size: 11px; color: var(--mint); opacity: .8; }
+.lex-eintrag .hi-pfeil { order: 2; }
+.lex-text { margin: 0; display: grid; gap: 4px; font-size: 14px; line-height: 1.45; }
+.lex-text dt { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--leise); margin-top: 6px; }
+.lex-text dd { margin: 0; }
+.lex-text dd.lex-werte { color: var(--amber); }
+.lex-anzahl { margin: 0 0 8px; }
+/* Druckplatten */
+.pl-matrix { display: grid; gap: 4px; }
+.pl-zeile { display: grid; grid-template-columns: minmax(56px, .8fr) repeat(5, minmax(0, 1fr)); gap: 4px; align-items: stretch; border-radius: 12px; transition: background .2s; }
+.pl-zeile.deine { background: rgba(62,230,168,.07); box-shadow: inset 0 0 0 1px rgba(62,230,168,.3); }
+.pl-mat { display: flex; align-items: center; padding-left: 10px; font-size: 14px; }
+.pl-zeile.deine .pl-mat { color: var(--mint); }
+.pl-spalte { padding: 8px 4px; border-radius: 10px; font-size: 12px; font-weight: 600; color: var(--leise); text-align: center; line-height: 1.2; border: 1px solid transparent; hyphens: manual; }
+.pl-spalte:hover { color: var(--text); background: var(--flaeche-hover); }
+.pl-spalte.an { color: var(--mint); border-color: rgba(62,230,168,.45); background: var(--mint-weich); }
+.pl-spalte.drin::after { content: " ●"; color: var(--mint); font-size: 9px; vertical-align: 1px; }
+.pl-zelle { display: grid; place-items: center; gap: 0; padding: 7px 2px; border-radius: 10px; background: rgba(255,255,255,.03); border: 1px solid var(--rand); transition: transform .15s, border-color .15s; min-width: 0; }
+.pl-zelle:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.2); }
+.pl-zelle b { font-size: 15px; line-height: 1.1; }
+.pl-zelle small { font-size: 11px; color: var(--leise); font-variant-numeric: tabular-nums; }
+.pl-zelle.ok { background: rgba(62,230,168,.10); border-color: rgba(62,230,168,.28); }
+.pl-zelle.ok b { color: var(--mint); }
+.pl-zelle.kleber { background: var(--amber-weich); border-color: rgba(255,181,71,.3); }
+.pl-zelle.kleber b { color: var(--amber); font-size: 12px; font-weight: 600; }
+.pl-zelle.nein b { color: rgba(255,107,107,.75); }
+.pl-zelle.nein { opacity: .7; }
+.pl-zelle.spalte { box-shadow: 0 0 0 1px rgba(62,230,168,.5); }
+.pl-legende { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 12px 0 4px; font-size: 12px; color: var(--leise); }
+.pl-legende b { font-weight: 700; margin-right: 4px; }
+.pl-legende .ok { color: var(--mint); } .pl-legende .kleber { color: var(--amber); } .pl-legende .nein { color: var(--rot); }
+.pl-detail-kopf { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.pl-detail-kopf h2 { font-size: 18px; }
+.pl-detail-kopf p { margin: 4px 0 0; font-size: 14px; }
+.pl-bild { width: 120px; height: auto; flex: none; border-radius: 12px; background: rgba(0,0,0,.3); }
+.pl-wahl .chip { padding: 6px 12px; }
+.mobil .pl-karte { padding: 14px 10px; }
+.mobil .pl-zeile { grid-template-columns: 46px repeat(5, minmax(0, 1fr)); gap: 3px; }
+.mobil .pl-mat { padding-left: 4px; font-size: 12px; }
+.mobil .pl-spalte { font-size: 10px; padding: 6px 1px; }
+.mobil .pl-zelle { padding: 6px 1px; }
+.mobil .pl-zelle.kleber b { font-size: 9.5px; }
+.mobil .pl-zelle small { font-size: 9.5px; }
+.mobil .pl-detail-kopf { flex-direction: column; align-items: flex-start; }
+.mobil .pl-bild { width: 110px; }
+@media (prefers-reduced-motion: reduce) { .hi-lauf { animation: none; } .hi-pfeil, .pl-zelle { transition: none; } }
 `;
 // ---------------------------------------------------------------------------
 // Inventar-Ansicht. Wird in die Panel-Klasse eingemischt (siehe panel.js).
@@ -3488,14 +4176,265 @@ const HI_FELDER = { duese: ["duese_erste", "duese", "flow"], extruder: ["k", "ma
   riemen: ["v_aussen", "v_innen", "v_fuellung"], bett: ["bett"], spule: ["tr_temp", "tr_dauer"] };
 
 const HilfeAnsicht = {
-  // Neue Hilfe-Reiter (v0.12): Konstruktions-Tipps, Slicer-Lexikon, Druckplatten
-  _hiKonstruktionHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
-  _hiLexikonHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
-  _hiPlattenHtml() { return `<div class="karte"><p class="leise">Kommt gleich.</p></div>`; },
-
   _hiZustand() {
-    if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", rolle: null, kalWert: null };
+    if (!this._hi) this._hi = { tab: "drucker", p1s: "duese", tr: "material", fehler: null, kal: "temp", rolle: null, kalWert: null,
+      // v0.12: aufgeklappte Einträge, Konstruktions-Rechner, Lexikon-Suche, gewählte Platte
+      auf: new Set(), knGruppe: "alle", knDuese: 0.4, knWand: 1.2, knEinsatz: null, lexQ: "", lexGruppe: "alle", platte: null };
     return this._hi;
+  },
+
+  // Aufklappbarer Eintrag (Konstruktion, Lexikon). Zustand bleibt beim Neuzeichnen erhalten.
+  _hiEintragHtml(id, kopf, inhalt, klasse = "", vonSelbstAuf = false) {
+    const auf = this._hi.auf.has(id) || vonSelbstAuf;
+    return `<div class="hi-eintrag ${klasse} ${auf ? "auf" : ""}" data-eintrag="${esc(id)}">
+      <button class="hi-eintrag-kopf" data-aktion="hi-auf" data-id="${esc(id)}" aria-expanded="${auf}">${kopf}<span class="hi-pfeil" aria-hidden="true">›</span></button>
+      <div class="hi-eintrag-text">${inhalt}</div></div>`;
+  },
+  // Auf-/Zuklappen ohne alles neu zu zeichnen
+  _hiAufZu(id) {
+    const h = this._hi;
+    const box = [...this.shadowRoot.querySelectorAll(".hi-eintrag")].find((x) => x.dataset.eintrag === id);
+    const auf = box ? !box.classList.contains("auf") : !h.auf.has(id);
+    if (auf) h.auf.add(id); else h.auf.delete(id);
+    if (!box) { this._zeichnen(); return; }
+    const text = box.querySelector(".hi-eintrag-text");
+    box.querySelector(".hi-eintrag-kopf").setAttribute("aria-expanded", String(auf));
+    if (auf) { box.classList.add("auf"); this._klappAnimieren(text, true); }
+    else this._klappAnimieren(text, false, () => { if (!h.auf.has(id)) box.classList.remove("auf"); });
+  },
+
+  // ---- Trockner: zwei Plätze ----
+  _hiPlaetze() {
+    const p = this._daten.trockner_plaetze;
+    return Array.isArray(p) ? [p[0] || "", p[1] || ""] : ["", ""];
+  },
+  // Inhalt eines Platzes: "r:<Rollen-ID>" oder "m:<Material>" → Trocknungswerte
+  _hiPlatzWert(code) {
+    if (!code) return null;
+    const [art, id] = [code.slice(0, 2), code.slice(2)];
+    if (art === "r:") {
+      const r = this._daten.rollen.find((x) => x.id === id);
+      if (!r) return null;
+      const std = TROCKNEN_MATERIALIEN.find((m) => m.id === r.material) || TROCKNEN_MATERIALIEN[0];
+      const v = (k) => wert(r, k).v ?? std[k];
+      const holz = String(r.art || "").toLowerCase() === "wood";
+      return { id: r.id, name: r.name, material: holz ? "Wood" : r.material, temp: v("tr_temp"), dauer: v("tr_dauer"), feuchte: v("tr_feuchte"),
+        ideal: std.id === r.material ? std.ideal : null, farbe: r.hex || materialInfo(r.material).farbe };
+    }
+    const m = TROCKNEN_MATERIALIEN.find((x) => x.id === id);
+    if (!m) return null;
+    return { name: m.name, material: m.id === "WOOD" ? "Wood" : m.id, temp: m.tr_temp, dauer: m.tr_dauer, feuchte: m.tr_feuchte, ideal: m.ideal,
+      farbe: materialInfo(m.id === "WOOD" ? "PLA" : m.id).farbe };
+  },
+  _hiKombiHtml() {
+    const d = this._daten, plaetze = this._hiPlaetze();
+    const werte = plaetze.map((c) => this._hiPlatzWert(c));
+    const k = trocknenKombi(werte[0], werte[1]);
+    const rollen = d.rollen.slice().sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const wahl = (i) => `<label class="auswahl breit-auswahl ${plaetze[i] ? "an" : ""}"><span>Platz ${i + 1} · ${i ? "rechts" : "links"}</span><select data-hi="tr-platz" data-platz="${i}">
+      <option value="" ${plaetze[i] ? "" : "selected"}>– leer –</option>
+      <optgroup label="Deine Rollen">${rollen.map((r) => `<option value="r:${esc(r.id)}" ${plaetze[i] === `r:${r.id}` ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}</option>`).join("")}</optgroup>
+      <optgroup label="Nur Material">${TROCKNEN_MATERIALIEN.map((m) => `<option value="m:${m.id}" ${plaetze[i] === `m:${m.id}` ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</optgroup>
+    </select></label>`;
+    const zeit = (h) => `${zahl(h, h % 1 ? 1 : 0)} h`;
+    const lauf = (l, i) => `<div class="hi-lauf">
+        <h4>${k.modus === "getrennt" ? `Lauf ${i + 1} · ${esc(l.name)}` : k.modus === "zusammen" ? "Beide Rollen zusammen" : esc(l.name)}</h4>
+        ${trocknerKombiSvg(l, werte, l.plaetze, i ? "vorher" : "danach")}
+        <ol class="hi-lauf-schritte">
+          <li><span>Material</span><strong>${esc(l.name)}</strong><small class="leise">oder „Custom“</small></li>
+          <li><span>Temperatur</span><strong>${l.temp} °C</strong></li>
+          <li><span>Zeit</span><strong>${zeit(l.dauer)}</strong></li>
+          <li><span>Fertig, wenn Feuchte</span><strong>&lt; ${l.feuchte} %</strong></li>
+        </ol></div>`;
+    return `<div class="dr-karte oben-abstand hi-kombi" data-einmal="hi-kombi">
+      <h3 class="dr-titel">Zwei Spulen zusammen trocknen</h3>
+      <p class="leise klein">Wähle für jeden Platz eine Rolle oder nur das Material. Du bekommst die gemeinsame Einstellung fürs Display.</p>
+      <div class="hi-kombi-wahl">${wahl(0)}${wahl(1)}</div>
+      <div class="hi-kombi-erg" data-modus="${k.modus}">
+        ${k.modus === "leer" ? `<p class="leise hi-kombi-leer">Noch nichts gewählt. Wähle oben, was in den Trockner kommt.</p>` : `
+        ${k.hinweise.map((x) => `<div class="hinweis ${x.art} hi-kombi-hinweis">${x.art === "rot" ? "⚠️ " : x.art === "amber" ? "⏱ " : "✓ "}${esc(x.text)}</div>`).join("")}
+        <div class="hi-laeufe ${k.laeufe.length > 1 ? "zwei" : ""}">${k.laeufe.map(lauf).join("")}</div>`}
+      </div></div>`;
+  },
+
+  // ---- Konstruktion ----
+  _hiKonstruktionHtml() {
+    const h = this._hiZustand();
+    const tipps = KONSTRUKTION.filter((t) => h.knGruppe === "alle" || t.g === h.knGruppe);
+    return `<p class="leise">Tipps für Teile, die du selbst konstruierst – auf FDM-Druck und deinen P1S abgestimmt. Tippe auf einen Tipp für Werte und Details.</p>
+      <div class="hi-raster kn-rechner">${this._knWandHtml()}${this._knEinsatzHtml()}</div>
+      <div class="chips unter-tabs kn-gruppen">${KN_GRUPPEN.map(([id, n]) => `<button class="chip ${h.knGruppe === id ? "an" : ""}" data-aktion="hi-kn-gruppe" data-id="${id}">${esc(n)}</button>`).join("")}</div>
+      <div class="kn-raster">${tipps.map((t) => this._hiEintragHtml(`kn:${t.id}`,
+        `${KN_BILD[t.id] || ""}<span class="kn-kopf-text"><strong>${esc(t.titel)}</strong><small class="leise">${esc(t.kurz)}</small></span>`,
+        `<ul class="kal-liste kn-punkte">${t.punkte.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>
+         ${t.werte ? `<div class="info-liste kn-werte">${t.werte.map(([n, w]) => `<div class="info-zeile"><span>${esc(n)}</span><strong>${esc(w)}</strong></div>`).join("")}</div>` : ""}
+         ${t.dyn ? this._knTabelleHtml(t.dyn) : ""}`, "kn-tipp")).join("")}</div>`;
+  },
+  // Linienbreiten in Bambu Studio je Düse: [Außenwand, Innenwand]
+  _knLinien(duese) {
+    return { 0.2: [0.22, 0.22], 0.4: [0.42, 0.45], 0.6: [0.62, 0.62], 0.8: [0.82, 0.82] }[duese] || [duese * 1.05, duese * 1.1];
+  },
+  _knWanddicke(duese, n) { const [a, i] = this._knLinien(duese); return a + (n - 1) * i; },
+  _knWandHtml() {
+    const h = this._hi, d = h.knDuese;
+    const imInventar = new Set((this._daten.inventar || []).filter((t) => t.kat === "duese").map((t) => Number(t.groesse)));
+    const [a, i] = this._knLinien(d);
+    const stufen = [[2, "Minimum"], [3, "Standard"], [4, "Funktionsteil"], [5, "Schrauben, Einsätze"], [6, "sehr stabil"]];
+    return `<div class="dr-karte kn-karte" data-einmal="kn-wand"><h3 class="dr-titel">🧮 Wandstärke für deine Düse</h3>
+      <div class="chips kn-duesen">${[0.2, 0.4, 0.6, 0.8].map((x) => `<button class="chip ${x === d ? "an" : ""}" data-aktion="hi-kn-duese" data-id="${x}">${zahl(x, 1)} mm${imInventar.has(x) ? ' <i class="kn-da" title="im Inventar">●</i>' : ""}</button>`).join("")}</div>
+      <p class="leise klein">Linienbreite in Bambu Studio: Außenwand ${zahl(a, 2)} mm, sonst ${zahl(i, 2)} mm · Schichthöhe ${zahl(d * 0.25, 2)}–${zahl(d * 0.7, 2)} mm</p>
+      <div class="info-liste kn-stufen">${stufen.map(([n, t]) => `<div class="info-zeile ${n === 3 ? "kn-empf" : ""}"><span>${n} Linien · ${esc(t)}</span><strong>${zahl(this._knWanddicke(d, n), 2)} mm</strong></div>`).join("")}</div>
+      <div class="mod-regler kn-regler"><div class="r-kopf"><span>Deine geplante Wand</span><strong id="hi-kn-wand-wert">${zahl(h.knWand, 2)} mm</strong></div>
+        <div class="regler-zeile"><input type="range" min="0.2" max="5" step="0.05" value="${h.knWand}" data-hi="kn-wand" aria-label="Geplante Wandstärke"></div></div>
+      <div id="hi-kn-wand-erg" class="kn-erg">${this._knWandErgebnisHtml()}</div></div>`;
+  },
+  _knWandErgebnisHtml() {
+    const h = this._hi, d = h.knDuese, w = h.knWand;
+    const [a] = this._knLinien(d);
+    if (w < a - 0.01) return `<div class="hinweis rot">Dünner als eine Linie (${zahl(a, 2)} mm): wird nicht oder nur lückenhaft gedruckt.</div>`;
+    let n = 1;
+    while (this._knWanddicke(d, n + 1) <= w + 0.02) n++;
+    const rest = w - this._knWanddicke(d, n);
+    if (rest < 0.06) return `<div class="hinweis mint">✓ Passt: genau ${n} ${n === 1 ? "Linie" : "Linien"}${n < 2 ? " – stabil wird es erst ab 2 Linien" : ""}.</div>`;
+    return `<div class="hinweis amber">${n} ${n === 1 ? "Linie" : "Linien"} + ${zahl(rest, 2)} mm Rest: dort entsteht eine Lücke oder Zickzack-Füllung.
+      Besser <strong>${zahl(this._knWanddicke(d, n), 2)} mm</strong> oder <strong>${zahl(this._knWanddicke(d, n + 1), 2)} mm</strong>.</div>`;
+  },
+  // Gewindeeinsätze aus dem Inventar (sonst übliche Größen)
+  _knEinsaetze() {
+    const inv = (this._daten.inventar || []).filter((t) => t.kat === "einsatz" && t.aussen && t.laenge);
+    const liste = inv.length ? inv : [{ id: "std-m2", gewinde: "M2", laenge: 3, aussen: 3.5 }, { id: "std-m3", gewinde: "M3", laenge: 5, aussen: 5 }, { id: "std-m4", gewinde: "M4", laenge: 5, aussen: 6 }];
+    return liste.slice().sort((x, y) => gewindeD(x.gewinde) - gewindeD(y.gewinde) || x.aussen - y.aussen);
+  },
+  _knEinsatzMasse(e) {
+    const loch = Math.round((e.aussen - 0.5) * 10) / 10;
+    const n = NORM[e.gewinde];
+    return { loch, von: Math.round((e.aussen - 0.6) * 10) / 10, bis: Math.round((e.aussen - 0.4) * 10) / 10, tiefe: e.laenge + 1, dom: Math.round((loch + 4) * 10) / 10,
+      durchgang: n ? Math.round((n.loch + 0.2) * 10) / 10 : null };
+  },
+  _knEinsatzHtml() {
+    const h = this._hi, liste = this._knEinsaetze();
+    const e = liste.find((x) => x.id === h.knEinsatz) || liste.find((x) => x.gewinde === "M3") || liste[0];
+    const m = this._knEinsatzMasse(e);
+    const r = this._hiRolle();
+    const loet = { PETG: "230–250", ASA: "240–260", ABS: "240–260", PC: "260–280", TPU: "200–220" }[r && r.material] || "210–230";
+    const z = (v) => zahl(v, v % 1 ? 1 : 0);
+    return `<div class="dr-karte kn-karte" data-einmal="kn-einsatz"><h3 class="dr-titel">🟡 Loch für Gewindeeinsatz</h3>
+      <div class="chips kn-einsaetze">${liste.map((x) => `<button class="chip ${x.id === e.id ? "an" : ""}" data-aktion="hi-kn-einsatz" data-id="${esc(x.id)}">${esc(x.gewinde)} · ${z(x.laenge)} × Ø ${zahl(x.aussen, 1)}</button>`).join("")}</div>
+      <div class="kn-einsatz-erg">
+        <div class="kn-gross"><span>Loch-Ø im CAD</span><strong>${zahl(m.loch, 1)} mm</strong><small class="leise">Bereich ${zahl(m.von, 1)}–${zahl(m.bis, 1)} mm, mit Teststreifen prüfen</small></div>
+        <div class="kn-gross"><span>Lochtiefe</span><strong>${z(m.tiefe)} mm</strong><small class="leise">Länge + 1 mm</small></div>
+      </div>
+      <div class="info-liste">
+        <div class="info-zeile"><span>Fase am Lochrand</span><strong>0,5 mm × 45°</strong></div>
+        <div class="info-zeile"><span>Dom/Wand rundum</span><strong>Ø ≥ ${zahl(m.dom, 1)} mm (≥ 2 mm Wand)</strong></div>
+        ${m.durchgang ? `<div class="info-zeile"><span>Durchgangsloch im Gegenstück</span><strong>${zahl(m.durchgang, 1)} mm</strong></div>` : ""}
+        <div class="info-zeile"><span>Lötkolben (${esc(r ? r.material : "PLA")})</span><strong>${loet} °C</strong></div>
+      </div>
+      <p class="leise klein">${(this._daten.inventar || []).some((t) => t.kat === "einsatz") ? "Größen aus deinem Inventar." : "Übliche Größen – trage deine Einsätze im Inventar ein."} Slicer: 4 Wandlinien um das Loch.</p></div>`;
+  },
+  // Tabellen in den Tipps, berechnet aus Normmaßen und Corins Inventar
+  _knTabelleHtml(art) {
+    const inv = this._daten.inventar || [];
+    const z = (v, nk = 1) => zahl(Math.round(v * 100) / 100, nk);
+    const tabelle = (kopf, zeilen) => `<div class="kn-tabelle" style="--spalten:${kopf.length}"><div class="kn-tz kn-tk">${kopf.map((k) => `<span>${esc(k)}</span>`).join("")}</div>
+      ${zeilen.map((zl) => `<div class="kn-tz">${zl.map((x, i) => i ? `<span>${x}</span>` : `<strong>${x}</strong>`).join("")}</div>`).join("")}</div>`;
+    if (art === "einsatz") return tabelle(["Einsatz", "Loch-Ø", "Tiefe", "Dom-Ø"], this._knEinsaetze().map((e) => {
+      const m = this._knEinsatzMasse(e);
+      return [`${esc(e.gewinde)} · ${zahl(e.laenge)} × ${z(e.aussen)}`, `${z(m.loch)}`, `${zahl(m.tiefe)}`, `≥ ${z(m.dom)}`];
+    }));
+    if (art === "schraube") return tabelle(["Gewinde", "Durchgang", "Kernloch", "Kopfsenkung"], ["M2", "M2.5", "M3", "M4", "M5"].map((g) => {
+      const n = NORM[g], d = gewindeD(g);
+      return [g, z(n.loch + 0.2), z(Math.round(d * 0.8 * 10) / 10), `Ø ${z(n.kopf_d + 0.5)} × ${z(n.kopf_h + 0.3)}`];
+    }));
+    if (art === "mutter") {
+      const gew = [...new Set(inv.filter((t) => t.kat === "mutter").map((t) => t.gewinde))];
+      return tabelle(["Mutter", "SW-Tasche", "über Ecken", "Tiefe"], (gew.length ? gew : ["M2", "M3", "M4"]).filter((g) => NORM[g]).map((g) => {
+        const n = NORM[g], sw = n.mutter_sw + 0.25;
+        return [g, z(sw, 2), z(sw * 2 / Math.sqrt(3), 2), z(n.mutter_h + 0.2)];
+      }));
+    }
+    if (art === "magnet") {
+      const mags = inv.filter((t) => t.kat === "magnet" && t.form !== "folie" && t.durchmesser && t.dicke);
+      if (!mags.length) return `<p class="leise klein">Trage deine Magnete im Inventar ein, dann stehen hier die passenden Taschen.</p>`;
+      return `<p class="leise klein kn-tab-titel">Deine Magnete aus dem Inventar (+0,15 mm):</p>` + tabelle(["Magnet", "Tasche", "Tiefe"], mags.map((t) => t.form === "quader"
+        ? [`▭ ${z(t.durchmesser, 2)} × ${z(t.breite, 2)} × ${z(t.dicke, 2)}`, `${z(t.durchmesser + 0.15, 2)} × ${z(t.breite + 0.15, 2)}`, z(t.dicke + 0.15, 2)]
+        : [`● Ø ${z(t.durchmesser, 2)} × ${z(t.dicke, 2)}`, `Ø ${z(t.durchmesser + 0.15, 2)}`, z(t.dicke + 0.15, 2)]));
+    }
+    return "";
+  },
+
+  // ---- Slicer-Lexikon ----
+  _hiLexikonHtml() {
+    const h = this._hiZustand();
+    return `<p class="leise">Einstellungen in Bambu Studio, so benannt wie in der deutschen Oberfläche (englisch in Klammern). Werte gelten für den P1S mit 0,4-mm-Düse.</p>
+      <div class="lex-werkzeug"><input id="hi-lex-suche" class="suche" type="search" data-hi="lex-suche" value="${esc(h.lexQ)}" placeholder="Einstellung suchen, z. B. Naht, Brim, Fluss …" autocomplete="off" aria-label="Lexikon durchsuchen"></div>
+      <div class="chips unter-tabs lex-gruppen">${[{ id: "alle", name: "Alle", icon: "📖" }, ...LEX_GRUPPEN].map((g) => `<button class="chip ${h.lexGruppe === g.id ? "an" : ""}" data-aktion="hi-lex-gruppe" data-id="${g.id}">${g.icon} ${esc(g.name)}<small>${g.id === "alle" ? LEXIKON.length : LEXIKON.filter((e) => e.g === g.id).length}</small></button>`).join("")}</div>
+      <div id="hi-lex-liste">${this._hiLexListeHtml()}</div>`;
+  },
+  _hiLexListeHtml() {
+    const h = this._hi, q = h.lexQ.trim();
+    const eintrag = (e, mitGruppe, vonSelbstAuf) => {
+      const g = LEX_GRUPPEN.find((x) => x.id === e.g);
+      return this._hiEintragHtml(`lex:${e.en}`,
+        `<span class="lex-name"><strong>${esc(e.de)}</strong><small>${esc(e.en)}</small></span>${mitGruppe || e.ab !== e.de ? `<span class="lex-ab">${mitGruppe ? `${g.icon} ${esc(g.name)} › ` : ""}${esc(e.ab)}</span>` : ""}`,
+        `<dl class="lex-text"><dt>Was es macht</dt><dd>${esc(e.was)}</dd><dt>Typische Werte</dt><dd class="lex-werte">${esc(e.werte)}</dd><dt>Wann ändern</dt><dd>${esc(e.wann)}</dd></dl>`,
+        "lex-eintrag", vonSelbstAuf);
+    };
+    if (q) {
+      const treffer = LEXIKON.map((e) => ({ e, p: suchPunkte(q, `${e.de} ${e.en} ${e.ab}`) * 2 + suchPunkte(q, `${e.de} ${e.en} ${e.ab} ${e.was}`) }))
+        .filter((x) => x.p > 0).sort((a, b) => b.p - a.p);
+      if (!treffer.length) return `<div class="dr-karte lex-leer"><p class="leise">Nichts gefunden für „${esc(q)}“. Versuche den englischen Namen oder ein kürzeres Wort.</p></div>`;
+      return `<p class="leise klein lex-anzahl">${treffer.length} Treffer</p><div class="lex-liste">${treffer.map((x) => eintrag(x.e, true, treffer.length <= 2)).join("")}</div>`;
+    }
+    return LEX_GRUPPEN.filter((g) => h.lexGruppe === "alle" || g.id === h.lexGruppe).map((g) => `<section class="lex-gruppe">
+      <h3 class="lex-gruppe-titel">${g.icon} ${esc(g.name)} <small class="leise">(${esc(g.en)})</small></h3>
+      <div class="lex-liste">${LEXIKON.filter((e) => e.g === g.id).map((e) => eintrag(e, false, false)).join("")}</div></section>`).join("");
+  },
+  _hiLexSuchen() {
+    const box = this.shadowRoot.getElementById("hi-lex-liste");
+    if (box) box.innerHTML = this._hiLexListeHtml();
+  },
+
+  // ---- Druckplatten ----
+  _hiPlattenHtml() {
+    const h = this._hiZustand();
+    const jetzt = this._drW ? this._drW("platte") : null;
+    const imDrucker = jetzt && typeof DR_PLATTEN !== "undefined" ? PLATTEN_INFO.find((p) => p.name === DR_PLATTEN[jetzt]) : null;
+    const p = PLATTEN_INFO.find((x) => x.id === h.platte) || imDrucker || PLATTEN_INFO.find((x) => x.id === "textured");
+    const r = this._hiRolle();
+    const zeileR = r && PLATTEN_MATRIX.find((z) => z.m === r.material);
+    const kurz = this._mobil ? { cool: "Cool", supertack: "Super­Tack", eng: "Engi­neering", smooth: "Smooth PEI", textured: "Tex­tured" } : null;
+    const zelle = ([a, t], pl, m) => `<button class="pl-zelle ${a} ${pl.id === p.id ? "spalte" : ""}" data-aktion="hi-platte" data-id="${pl.id}" title="${esc(m)} auf ${esc(pl.kurz)}: ${a === "ok" ? "geeignet" : a === "kleber" ? "mit Kleber" : "nicht geeignet"}${t ? `, ${t} °C` : ""}">
+      <b>${a === "ok" ? "✓" : a === "kleber" ? "Kleber" : "✗"}</b>${t ? `<small>${t}°</small>` : ""}</button>`;
+    const fuerRolle = zeileR ? zeileR.w[p.id] : null;
+    return `<p class="leise">Welche Bambu-Platte für welches Material, mit Kleber oder ohne, und wie du sie pflegst.${imDrucker ? ` Im Drucker liegt gerade die <strong class="pl-jetzt">${esc(imDrucker.kurz)}</strong>.` : ""}</p>
+      <div class="dr-karte pl-karte" data-einmal="pl-matrix"><h3 class="dr-titel">Material × Platte</h3>
+        <div class="pl-matrix" role="table" aria-label="Material und Druckplatte">
+          <div class="pl-zeile pl-kopf" role="row"><span></span>${PLATTEN_INFO.map((pl) => `<button class="pl-spalte ${pl.id === p.id ? "an" : ""} ${imDrucker && imDrucker.id === pl.id ? "drin" : ""}" data-aktion="hi-platte" data-id="${pl.id}">${esc(kurz ? kurz[pl.id] : pl.kurz)}</button>`).join("")}</div>
+          ${PLATTEN_MATRIX.map((z) => `<div class="pl-zeile ${r && r.material === z.m ? "deine" : ""}" role="row"><strong class="pl-mat">${esc(z.m)}</strong>${PLATTEN_INFO.map((pl) => zelle(z.w[pl.id] || ["nein"], pl, z.m)).join("")}</div>`).join("")}
+        </div>
+        <div class="pl-legende"><span><b class="ok">✓</b> ohne Kleber</span><span><b class="kleber">Kleber</b> nur mit Klebestift</span><span><b class="nein">✗</b> nicht geeignet</span><span class="leise">Zahlen = Bett in °C</span></div>
+        <p class="leise klein">Der P1S heizt das Bett auf höchstens ${BETT_MAX_P1S} °C. PLA mit Bett über 45 °C: Tür oder Deckel einen Spalt öffnen, sonst wird es in der Kammer zu warm.${r && zeileR ? ` Hervorgehoben: ${esc(r.material)} (${esc(r.name)}).` : ""}</p>
+      </div>
+      <div class="hi-raster oben-abstand">
+        <div class="dr-karte pl-detail" data-einmal="pl-${p.id}">
+          <div class="pl-detail-kopf">${platteSvg(p)}<div><h2>${esc(p.name)}</h2><p class="leise">${esc(p.text)}</p></div></div>
+          ${fuerRolle ? `<div class="hinweis ${fuerRolle[0] === "nein" ? "rot" : fuerRolle[0] === "kleber" ? "amber" : "mint"}">${esc(r.name)}: ${fuerRolle[0] === "nein" ? "auf dieser Platte nicht drucken" : `${fuerRolle[0] === "kleber" ? "mit Klebestift, " : "ohne Kleber, "}Bett ${fuerRolle[1]} °C`}${wert(r, "platte").v ? ` · eingetragen: ${esc(wert(r, "platte").v)}` : ""}</div>` : ""}
+          <h3>Gut für</h3><ul class="kal-liste">${p.gut.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+          <h3>Reinigen und pflegen</h3><ul class="kal-liste">${p.pflege.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+          <div class="hinweis amber oben-abstand">⚠️ ${esc(p.vorsicht)}</div>
+        </div>
+        <div class="dr-karte pl-allgemein"><h3 class="dr-titel">Für alle Platten</h3>
+          <ul class="kal-liste">
+            <li>Fett von den Fingern ist der häufigste Grund für schlechte Haftung: Druckfläche nur am Rand anfassen.</li>
+            <li>Gründlich reinigen: Spülmittel und warmes Wasser, gut abspülen und trocknen. Für zwischendurch Isopropanol (≥ 90 %).</li>
+            <li>Klebestift dünn und gleichmäßig auftragen. Er wirkt als Haftmittel und als Trennschicht, damit PETG oder TPU die Platte nicht beschädigt.</li>
+            <li>Teile erst nach dem Abkühlen lösen. Die Federstahlplatte leicht biegen, nicht hebeln.</li>
+            <li>In Bambu Studio immer die Platte einstellen, die wirklich im Drucker liegt: davon hängt die Betttemperatur ab.</li>
+          </ul>
+          <div class="chips oben-abstand pl-wahl">${PLATTEN_INFO.map((pl) => `<button class="chip ${pl.id === p.id ? "an" : ""}" data-aktion="hi-platte" data-id="${pl.id}">${esc(pl.kurz)}</button>`).join("")}</div>
+        </div>
+      </div>`;
   },
 
   _hiHtml() {
@@ -3563,6 +4502,7 @@ const HilfeAnsicht = {
           <span class="tr-werte"><b>${t.temp} °C</b><b>${t.h} h</b><b>&lt; ${t.ziel} %</b></span>
           <small class="leise">Feucht, wenn: ${esc(t.zeichen)}. ${esc(t.lagern)}</small></div>`).join("")}</div></div>
     </div>
+    ${this._hiKombiHtml()}
     <div class="dr-karte oben-abstand"><h3 class="dr-titel">Deine Rollen</h3><div class="tr-rollen">${rollen.map((r) => {
       const t = wert(r, "tr_temp").v, d = wert(r, "tr_dauer").v, f = wert(r, "tr_feuchte").v;
       return `<button class="tr-rolle" data-aktion="oeffnen-filament" data-id="${esc(r.id)}">${spuleSvg(r)}<span><strong>${esc(r.name)}</strong><small>${esc(r.hersteller)}</small></span>
@@ -3694,6 +4634,12 @@ const HilfeAnsicht = {
       case "hi-fehler": this._hiFehlerAuf(el.dataset.id); return;
       case "hi-fehler-zu": this._hiFehlerZu(); return;
       case "hi-kal": h.kal = el.dataset.id; h.kalWert = null; break;
+      case "hi-auf": this._hiAufZu(el.dataset.id); return;
+      case "hi-kn-gruppe": h.knGruppe = el.dataset.id; break;
+      case "hi-kn-duese": h.knDuese = Number(el.dataset.id); break;
+      case "hi-kn-einsatz": h.knEinsatz = el.dataset.id; break;
+      case "hi-lex-gruppe": h.lexGruppe = el.dataset.id; h.lexQ = ""; break;
+      case "hi-platte": h.platte = el.dataset.id; break;
       case "hi-kal-schritt": {
         const k = KALIBRIERUNGEN.find((x) => x.id === h.kal), f = FELDER.find((x) => x.k === k.feld);
         const r = this._hiRolle();
@@ -3729,12 +4675,26 @@ const HilfeAnsicht = {
     const k = t.dataset && t.dataset.hi;
     if (!k) return false;
     if (k === "kal-wert") { this._hi.kalWert = Number(t.value); this._hiKalWertZeigen(); }
+    if (k === "kn-wand") {
+      this._hi.knWand = Number(t.value);
+      const w = this.shadowRoot.getElementById("hi-kn-wand-wert"), e = this.shadowRoot.getElementById("hi-kn-wand-erg");
+      if (w) w.textContent = `${zahl(this._hi.knWand, 2)} mm`;
+      if (e) e.innerHTML = this._knWandErgebnisHtml();
+    }
+    if (k === "lex-suche") { this._hi.lexQ = t.value; this._hiLexSuchen(); }
     return true;
   },
   _hiAenderung(t) {
     const k = t.dataset && t.dataset.hi;
     if (!k) return false;
     if (k === "rolle") { this._hi.rolle = t.value; this._hi.kalWert = null; this._zeichnen(); }
+    if (k === "tr-platz") {
+      const p = this._hiPlaetze();
+      p[Number(t.dataset.platz)] = t.value;
+      this._daten.trockner_plaetze = p;   // optionales Feld, fehlt in älteren Daten
+      this._speichern();
+      this._zeichnen();
+    }
     return true;
   },
 };
