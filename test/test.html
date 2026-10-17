@@ -101,6 +101,38 @@ window.hass = { states, callService: async (domain, dienst, data) => {
   throw new Error("unbekannt " + m.type);
 }};
 window.speicher = speicher;
+// ---- Integration: automatische Sicherung und Update-Prüfung ----
+// ?sich=auto  → die Integration sichert jede Nacht (sonst wie früher: Befehl unbekannt)
+// ?upd=hacs   → HACS-Update-Entität mit neuer Version, ?upd=github → keine Entität (GitHub)
+{
+  const q = new URLSearchParams(location.search), wsAlt = window.hass.callWS;
+  const tag = (n, h = 3) => { const d = new Date(); d.setDate(d.getDate() - n); d.setHours(h, 0, 0, 0); return d; };
+  window.autoSich = Array.from({ length: 14 }, (_, n) => {
+    const d = tag(n); const datum = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { datei: `${datum}_test.json`, datum, zeit: d.toISOString(), groesse: 182000 - n * 900, rollen: 40 - (n % 3), inventar: 120, geaendert: d.toISOString() };
+  });
+  const antwort = () => ({ automatisch: true, uhrzeit: "03:00", behalten: 14, ordner: "filament-werkstatt-sicherung", liste: window.autoSich });
+  if (q.get("upd") === "hacs") setze("update.filament_werkstatt_update", "Filament-Werkstatt update", "on", {
+    installed_version: "0.12.0", latest_version: "0.12.1", title: "Filament-Werkstatt", release_summary: "Raumklima, nächtliche Sicherung und Update-Knopf",
+    release_url: "https://github.com/Corineye/filament-werkstatt/releases/v0.12.1" });
+  window.hass.callWS = async (m) => {
+    if (q.get("sich") === "auto" && m.type === "filament_werkstatt/sicherungen") { wsLog.push(m.type); return antwort(); }
+    if (q.get("sich") === "auto" && m.type === "filament_werkstatt/sicherung_jetzt") {
+      wsLog.push(m.type);
+      const d = new Date(); const datum = window.autoSich[0].datum;
+      window.autoSich = [{ ...window.autoSich[0], zeit: d.toISOString(), rollen: JSON.parse(speicher.filament_werkstatt).rollen.length }, ...window.autoSich.slice(1)];
+      return { ...antwort(), neu: window.autoSich[0], datum };
+    }
+    if (q.get("sich") === "auto" && m.type === "filament_werkstatt/sicherung_lesen") {
+      wsLog.push(m.type + ":" + m.datei);
+      const d = JSON.parse(speicher.filament_werkstatt); d.rollen = d.rollen.slice(0, 7);
+      return { datei: m.datei, daten: d };
+    }
+    if (q.get("upd") && m.type === "filament_werkstatt/update") return { version: "0.12.0", repo: "Corineye/filament-werkstatt", entity_id: q.get("upd") === "hacs" ? "update.filament_werkstatt_update" : null };
+    if (m.type === "update/release_notes") return "## Neu\n- **Raumklima** auf Drucker- und Startseite\n- Sicherung jede Nacht um 03:00\n\n## Behoben\n- Kleinigkeiten";
+    return wsAlt(m);
+  };
+}
 </script>
 <script type="module">
 await import("../custom_components/filament_werkstatt/frontend/filament-werkstatt.js");
