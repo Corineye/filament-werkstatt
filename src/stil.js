@@ -574,6 +574,8 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .bu-kopf { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; }
 .bu-kopf .ld-bild { width: 64px; height: 64px; }
 .bu-kopf p { margin: 2px 0 0; }
+.bu-name { width: 100%; box-sizing: border-box; font: inherit; font-size: 1.15rem; font-weight: 700; color: inherit; background: transparent; border: 1px dashed transparent; border-radius: 8px; padding: 4px 8px; margin: 0 -8px 2px; }
+.bu-name:hover, .bu-name:focus { border-color: var(--mint, #3ee8b5); background: rgba(255,255,255,.04); outline: none; }
 .bu-rollen { display: grid; gap: 8px; margin-bottom: 8px; }
 .bu-rolle { position: relative; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; border-radius: 14px; background: var(--flaeche); border: 1px solid var(--rand); transition: border-color .15s, background .15s, transform .15s; }
 .bu-rolle:hover { border-color: rgba(62,230,168,.4); }

@@ -2031,6 +2031,8 @@ select.dd-nativ { position: absolute !important; opacity: 0; pointer-events: non
 .bu-kopf { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; }
 .bu-kopf .ld-bild { width: 64px; height: 64px; }
 .bu-kopf p { margin: 2px 0 0; }
+.bu-name { width: 100%; box-sizing: border-box; font: inherit; font-size: 1.15rem; font-weight: 700; color: inherit; background: transparent; border: 1px dashed transparent; border-radius: 8px; padding: 4px 8px; margin: 0 -8px 2px; }
+.bu-name:hover, .bu-name:focus { border-color: var(--mint, #3ee8b5); background: rgba(255,255,255,.04); outline: none; }
 .bu-rollen { display: grid; gap: 8px; margin-bottom: 8px; }
 .bu-rolle { position: relative; display: flex; gap: 12px; align-items: center; text-align: left; padding: 10px; border-radius: 14px; background: var(--flaeche); border: 1px solid var(--rand); transition: border-color .15s, background .15s, transform .15s; }
 .bu-rolle:hover { border-color: rgba(62,230,168,.4); }
@@ -4484,7 +4486,7 @@ const DruckerAnsicht = {
     const foto = f && this._drFotos && this._drFotos[f];
     const zeile = (n, v) => (v == null || v === "" ? "" : `<div class="info-zeile"><span>${n}</span><strong>${esc(v)}</strong></div>`);
     const dauer = d.start && d.ende ? Math.round((new Date(d.ende) - new Date(d.start)) / 60000) : null;
-    return `<h2>${esc(d.name)}</h2><p class="leise">${esc(d.zeit)}</p>
+    return `${this._buNameHtml(d)}<p class="leise">${esc(d.zeit)}</p>
       ${foto ? `<img class="dr-foto-gross" src="${esc(foto)}" alt="Endfoto">` : ""}
       <div class="info-liste oben-abstand">
         ${zeile("Ergebnis", d.status === "finish" ? "fertig" : d.status === "failed" ? "fehlgeschlagen" : d.status === "laeuft" ? "ohne Abschluss" : d.status)}
@@ -5258,7 +5260,26 @@ const BuchenAnsicht = {
       gewicht: x.hand.gewicht, laenge: null, duese_c: null, bett_c: null, duese_mm: null, start: x.hand.start, ende: x.hand.start,
       status: x.hand.status || "finish", fortschritt: x.hand.status === "failed" ? x.hand.fortschritt : 100, hand: true,
     }));
-    return [...(this._drVerlauf || []), ...hand].sort((a, b) => (b.start || "").localeCompare(a.start || ""));
+    const eigen = (d) => { const n = ((this._daten.drucke || {})[d.uid] || {}).eigener_name; return n ? { ...d, name: n, titel: n, slicer_name: d.name } : d; };
+    return [...(this._drVerlauf || []), ...hand].map(eigen).sort((a, b) => (b.start || "").localeCompare(a.start || ""));
+  },
+  // Name des Drucks änderbar (Slicer-Namen wie „0.12mm layer, 2 walls“ sagen wenig)
+  _buNameHtml(d) {
+    return `<input class="bu-name" data-bu="name" data-uid="${esc(d.uid)}" value="${esc(d.name)}" maxlength="80" aria-label="Name des Drucks" placeholder="${esc(d.slicer_name || d.name)}">
+      ${d.slicer_name ? `<small class="leise klein">Slicer: ${esc(d.slicer_name)}</small>` : ""}`;
+  },
+  _buNameSpeichern(t) {
+    const uid = t.dataset.uid;
+    if (!uid) return;
+    this._daten.drucke = this._daten.drucke || {};
+    const alt = this._daten.drucke[uid] || {};
+    const neu = (t.value || "").trim();
+    if ((alt.eigener_name || "") === neu) return;
+    const x = { ...alt };
+    if (neu) x.eigener_name = neu; else delete x.eigener_name;
+    this._daten.drucke[uid] = x;
+    this._speichern();
+    this._toast(neu ? "Name gespeichert." : "Slicer-Name wiederhergestellt.");
   },
   _buExtra(uid) { return (this._daten.drucke || {})[uid] || {}; },
   _buOffene() {
@@ -5406,7 +5427,7 @@ const BuchenAnsicht = {
     const b = this._buBedarf(d, rolle, bu.fortschritt);
     const e = this._daten.einstellungen;
     const alt = this._daten.letzte_rolle && this._daten.letzte_rolle !== bu.rolleId ? this._daten.rollen.find((r) => r.id === this._daten.letzte_rolle) : null;
-    const f = fotoName(d), foto = f && this._drFotos && this._drFotos[f];
+    const f = fotoName(d), foto = (f && this._drFotos && this._drFotos[f]) || (this._buAlle()[0] === d ? this._drLetztesBild : null);
     const rest = rolle && rolle.rest_g != null ? rolle.rest_g - b.summe : null;
     const kachel = (r, gruende) => `<button class="bu-rolle ${r.id === bu.rolleId ? "an" : ""}" data-aktion="bu-rolle" data-id="${esc(r.id)}">
         ${spuleSvg(r)}<span class="bu-rolle-text"><strong>${esc(r.name)}</strong><small>${esc(r.hersteller)} · ${r.rest_g != null ? `${zahl(r.rest_g)} g` : "nicht gewogen"}</small>
@@ -5414,7 +5435,7 @@ const BuchenAnsicht = {
     const andere = this._daten.rollen.slice().sort((a, c) => a.name.localeCompare(c.name, "de"));
     return `<div class="bu-kopf">
         <span class="ld-bild">${foto ? `<img src="${esc(foto)}" alt="">` : "🖨️"}</span>
-        <div><h2>${esc(d.name)}</h2><p class="leise klein">${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g laut Slicer` : ""}</p></div>
+        <div>${this._buNameHtml(d)}<p class="leise klein">${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g laut Slicer` : ""}</p></div>
       </div>
       ${d.status === "failed" || bu.ergebnis !== "ok" ? `<div class="chips bu-ergebnis">
         <button class="chip ${bu.ergebnis === "fehl" ? "an rot-chip" : ""}" data-aktion="bu-ergebnis" data-id="fehl">⛔ Fehldruck</button>
@@ -5632,6 +5653,7 @@ const BuchenAnsicht = {
   _buEingabe(t) {
     const k = t.dataset && t.dataset.bu;
     if (!k) return false;
+    if (k === "name") return true;
     if (k === "fortschritt") {
       this._bu.fortschritt = Number(t.value);
       const w = this.shadowRoot.getElementById("bu-wert-fortschritt");
@@ -5649,6 +5671,7 @@ const BuchenAnsicht = {
   _buAenderung(t) {
     const k = t.dataset && t.dataset.bu;
     if (!k) return false;
+    if (k === "name") { this._buNameSpeichern(t); return true; }
     if (k === "rolle") { this._bu.rolleId = t.value; this._zeichnen(); }
     if (k === "fortschritt") this._bu.wann = wannAusFortschritt(this._bu.fortschritt);
     return true;
@@ -13295,7 +13318,7 @@ const NotizAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.15.0";
+const VERSION = "0.15.1";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
@@ -13446,6 +13469,20 @@ class FilamentWerkstattPanel extends HTMLElement {
         delete this[k];
         this[k] = wert;
       }
+    }
+    if (!this._bildFehlerHoeren) {
+      // Foto-Datei fehlt (HA liefert trotzdem eine Adresse): Platzhalter statt kaputtem Bild
+      this._bildFehlerHoeren = true;
+      this.shadowRoot.addEventListener("error", (e) => {
+        const img = e.target;
+        if (!img || img.tagName !== "IMG") return;
+        const url = img.getAttribute("src");
+        for (const k of Object.keys(this._drFotos || {})) if (this._drFotos[k] === url) this._drFotos[k] = null;
+        if (this._drLetztesBild === url) this._drLetztesBild = null;
+        const platz = document.createElement("span");
+        platz.textContent = "🖨️";
+        img.replaceWith(platz);
+      }, true);
     }
     if (!this._ro) {
       this._ro = new ResizeObserver((e) => {

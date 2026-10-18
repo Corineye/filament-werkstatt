@@ -162,7 +162,7 @@ class DruckProtokoll:
 
     async def _foto(self, start: datetime) -> None:
         """Endfoto unter Medien › 3d-drucke, Dateiname = Startzeit (so ordnet die Seite es zu)."""
-        kamera = self.ent.get("kamera")
+        kamera = self.ent.get("titelbild") or self.ent.get("kamera")
         if not kamera:
             return
         try:
