@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.15.0";
+const VERSION = "0.15.1";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
@@ -154,6 +154,20 @@ class FilamentWerkstattPanel extends HTMLElement {
         delete this[k];
         this[k] = wert;
       }
+    }
+    if (!this._bildFehlerHoeren) {
+      // Foto-Datei fehlt (HA liefert trotzdem eine Adresse): Platzhalter statt kaputtem Bild
+      this._bildFehlerHoeren = true;
+      this.shadowRoot.addEventListener("error", (e) => {
+        const img = e.target;
+        if (!img || img.tagName !== "IMG") return;
+        const url = img.getAttribute("src");
+        for (const k of Object.keys(this._drFotos || {})) if (this._drFotos[k] === url) this._drFotos[k] = null;
+        if (this._drLetztesBild === url) this._drLetztesBild = null;
+        const platz = document.createElement("span");
+        platz.textContent = "🖨️";
+        img.replaceWith(platz);
+      }, true);
     }
     if (!this._ro) {
       this._ro = new ResizeObserver((e) => {

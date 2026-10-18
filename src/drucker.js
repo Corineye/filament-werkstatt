@@ -485,7 +485,7 @@ const DruckerAnsicht = {
     const foto = f && this._drFotos && this._drFotos[f];
     const zeile = (n, v) => (v == null || v === "" ? "" : `<div class="info-zeile"><span>${n}</span><strong>${esc(v)}</strong></div>`);
     const dauer = d.start && d.ende ? Math.round((new Date(d.ende) - new Date(d.start)) / 60000) : null;
-    return `<h2>${esc(d.name)}</h2><p class="leise">${esc(d.zeit)}</p>
+    return `${this._buNameHtml(d)}<p class="leise">${esc(d.zeit)}</p>
       ${foto ? `<img class="dr-foto-gross" src="${esc(foto)}" alt="Endfoto">` : ""}
       <div class="info-liste oben-abstand">
         ${zeile("Ergebnis", d.status === "finish" ? "fertig" : d.status === "failed" ? "fehlgeschlagen" : d.status === "laeuft" ? "ohne Abschluss" : d.status)}

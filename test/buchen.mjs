@@ -22,12 +22,25 @@ const el = (p) => p.locator("filament-werkstatt-panel");
 let p = await seite(1400, 900);
 pruefe((await el(p).locator(".bu-dialog").count()) === 1, "Pop-up öffnet sich von selbst für den fertigen Druck");
 let t = await el(p).locator(".bu-dialog").textContent();
-pruefe(t.includes("Kalibrierwürfel") && t.includes("6,8 g laut Slicer"), "Pop-up zeigt Druck und Gewicht");
+pruefe((await el(p).locator(".bu-name").inputValue()) === "Kalibrierwürfel" && t.includes("6,8 g laut Slicer"), "Pop-up zeigt Druck und Gewicht");
 pruefe(t.includes("220 °C passt zu PLA"), "Vorschlag begründet mit Düsentemperatur");
 pruefe(/Anfangslinie \+ 3× Extruder\s*0,40 g/.test(t), "Feste Zusatzposten 0,4 g");
 await p.waitForTimeout(300);
 pruefe((await el(p).locator("#bu-kosten").textContent()).includes("0,210 kWh"), "Strom aus dem Monatszähler (0,21 kWh)");
 await p.screenshot({ path: `${out}/b1-popup.png` });
+// Name ändern: bleibt gespeichert, Slicer-Name steht klein darunter
+await el(p).locator(".bu-name").fill("Kalibrierwürfel PLA");
+await el(p).locator(".bu-name").press("Enter");
+await p.waitForTimeout(300);
+pruefe(await p.evaluate(() => Object.values(window.el._daten.drucke).some((x) => x.eigener_name === "Kalibrierwürfel PLA")), "Neuer Name gespeichert");
+await p.evaluate(() => window.el._zeichnen());
+await p.waitForTimeout(200);
+t = await el(p).locator(".bu-dialog").textContent();
+pruefe((await el(p).locator(".bu-name").inputValue()) === "Kalibrierwürfel PLA" && t.includes("Slicer: Kalibrierwürfel"), "Name nach neu Zeichnen noch da, Slicer-Name darunter");
+// Fehlende Foto-Datei: kein kaputtes Bild
+await p.evaluate(() => { const x = window.el; x._drFotos = { }; x._drLetztesBild = null; const bild = document.createElement("img"); bild.src = "/gibt-es-nicht.jpg"; x.shadowRoot.querySelector(".ld-bild").replaceChildren(bild); });
+await p.waitForTimeout(500);
+pruefe((await el(p).locator(".bu-kopf .ld-bild img").count()) === 0, "Fehlendes Foto: Platzhalter statt kaputtem Bild");
 const rolleName = await el(p).locator(".bu-rolle.an strong").textContent();
 const vorher = await p.evaluate((n) => window.el._daten.rollen.find((r) => r.name === n).rest_g, rolleName);
 await el(p).locator('[data-aktion="bu-buchen"]').click();
