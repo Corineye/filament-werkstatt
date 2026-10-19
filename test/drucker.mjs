@@ -26,6 +26,14 @@ pruefe(text.includes("Textured PEI Plate") && text.includes("Gehärteter Stahl")
 pruefe((await el(p).locator(".dr-druck").count()) === 3, "Druckverlauf mit 3 Drucken");
 pruefe((await el(p).locator('.dr-druck img').count()) === 1, "Endfoto zum passenden Druck gefunden");
 pruefe(await el(p).locator("#dr-titelbild-gross").evaluate((i) => i.complete && i.naturalWidth > 0), "Titelbild groß geladen (statt Kamera)");
+// Live-Bild: Umschalter in der Bildkarte
+await el(p).locator('[data-aktion="dr-live"][data-id="an"]').click();
+await p.waitForTimeout(400);
+pruefe(await el(p).locator(".dr-live-bild").evaluate((i) => i.complete && i.naturalWidth > 0), "Live-Bild der Kamera zeigt sich");
+await p.screenshot({ path: `${out}/live-bild.png` });
+await el(p).locator('[data-aktion="dr-live"][data-id="aus"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator("#dr-titelbild-gross").count()) === 1 && (await el(p).locator(".dr-live-bild").count()) === 0, "Zurück zum Titelbild");
 await p.screenshot({ path: `${out}/d1-druckt.png` });
 
 // Live-Werte ändern sich, ohne dass die Seite neu aufgebaut wird
