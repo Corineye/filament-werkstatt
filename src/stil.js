@@ -1696,6 +1696,9 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
 @keyframes dr-schweben { 50% { transform: translateY(-5px); } }
 .dr-bild .dr-kamera-leer { display: grid; justify-items: center; gap: 8px; height: auto; }
 .dr-bild-leer-icon { font-size: 42px; color: rgba(62,230,168,.35); line-height: 1; }
+.dr-bild-tabs { display: flex; gap: 8px; margin: 2px 0 10px; }
+.dr-bild .dr-live-bild { max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: contain; filter: none; animation: none; border-radius: 12px; }
+.dr-bild-karte.aktiv .dr-bild .dr-live-bild { animation: none; }
 .dr-bild-name { margin: 10px 0 0; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
 /* Zeitleiste im Statuskasten */
 .dr-status { flex-wrap: wrap; }

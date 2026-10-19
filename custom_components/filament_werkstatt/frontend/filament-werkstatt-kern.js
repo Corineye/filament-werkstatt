@@ -3153,6 +3153,9 @@ button.pille.ws-pj-pille:hover { background: color-mix(in srgb, var(--pj, var(--
 @keyframes dr-schweben { 50% { transform: translateY(-5px); } }
 .dr-bild .dr-kamera-leer { display: grid; justify-items: center; gap: 8px; height: auto; }
 .dr-bild-leer-icon { font-size: 42px; color: rgba(62,230,168,.35); line-height: 1; }
+.dr-bild-tabs { display: flex; gap: 8px; margin: 2px 0 10px; }
+.dr-bild .dr-live-bild { max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: contain; filter: none; animation: none; border-radius: 12px; }
+.dr-bild-karte.aktiv .dr-bild .dr-live-bild { animation: none; }
 .dr-bild-name { margin: 10px 0 0; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
 /* Zeitleiste im Statuskasten */
 .dr-status { flex-wrap: wrap; }
@@ -4408,14 +4411,36 @@ const DruckerAnsicht = {
     const letzter = this._drVerlauf && this._buAlle()[0];
     const name = druckt ? this._drW("name") : (["finish", "failed"].includes(zustand) && this._drW("name")) || (letzter && letzter.name);
     const fortschritt = this._drZ("fortschritt");
-    return `<div class="dr-karte dr-bild-karte ${druckt ? "aktiv" : ""}">
-      <div class="dr-kamera-kopf"><h3 class="dr-titel">🖼️ ${druckt ? "Aktueller Druck" : "Letzter Druck"}</h3>
-        ${druckt && fortschritt != null ? `<span class="pille mint">${zahl(fortschritt)} %</span>` : ""}</div>
-      <div class="dr-bild">${zeige
+    const live = !!this._drLive;
+    const umschalter = `<span class="dr-bild-tabs"><button class="chip ${live ? "" : "an"}" data-aktion="dr-live" data-id="aus">🖼️ Titelbild</button>
+        <button class="chip ${live ? "an" : ""}" data-aktion="dr-live" data-id="an">🎥 Live</button></span>`;
+    let inhalt;
+    if (live) {
+      const src = this._drLiveQuelle();
+      inhalt = src
+        ? `<img class="dr-live-bild" src="${esc(src)}" alt="Live-Bild der Druckerkamera">`
+        : `<div class="dr-kamera-leer"><span class="dr-bild-leer-icon" aria-hidden="true">🎥</span>Kamera liefert gerade kein Bild</div>`;
+    } else {
+      inhalt = zeige
         ? `<img id="dr-titelbild-gross" src="${esc(zeige)}" alt="Titelbild${name ? ` von ${esc(name)}` : ""}">`
-        : `<div class="dr-kamera-leer"><span class="dr-bild-leer-icon" aria-hidden="true">◇</span>Kein Druck</div>`}</div>
-      ${zeige && name ? `<p class="dr-bild-name">${esc(name)}</p>` : ""}
+        : `<div class="dr-kamera-leer"><span class="dr-bild-leer-icon" aria-hidden="true">◇</span>Kein Druck</div>`;
+    }
+    return `<div class="dr-karte dr-bild-karte ${druckt ? "aktiv" : ""} ${live ? "live" : ""}">
+      <div class="dr-kamera-kopf"><h3 class="dr-titel">${live ? "🎥 Live" : "🖼️"} ${druckt ? "Aktueller Druck" : "Letzter Druck"}</h3>
+        ${druckt && fortschritt != null ? `<span class="pille mint">${zahl(fortschritt)} %</span>` : ""}</div>
+      ${umschalter}
+      <div class="dr-bild">${inhalt}</div>
+      ${!live && zeige && name ? `<p class="dr-bild-name">${esc(name)}</p>` : ""}
     </div>`;
+  },
+  // Live-Bild: Stream-Adresse der Kamera, beim Einschalten festgehalten, damit der Stream nicht bei jeder Änderung neu startet
+  _drLiveQuelle() {
+    if (this._drLiveSrc) return this._drLiveSrc;
+    const s = this._drS("kamera");
+    const bild = s && !["unavailable", "unknown"].includes(s.state) && s.attributes && s.attributes.entity_picture;
+    if (!bild) return null;
+    this._drLiveSrc = bild.replace("/camera_proxy/", "/camera_proxy_stream/");
+    return this._drLiveSrc;
   },
 
   // ---- Druckverlauf ------------------------------------------------------
@@ -5225,6 +5250,7 @@ const DruckerAnsicht = {
         this._drSteuerArt = el.dataset.art; this._dialog = "dr-steuer";
         break;
       case "dr-steuer-ok": this._drSteuerSenden(this._drSteuerArt); return;
+      case "dr-live": this._drLive = el.dataset.id === "an"; this._drLiveSrc = null; break;
       case "dr-licht": this._drLichtSchalten(); return;
       case "dr-tempo": this._drTempoSetzen(el.dataset.wert); return;
       case "dr-neu-laden": this._drVerlauf = null; this._drVerlaufLaden(); break;
@@ -13318,7 +13344,7 @@ const NotizAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.15.1";
+const VERSION = "0.15.2";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
@@ -13477,6 +13503,11 @@ class FilamentWerkstattPanel extends HTMLElement {
         const img = e.target;
         if (!img || img.tagName !== "IMG") return;
         const url = img.getAttribute("src");
+        if (img.classList.contains("dr-live-bild")) {
+          this._drLiveSrc = null;
+          img.parentElement.innerHTML = `<div class="dr-kamera-leer"><span class="dr-bild-leer-icon" aria-hidden="true">🎥</span>Kamera liefert gerade kein Bild</div>`;
+          return;
+        }
         for (const k of Object.keys(this._drFotos || {})) if (this._drFotos[k] === url) this._drFotos[k] = null;
         if (this._drLetztesBild === url) this._drLetztesBild = null;
         const platz = document.createElement("span");
