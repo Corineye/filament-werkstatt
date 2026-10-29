@@ -40,6 +40,7 @@ from .const import (
 from .modelle import ModellDatei, ModelleListe
 from .geraete import drucker_entitaeten, einstellungen, raum_vorschlaege, vorschlaege
 from .protokoll import DruckProtokoll
+from .schnittstelle import registrieren as dienste_registrieren
 from .sicherung import Sicherung
 
 _LOGGER = logging.getLogger(__name__)
@@ -76,6 +77,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         websocket_api.async_register_command(hass, ws_sicherung_jetzt)
         websocket_api.async_register_command(hass, ws_update)
         daten["sicherung"] = Sicherung(hass)
+        dienste_registrieren(hass)
         hass.http.register_view(ModelleListe())
         hass.http.register_view(ModellDatei())
         daten["dateien"] = True

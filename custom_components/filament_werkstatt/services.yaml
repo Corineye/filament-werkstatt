@@ -1,0 +1,131 @@
+lesen:
+  fields:
+    benutzer:
+      required: false
+      example: corin
+      selector:
+        text:
+warteschlange_hinzufuegen:
+  fields:
+    name:
+      required: true
+      example: Kabelclip
+      selector:
+        text:
+    gewicht_g:
+      required: false
+      example: 12.5
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 0.1
+          unit_of_measurement: g
+    zeit_min:
+      required: false
+      example: 95
+      selector:
+        number:
+          min: 0
+          max: 100000
+          unit_of_measurement: min
+    rolle_id:
+      required: false
+      selector:
+        text:
+    notiz:
+      required: false
+      selector:
+        text:
+    projekt:
+      required: false
+      selector:
+        text:
+    quelle:
+      required: false
+      example: werkstatt-app
+      selector:
+        text:
+    datei:
+      required: false
+      example: C:\\Druck\\kabelclip.3mf
+      selector:
+        text:
+    benutzer:
+      required: false
+      selector:
+        text:
+warteschlange_aendern:
+  fields:
+    id:
+      required: true
+      selector:
+        text:
+    name:
+      required: false
+      selector:
+        text:
+    gewicht_g:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 0.1
+          unit_of_measurement: g
+    zeit_min:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100000
+          unit_of_measurement: min
+    rolle_id:
+      required: false
+      selector:
+        text:
+    notiz:
+      required: false
+      selector:
+        text:
+    projekt:
+      required: false
+      selector:
+        text:
+    datei:
+      required: false
+      selector:
+        text:
+    benutzer:
+      required: false
+      selector:
+        text:
+warteschlange_entfernen:
+  fields:
+    id:
+      required: true
+      selector:
+        text:
+    benutzer:
+      required: false
+      selector:
+        text:
+projekt_setzen:
+  fields:
+    druck_uid:
+      required: false
+      selector:
+        text:
+    warteschlange_id:
+      required: false
+      selector:
+        text:
+    projekt:
+      required: true
+      example: Schlüsselanhänger
+      selector:
+        text:
+    benutzer:
+      required: false
+      selector:
+        text:

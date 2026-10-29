@@ -4481,8 +4481,14 @@ const DruckerAnsicht = {
     else if (this._drVerlaufFehler) inhalt = `<div class="hinweis amber">Die Liste „3D-Drucke“ konnte nicht gelesen werden: ${esc(this._drVerlaufFehler)}</div>`;
     else if (!liste.length) inhalt = `<div class="leise klein">Noch keine Drucke aufgezeichnet. Die Automation trägt jeden Druck automatisch ein.</div>`;
     else {
-      const zeige = this._drAlle ? liste : liste.slice(0, 8);
-      inhalt = `<div class="dr-verlauf">${zeige.map((d) => {
+      const namen = this._projektNamen();
+      const filter = this._drPjFilter && namen.includes(this._drPjFilter) ? this._drPjFilter : "";
+      const gefiltert = filter ? liste.filter((d) => d.projekt === filter) : liste;
+      const zeige = this._drAlle || filter ? gefiltert : gefiltert.slice(0, 8);
+      inhalt = `${namen.length ? `<div class="chips dr-pj-filter" role="group" aria-label="Projekt">
+        <button class="chip ${filter ? "" : "an"}" data-aktion="dr-pj-filter" data-id="">Alle</button>
+        ${namen.map((n) => `<button class="chip ${filter === n ? "an" : ""}" data-aktion="dr-pj-filter" data-id="${esc(n)}">📁 ${esc(n)}</button>`).join("")}</div>` : ""}
+      <div class="dr-verlauf">${zeige.map((d) => {
         const f = fotoName(d);
         const foto = f && this._drFotos && this._drFotos[f];
         const extra = (this._daten.drucke || {})[d.uid] || {};
@@ -4494,10 +4500,10 @@ const DruckerAnsicht = {
           <span class="dr-druck-text"><strong>${esc(d.name)}</strong>
             <small>${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g` : ""}${d.duese_mm ? ` · ${zahl(d.duese_mm, 1)} mm Düse` : ""}${g ? ` · ${esc((this._daten.rollen.find((r) => r.id === g.rolle) || {}).name || "")}` : ""}${d.hand ? " · von Hand" : ""}</small>
             ${extra.kommentar ? `<small class="dr-kommentar">💬 ${esc(extra.kommentar)}</small>` : ""}</span>
-          <span class="pille ${farbe}">${st}</span>
+          <span class="pille ${farbe}">${st}</span>${d.projekt ? `<span class="pille leise">📁 ${esc(d.projekt)}</span>` : ""}
         </button>`;
       }).join("")}</div>
-      ${liste.length > 8 ? `<button class="mini mint-rand" data-aktion="dr-alle">${this._drAlle ? "Weniger zeigen" : `Alle ${liste.length} Drucke zeigen`}</button>` : ""}`;
+      ${!filter && liste.length > 8 ? `<button class="mini mint-rand" data-aktion="dr-alle">${this._drAlle ? "Weniger zeigen" : `Alle ${liste.length} Drucke zeigen`}</button>` : ""}`;
     }
     return `<div class="dr-karte"><div class="dr-kamera-kopf"><h3 class="dr-titel">🗂️ Druckverlauf</h3>
       <span class="chips"><button class="chip" data-aktion="bu-hand">＋ Nachtragen</button><button class="chip" data-aktion="dr-neu-laden">↻ Aktualisieren</button></span></div>${inhalt}</div>`;
@@ -4523,6 +4529,7 @@ const DruckerAnsicht = {
         ${zeile("Düse", d.duese_mm ? `${zahl(d.duese_mm, 1)} mm` : null)}
       </div>
       ${this._drBuchungHtml(d, extra)}
+      ${this._buProjektHtml(d)}
       <h3>Kommentar</h3>
       <textarea id="dr-kommentar" rows="4" placeholder="z. B. warum abgebrochen, was du gelernt hast …">${esc(extra.kommentar || "")}</textarea>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Schließen</button>
@@ -5250,6 +5257,7 @@ const DruckerAnsicht = {
         this._drSteuerArt = el.dataset.art; this._dialog = "dr-steuer";
         break;
       case "dr-steuer-ok": this._drSteuerSenden(this._drSteuerArt); return;
+      case "dr-pj-filter": this._drPjFilter = el.dataset.id || ""; break;
       case "dr-live": this._drLive = el.dataset.id === "an"; this._drLiveSrc = null; break;
       case "dr-licht": this._drLichtSchalten(); return;
       case "dr-tempo": this._drTempoSetzen(el.dataset.wert); return;
@@ -5286,13 +5294,40 @@ const BuchenAnsicht = {
       gewicht: x.hand.gewicht, laenge: null, duese_c: null, bett_c: null, duese_mm: null, start: x.hand.start, ende: x.hand.start,
       status: x.hand.status || "finish", fortschritt: x.hand.status === "failed" ? x.hand.fortschritt : 100, hand: true,
     }));
-    const eigen = (d) => { const n = ((this._daten.drucke || {})[d.uid] || {}).eigener_name; return n ? { ...d, name: n, titel: n, slicer_name: d.name } : d; };
+    const eigen = (d) => {
+      const x = (this._daten.drucke || {})[d.uid] || {};
+      const e = x.eigener_name ? { ...d, name: x.eigener_name, titel: x.eigener_name, slicer_name: d.name } : d;
+      return x.projekt ? { ...e, projekt: x.projekt } : e;
+    };
     return [...(this._drVerlauf || []), ...hand].map(eigen).sort((a, b) => (b.start || "").localeCompare(a.start || ""));
   },
   // Name des Drucks änderbar (Slicer-Namen wie „0.12mm layer, 2 walls“ sagen wenig)
   _buNameHtml(d) {
     return `<input class="bu-name" data-bu="name" data-uid="${esc(d.uid)}" value="${esc(d.name)}" maxlength="80" aria-label="Name des Drucks" placeholder="${esc(d.slicer_name || d.name)}">
       ${d.slicer_name ? `<small class="leise klein">Slicer: ${esc(d.slicer_name)}</small>` : ""}`;
+  },
+  // Alle bisher benutzten Projektnamen (Warteschlange und Drucke) für Vorschläge und Filter
+  _projektNamen() {
+    const n = new Set();
+    for (const a of (this._daten.warteschlange || [])) if (a.projekt) n.add(a.projekt);
+    for (const x of Object.values(this._daten.drucke || {})) if (x && x.projekt) n.add(x.projekt);
+    return [...n].sort((a, b) => a.localeCompare(b, "de"));
+  },
+  _buProjektHtml(d) {
+    return `<label class="feld"><span>Projekt (optional)</span><input data-bu="projekt" data-uid="${esc(d.uid)}" list="projekt-liste" value="${esc(d.projekt || "")}" maxlength="60" placeholder="z. B. Schlüsselanhänger">
+      <datalist id="projekt-liste">${this._projektNamen().map((n) => `<option value="${esc(n)}">`).join("")}</datalist></label>`;
+  },
+  _buProjektSpeichern(t) {
+    const uid = t.dataset.uid;
+    if (!uid) return;
+    this._daten.drucke = this._daten.drucke || {};
+    const x = { ...(this._daten.drucke[uid] || {}) };
+    const neu = (t.value || "").trim();
+    if ((x.projekt || "") === neu) return;
+    if (neu) x.projekt = neu; else delete x.projekt;
+    this._daten.drucke[uid] = x;
+    this._speichern();
+    this._toast(neu ? "Projekt gespeichert." : "Projekt entfernt.");
   },
   _buNameSpeichern(t) {
     const uid = t.dataset.uid;
@@ -5679,7 +5714,7 @@ const BuchenAnsicht = {
   _buEingabe(t) {
     const k = t.dataset && t.dataset.bu;
     if (!k) return false;
-    if (k === "name") return true;
+    if (k === "name" || k === "projekt") return true;
     if (k === "fortschritt") {
       this._bu.fortschritt = Number(t.value);
       const w = this.shadowRoot.getElementById("bu-wert-fortschritt");
@@ -5698,6 +5733,7 @@ const BuchenAnsicht = {
     const k = t.dataset && t.dataset.bu;
     if (!k) return false;
     if (k === "name") { this._buNameSpeichern(t); return true; }
+    if (k === "projekt") { this._buProjektSpeichern(t); return true; }
     if (k === "rolle") { this._bu.rolleId = t.value; this._zeichnen(); }
     if (k === "fortschritt") this._bu.wann = wannAusFortschritt(this._bu.fortschritt);
     return true;
@@ -6547,6 +6583,8 @@ const WerkstattAnsicht = {
     const geladen = this._daten.rollen.find((r) => r.id === this._daten.geladen);
     const projekte = this._wsProjekte();
     const heute = new Date().toDateString();
+    const pjNamen = this._projektNamen();
+    const pjFilter = this._ws.pjFilter && pjNamen.includes(this._ws.pjFilter) ? this._ws.pjFilter : "";
     let letzteRolle = null;
     return `<div class="ws-kopfzeile"><p class="leise">Was als Nächstes gedruckt wird. Die Bestandsprüfung rechnet die Aufträge der Reihe nach von den Rollen ab.</p>
       <button class="knopf" data-aktion="ws-neu">＋ Auftrag</button></div>
@@ -6562,9 +6600,14 @@ const WerkstattAnsicht = {
         <div class="ws-plan-zeile"><span class="ws-plan-icon">🔁</span><div><strong>${klug ? wechselKlug : wechselManuell} Rollenwechsel</strong>
           <small class="leise">${klug ? (wechselKlug < wechselManuell ? `statt ${wechselManuell} in deiner Reihenfolge` : "weniger geht nicht") : wechselKlug < wechselManuell ? `Klug sortiert wären es nur ${wechselKlug}` : "Die Reihenfolge ist schon günstig"}${geladen ? ` · geladen: ${esc(geladen.name)}` : " · keine Rolle als geladen markiert"}</small></div></div>
       </div>` : ""}
+      ${pjNamen.length ? `<div class="chips ws-pj-filter" role="group" aria-label="Projekt">
+        <button class="chip ${pjFilter ? "" : "an"}" data-aktion="ws-pj-filter" data-id="">Alle</button>
+        ${pjNamen.map((n) => `<button class="chip ${pjFilter === n ? "an" : ""}" data-aktion="ws-pj-filter" data-id="${esc(n)}">📁 ${esc(n)}</button>`).join("")}
+        ${!klug && q.length > 1 ? `<button class="mini mint-rand" data-aktion="ws-nach-projekt">Nach Projekt ordnen</button>` : ""}</div>` : ""}
       ${!liste.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📋</span><strong>Die Warteschlange ist leer</strong>
         <span class="leise">Füge Aufträge hier hinzu, aus dem 3D-Modell-Viewer oder mit „Nochmal drucken“ in der Bibliothek.</span></div>` : ""}
       <div class="ws-liste">${liste.map((x, i) => {
+        if (pjFilter && x.a.projekt !== pjFilter) return "";
         const [st, farbe] = text[x.stufe];
         const p = zp.plan[i];
         let trenner = "";
@@ -6584,7 +6627,7 @@ const WerkstattAnsicht = {
             <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${p.min != null ? ` · ${wsDauerText(p.min)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}${x.r && x.a.gewicht ? (() => { const pp = this._preisProGramm(x.r); return ` · ≈ ${zahl(x.bedarf * pp.wert, 2)} €${this._voreingestelltHtml(pp)}`; })() : ""}</small>
             <span class="ws-pillen"><span class="pille ${farbe}">${st}${x.vorher != null && x.a.gewicht ? (x.danach < 0 ? ` · es fehlen ${zahl(-x.danach)} g` : ` · danach ${zahl(x.danach)} g`) : ""}</span>
               ${p.ende != null ? `<span class="pille ws-uhr">fertig um ${wsUhr(p.ende)}${new Date(p.ende).toDateString() !== heute ? ` (${new Date(p.ende).toLocaleDateString("de-DE", { weekday: "short" })})` : ""}</span>` : `<span class="pille ws-ohne-dauer">Dauer fehlt</span>`}
-              ${pj.map((pr) => `<span class="pille ws-pj-pille" style="--pj:${esc(pr.farbe)}">${esc(pr.icon)} ${esc(pr.name)}</span>`).join("")}</span>
+              ${x.a.projekt ? `<span class="pille leise">📁 ${esc(x.a.projekt)}</span>` : ""}${pj.map((pr) => `<span class="pille ws-pj-pille" style="--pj:${esc(pr.farbe)}">${esc(pr.icon)} ${esc(pr.name)}</span>`).join("")}</span>
             ${x.ersatz && x.ersatz.length ? `<div class="chips ws-ersatz"><span class="leise klein">Reicht stattdessen:</span>${x.ersatz.map((r) => `<button class="chip" data-aktion="ws-rolle" data-id="${esc(x.a.id)}" data-rolle="${esc(r.id)}">${esc(r.name)} · ${zahl(r.rest_g)} g</button>`).join("")}</div>` : ""}
             ${x.a.notiz ? `<small class="leise">📝 ${esc(x.a.notiz)}</small>` : ""}</div>
           <div class="ws-knoepfe">
@@ -6620,6 +6663,8 @@ const WerkstattAnsicht = {
         <div class="regler-zeile"><button class="rund" data-aktion="ws-d" data-d="-15">−15</button><input type="range" min="0" max="1440" step="5" value="${n.dauer_min || 0}" data-ws="dauer" aria-label="Druckdauer in Minuten"><button class="rund" data-aktion="ws-d" data-d="15">+15</button></div>
         <small class="leise klein">In Minuten, steht im Slicer. Damit rechnet die Warteschlange aus, wann was fertig ist.</small></div>
       <label class="auswahl breit-auswahl"><span>Rolle</span><select data-ws="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${r.id === n.rolleId ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : ""}${r.id === this._daten.geladen ? " · geladen" : ""}</option>`).join("")}</select></label>
+      <label class="feld"><span>Projekt (optional)</span><input id="ws-projekt" list="projekt-liste" value="${esc(n.projekt || "")}" maxlength="60" placeholder="z. B. Schlüsselanhänger">
+        <datalist id="projekt-liste">${this._projektNamen().map((x) => `<option value="${esc(x)}">`).join("")}</datalist></label>
       <label class="feld"><span>Notiz (optional)</span><input id="ws-notiz" value="${esc(n.notiz)}" maxlength="140"></label>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf" data-aktion="ws-speichern">${n.id ? "Speichern" : "Hinzufügen"}</button></div>`;
   },
@@ -7203,6 +7248,13 @@ const WerkstattAnsicht = {
       case "ws-bearbeiten": if (idx < 0) return; this._wsAuftragNeu({ ...q[idx] }); break;
       case "ws-g": { const n = w.neu; n.gewicht = Math.max(0, Math.min(1000, (n.gewicht || 0) + Number(el.dataset.d))); this._wsGewichtZeigen(); return; }
       case "ws-d": { const n = w.neu; n.dauer_min = Math.max(0, Math.min(1440, (n.dauer_min || 0) + Number(el.dataset.d))); this._wsGewichtZeigen(); return; }
+      case "ws-pj-filter": w.pjFilter = el.dataset.id || ""; break;
+      case "ws-nach-projekt": {
+        // Stabil nach Projekt ordnen: Aufträge ohne Projekt zuletzt, sonst bleibt die Reihenfolge
+        this._daten.warteschlange = q.map((x, i) => [x, i]).sort((a, b) => (a[0].projekt ? 0 : 1) - (b[0].projekt ? 0 : 1) || (a[0].projekt || "").localeCompare(b[0].projekt || "", "de") || a[1] - b[1]).map((x) => x[0]);
+        this._daten.einstellungen.schlange_klug = false;
+        this._speichern(); this._toast("Nach Projekt geordnet."); break;
+      }
       case "ws-klug": this._daten.einstellungen.schlange_klug = el.dataset.id === "an"; this._speichern(); break;
       case "ws-klug-uebernehmen": {
         this._daten.warteschlange = this._wsKlugeReihenfolge();
@@ -7215,9 +7267,11 @@ const WerkstattAnsicht = {
         const n = w.neu;
         n.name = (this.shadowRoot.getElementById("ws-name").value || "").trim();
         n.notiz = (this.shadowRoot.getElementById("ws-notiz").value || "").trim();
+        n.projekt = (this.shadowRoot.getElementById("ws-projekt").value || "").trim();
+        if (!n.projekt) delete n.projekt;
         if (!n.name) { this._toast("Bitte einen Namen eingeben."); return; }
         n.dauer_min = n.dauer_min > 0 ? n.dauer_min : null;
-        if (n.id) { const i = q.findIndex((x) => x.id === n.id); if (i >= 0) q[i] = { ...q[i], ...n }; }
+        if (n.id) { const i = q.findIndex((x) => x.id === n.id); if (i >= 0) { q[i] = { ...q[i], ...n }; if (!n.projekt) delete q[i].projekt; } }
         else q.push({ ...n, id: `a-${Date.now().toString(36)}`, am: new Date().toISOString(), quelle: "hand" });
         w.neu = null; this._dialog = null; this._speichern();
         break;
@@ -13344,7 +13398,7 @@ const NotizAnsicht = {
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.15.2";
+const VERSION = "0.16.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
@@ -13537,7 +13591,12 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._ro.observe(this);
     this._zeichnen();
   }
-  disconnectedCallback() { this._ro && this._ro.disconnect(); }
+  disconnectedCallback() {
+    this._ro && this._ro.disconnect();
+    clearTimeout(this._fremdTimer);
+    if (this._aboEnde) { try { this._aboEnde(); } catch (e) { /* schon getrennt */ } this._aboEnde = null; }
+    this._abo = false;
+  }
 
   // Fehler in einem Klick soll nicht die ganze Seite lahmlegen
   _sicher(f) {
@@ -13580,10 +13639,21 @@ class FilamentWerkstattPanel extends HTMLElement {
         await this._speichernJetzt(true);
       }
       this._drVerlaufLaden();
+      this._aenderungenAbonnieren();
     } catch (e) {
       this._fehler = e.message || String(e);
     }
     this._zeichnen();
+  }
+
+  // Schreibt ein anderer Zugang (z. B. die Desktop-App über die Dienste) in die Daten,
+  // meldet Home Assistant das sofort; die Seite lädt dann den neuen Stand.
+  _aenderungenAbonnieren() {
+    if (this._abo || !this._hass.connection || !this._hass.connection.subscribeMessage) return;
+    this._abo = true;
+    this._hass.connection.subscribeMessage(() => this._fremdeAenderungPruefen(), { type: "frontend/subscribe_user_data", key: SPEICHER_KEY })
+      .then((u) => { this._aboEnde = u; })
+      .catch(() => { this._abo = false; });
   }
 
   // Drucker, Steckdose und Druckliste aus der Einrichtung der Integration
@@ -13637,7 +13707,12 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 
   async _fremdeAenderungPruefen() {
-    if (!this._hass || !this._daten || this._ungespeichert || this._modus || this._dialog || this._konflikt) return;
+    if (!this._hass || !this._daten || this._konflikt) return;
+    if (this._ungespeichert || this._modus || this._dialog) {   // gerade beschäftigt: gleich nochmal
+      clearTimeout(this._fremdTimer);
+      this._fremdTimer = setTimeout(() => this._fremdeAenderungPruefen(), 4000);
+      return;
+    }
     try {
       const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
       const v = r && r.value;

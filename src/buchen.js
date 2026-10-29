@@ -15,13 +15,40 @@ const BuchenAnsicht = {
       gewicht: x.hand.gewicht, laenge: null, duese_c: null, bett_c: null, duese_mm: null, start: x.hand.start, ende: x.hand.start,
       status: x.hand.status || "finish", fortschritt: x.hand.status === "failed" ? x.hand.fortschritt : 100, hand: true,
     }));
-    const eigen = (d) => { const n = ((this._daten.drucke || {})[d.uid] || {}).eigener_name; return n ? { ...d, name: n, titel: n, slicer_name: d.name } : d; };
+    const eigen = (d) => {
+      const x = (this._daten.drucke || {})[d.uid] || {};
+      const e = x.eigener_name ? { ...d, name: x.eigener_name, titel: x.eigener_name, slicer_name: d.name } : d;
+      return x.projekt ? { ...e, projekt: x.projekt } : e;
+    };
     return [...(this._drVerlauf || []), ...hand].map(eigen).sort((a, b) => (b.start || "").localeCompare(a.start || ""));
   },
   // Name des Drucks änderbar (Slicer-Namen wie „0.12mm layer, 2 walls“ sagen wenig)
   _buNameHtml(d) {
     return `<input class="bu-name" data-bu="name" data-uid="${esc(d.uid)}" value="${esc(d.name)}" maxlength="80" aria-label="Name des Drucks" placeholder="${esc(d.slicer_name || d.name)}">
       ${d.slicer_name ? `<small class="leise klein">Slicer: ${esc(d.slicer_name)}</small>` : ""}`;
+  },
+  // Alle bisher benutzten Projektnamen (Warteschlange und Drucke) für Vorschläge und Filter
+  _projektNamen() {
+    const n = new Set();
+    for (const a of (this._daten.warteschlange || [])) if (a.projekt) n.add(a.projekt);
+    for (const x of Object.values(this._daten.drucke || {})) if (x && x.projekt) n.add(x.projekt);
+    return [...n].sort((a, b) => a.localeCompare(b, "de"));
+  },
+  _buProjektHtml(d) {
+    return `<label class="feld"><span>Projekt (optional)</span><input data-bu="projekt" data-uid="${esc(d.uid)}" list="projekt-liste" value="${esc(d.projekt || "")}" maxlength="60" placeholder="z. B. Schlüsselanhänger">
+      <datalist id="projekt-liste">${this._projektNamen().map((n) => `<option value="${esc(n)}">`).join("")}</datalist></label>`;
+  },
+  _buProjektSpeichern(t) {
+    const uid = t.dataset.uid;
+    if (!uid) return;
+    this._daten.drucke = this._daten.drucke || {};
+    const x = { ...(this._daten.drucke[uid] || {}) };
+    const neu = (t.value || "").trim();
+    if ((x.projekt || "") === neu) return;
+    if (neu) x.projekt = neu; else delete x.projekt;
+    this._daten.drucke[uid] = x;
+    this._speichern();
+    this._toast(neu ? "Projekt gespeichert." : "Projekt entfernt.");
   },
   _buNameSpeichern(t) {
     const uid = t.dataset.uid;
@@ -408,7 +435,7 @@ const BuchenAnsicht = {
   _buEingabe(t) {
     const k = t.dataset && t.dataset.bu;
     if (!k) return false;
-    if (k === "name") return true;
+    if (k === "name" || k === "projekt") return true;
     if (k === "fortschritt") {
       this._bu.fortschritt = Number(t.value);
       const w = this.shadowRoot.getElementById("bu-wert-fortschritt");
@@ -427,6 +454,7 @@ const BuchenAnsicht = {
     const k = t.dataset && t.dataset.bu;
     if (!k) return false;
     if (k === "name") { this._buNameSpeichern(t); return true; }
+    if (k === "projekt") { this._buProjektSpeichern(t); return true; }
     if (k === "rolle") { this._bu.rolleId = t.value; this._zeichnen(); }
     if (k === "fortschritt") this._bu.wann = wannAusFortschritt(this._bu.fortschritt);
     return true;

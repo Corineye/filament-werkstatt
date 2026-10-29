@@ -89,6 +89,21 @@ pruefe(t.includes("verbucht") && t.includes("Fehldruck"), "Verlauf zeigt verbuch
 await el(p).locator('.dr-druck', { hasText: "Kalibrierwürfel" }).click();
 await p.waitForTimeout(300);
 pruefe((await el(p).locator(".dialog").textContent()).includes("Abgezogen"), "Druck-Dialog zeigt Buchung");
+// Projekt am Druck: speichern, im Verlauf als Pille und als Filter
+await el(p).locator('.dialog [data-bu="projekt"]').fill("Prototypen");
+await el(p).locator('.dialog [data-bu="projekt"]').press("Enter");
+await p.waitForTimeout(300);
+pruefe(await p.evaluate(() => Object.values(window.el._daten.drucke).some((x) => x.projekt === "Prototypen")), "Projekt am Druck gespeichert");
+await el(p).locator('.dialog [data-aktion="dialog-zu"]').last().evaluate((k) => k.click());
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".dr-verlauf").textContent()).includes("📁 Prototypen"), "Verlauf zeigt das Projekt");
+await el(p).locator('.dr-pj-filter [data-id="Prototypen"]').click();
+await p.waitForTimeout(300);
+pruefe((await el(p).locator(".dr-verlauf .dr-druck").count()) === 1, "Projekt-Filter im Druckverlauf zeigt nur diesen Druck");
+await el(p).locator('.dr-pj-filter [data-id=""]').click();
+await p.waitForTimeout(300);
+await el(p).locator('.dr-druck', { hasText: "Kalibrierwürfel" }).click();
+await p.waitForTimeout(300);
 await el(p).locator('[data-aktion="bu-rueckgaengig"]').click();
 await p.waitForTimeout(300);
 const zurueck = await p.evaluate((n) => window.el._daten.rollen.find((r) => r.name === n).rest_g, rolleName);

@@ -309,6 +309,34 @@ await el(mi).locator('[data-aktion="inv-vorlage"]:has-text("IPA")').click();
 await mi.waitForTimeout(400);
 await mi.screenshot({ path: `${out}/handy-inventar-werkzeug-neu.png` });
 
+// Projekt-Feld: Filter, Sortierung, Eingabe im Auftrag und am Druck
+const pj = await seite(1400, 900);
+await pj.evaluate(() => {
+  const x = window.el, q = x._daten.warteschlange;
+  q.length = 0;
+  q.push({ id: "a1", name: "Ohne", gewicht: 5, rolleId: null, notiz: "" }, { id: "a2", name: "Lampe-Fuß", gewicht: 20, rolleId: null, notiz: "", projekt: "Lampe" },
+    { id: "a3", name: "Clip", gewicht: 3, rolleId: null, notiz: "", projekt: "Anhänger" }, { id: "a4", name: "Lampe-Schirm", gewicht: 30, rolleId: null, notiz: "", projekt: "Lampe" });
+  x._daten.einstellungen.schlange_klug = false;
+  x._ws = x._wsZustand(); x._ws.tab = "schlange"; x._zeichnen();
+});
+await pj.waitForTimeout(400);
+const namenAn = async () => (await el(pj).locator(".ws-liste .ws-text strong").allTextContents()).join(",");
+pruefe((await el(pj).locator(".ws-pj-filter .chip").allTextContents()).join("|").includes("Lampe"), "Projekt-Filter zeigt die benutzten Projekte");
+await el(pj).locator('.ws-pj-filter [data-id="Lampe"]').click();
+await pj.waitForTimeout(300);
+pruefe((await namenAn()) === "Lampe-Fuß,Lampe-Schirm", `Filter Lampe zeigt nur Lampen-Teile (${await namenAn()})`);
+await el(pj).locator('.ws-pj-filter [data-id=""]').click();
+await el(pj).locator('[data-aktion="ws-nach-projekt"]').click();
+await pj.waitForTimeout(300);
+pruefe((await namenAn()) === "Clip,Lampe-Fuß,Lampe-Schirm,Ohne", `Nach Projekt geordnet, ohne Projekt zuletzt (${await namenAn()})`);
+await el(pj).locator('[data-aktion="ws-bearbeiten"]').first().click();
+await pj.waitForTimeout(300);
+await el(pj).locator("#ws-projekt").fill("Neu");
+await el(pj).locator('[data-aktion="ws-speichern"]').click();
+await pj.waitForTimeout(300);
+pruefe(await pj.evaluate(() => window.el._daten.warteschlange.some((a) => a.name === "Clip" && a.projekt === "Neu")), "Projekt im Auftrag änderbar");
+await pj.screenshot({ path: `${out}/projekt-schlange.png` });
+
 console.log("Fehler:", fehler.length ? fehler : "keine");
 await b.close();
 process.exit(fehler.length ? 1 : 0);

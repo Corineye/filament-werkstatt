@@ -234,6 +234,8 @@ const WerkstattAnsicht = {
     const geladen = this._daten.rollen.find((r) => r.id === this._daten.geladen);
     const projekte = this._wsProjekte();
     const heute = new Date().toDateString();
+    const pjNamen = this._projektNamen();
+    const pjFilter = this._ws.pjFilter && pjNamen.includes(this._ws.pjFilter) ? this._ws.pjFilter : "";
     let letzteRolle = null;
     return `<div class="ws-kopfzeile"><p class="leise">Was als Nächstes gedruckt wird. Die Bestandsprüfung rechnet die Aufträge der Reihe nach von den Rollen ab.</p>
       <button class="knopf" data-aktion="ws-neu">＋ Auftrag</button></div>
@@ -249,9 +251,14 @@ const WerkstattAnsicht = {
         <div class="ws-plan-zeile"><span class="ws-plan-icon">🔁</span><div><strong>${klug ? wechselKlug : wechselManuell} Rollenwechsel</strong>
           <small class="leise">${klug ? (wechselKlug < wechselManuell ? `statt ${wechselManuell} in deiner Reihenfolge` : "weniger geht nicht") : wechselKlug < wechselManuell ? `Klug sortiert wären es nur ${wechselKlug}` : "Die Reihenfolge ist schon günstig"}${geladen ? ` · geladen: ${esc(geladen.name)}` : " · keine Rolle als geladen markiert"}</small></div></div>
       </div>` : ""}
+      ${pjNamen.length ? `<div class="chips ws-pj-filter" role="group" aria-label="Projekt">
+        <button class="chip ${pjFilter ? "" : "an"}" data-aktion="ws-pj-filter" data-id="">Alle</button>
+        ${pjNamen.map((n) => `<button class="chip ${pjFilter === n ? "an" : ""}" data-aktion="ws-pj-filter" data-id="${esc(n)}">📁 ${esc(n)}</button>`).join("")}
+        ${!klug && q.length > 1 ? `<button class="mini mint-rand" data-aktion="ws-nach-projekt">Nach Projekt ordnen</button>` : ""}</div>` : ""}
       ${!liste.length ? `<div class="leer-karte dr-karte"><span class="gross-icon">📋</span><strong>Die Warteschlange ist leer</strong>
         <span class="leise">Füge Aufträge hier hinzu, aus dem 3D-Modell-Viewer oder mit „Nochmal drucken“ in der Bibliothek.</span></div>` : ""}
       <div class="ws-liste">${liste.map((x, i) => {
+        if (pjFilter && x.a.projekt !== pjFilter) return "";
         const [st, farbe] = text[x.stufe];
         const p = zp.plan[i];
         let trenner = "";
@@ -271,7 +278,7 @@ const WerkstattAnsicht = {
             <small class="leise">${x.a.gewicht ? `${zahl(x.a.gewicht, 1)} g` : "Gewicht unbekannt"}${p.min != null ? ` · ${wsDauerText(p.min)}` : ""}${x.r ? ` · ${esc(x.r.name)}` : ""}${x.r && x.a.gewicht ? (() => { const pp = this._preisProGramm(x.r); return ` · ≈ ${zahl(x.bedarf * pp.wert, 2)} €${this._voreingestelltHtml(pp)}`; })() : ""}</small>
             <span class="ws-pillen"><span class="pille ${farbe}">${st}${x.vorher != null && x.a.gewicht ? (x.danach < 0 ? ` · es fehlen ${zahl(-x.danach)} g` : ` · danach ${zahl(x.danach)} g`) : ""}</span>
               ${p.ende != null ? `<span class="pille ws-uhr">fertig um ${wsUhr(p.ende)}${new Date(p.ende).toDateString() !== heute ? ` (${new Date(p.ende).toLocaleDateString("de-DE", { weekday: "short" })})` : ""}</span>` : `<span class="pille ws-ohne-dauer">Dauer fehlt</span>`}
-              ${pj.map((pr) => `<span class="pille ws-pj-pille" style="--pj:${esc(pr.farbe)}">${esc(pr.icon)} ${esc(pr.name)}</span>`).join("")}</span>
+              ${x.a.projekt ? `<span class="pille leise">📁 ${esc(x.a.projekt)}</span>` : ""}${pj.map((pr) => `<span class="pille ws-pj-pille" style="--pj:${esc(pr.farbe)}">${esc(pr.icon)} ${esc(pr.name)}</span>`).join("")}</span>
             ${x.ersatz && x.ersatz.length ? `<div class="chips ws-ersatz"><span class="leise klein">Reicht stattdessen:</span>${x.ersatz.map((r) => `<button class="chip" data-aktion="ws-rolle" data-id="${esc(x.a.id)}" data-rolle="${esc(r.id)}">${esc(r.name)} · ${zahl(r.rest_g)} g</button>`).join("")}</div>` : ""}
             ${x.a.notiz ? `<small class="leise">📝 ${esc(x.a.notiz)}</small>` : ""}</div>
           <div class="ws-knoepfe">
@@ -307,6 +314,8 @@ const WerkstattAnsicht = {
         <div class="regler-zeile"><button class="rund" data-aktion="ws-d" data-d="-15">−15</button><input type="range" min="0" max="1440" step="5" value="${n.dauer_min || 0}" data-ws="dauer" aria-label="Druckdauer in Minuten"><button class="rund" data-aktion="ws-d" data-d="15">+15</button></div>
         <small class="leise klein">In Minuten, steht im Slicer. Damit rechnet die Warteschlange aus, wann was fertig ist.</small></div>
       <label class="auswahl breit-auswahl"><span>Rolle</span><select data-ws="rolle">${rollen.map((r) => `<option value="${esc(r.id)}" ${r.id === n.rolleId ? "selected" : ""}>${esc(r.name)} · ${esc(r.hersteller)}${r.rest_g != null ? ` · ${zahl(r.rest_g)} g` : ""}${r.id === this._daten.geladen ? " · geladen" : ""}</option>`).join("")}</select></label>
+      <label class="feld"><span>Projekt (optional)</span><input id="ws-projekt" list="projekt-liste" value="${esc(n.projekt || "")}" maxlength="60" placeholder="z. B. Schlüsselanhänger">
+        <datalist id="projekt-liste">${this._projektNamen().map((x) => `<option value="${esc(x)}">`).join("")}</datalist></label>
       <label class="feld"><span>Notiz (optional)</span><input id="ws-notiz" value="${esc(n.notiz)}" maxlength="140"></label>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Abbrechen</button><button class="knopf" data-aktion="ws-speichern">${n.id ? "Speichern" : "Hinzufügen"}</button></div>`;
   },
@@ -890,6 +899,13 @@ const WerkstattAnsicht = {
       case "ws-bearbeiten": if (idx < 0) return; this._wsAuftragNeu({ ...q[idx] }); break;
       case "ws-g": { const n = w.neu; n.gewicht = Math.max(0, Math.min(1000, (n.gewicht || 0) + Number(el.dataset.d))); this._wsGewichtZeigen(); return; }
       case "ws-d": { const n = w.neu; n.dauer_min = Math.max(0, Math.min(1440, (n.dauer_min || 0) + Number(el.dataset.d))); this._wsGewichtZeigen(); return; }
+      case "ws-pj-filter": w.pjFilter = el.dataset.id || ""; break;
+      case "ws-nach-projekt": {
+        // Stabil nach Projekt ordnen: Aufträge ohne Projekt zuletzt, sonst bleibt die Reihenfolge
+        this._daten.warteschlange = q.map((x, i) => [x, i]).sort((a, b) => (a[0].projekt ? 0 : 1) - (b[0].projekt ? 0 : 1) || (a[0].projekt || "").localeCompare(b[0].projekt || "", "de") || a[1] - b[1]).map((x) => x[0]);
+        this._daten.einstellungen.schlange_klug = false;
+        this._speichern(); this._toast("Nach Projekt geordnet."); break;
+      }
       case "ws-klug": this._daten.einstellungen.schlange_klug = el.dataset.id === "an"; this._speichern(); break;
       case "ws-klug-uebernehmen": {
         this._daten.warteschlange = this._wsKlugeReihenfolge();
@@ -902,9 +918,11 @@ const WerkstattAnsicht = {
         const n = w.neu;
         n.name = (this.shadowRoot.getElementById("ws-name").value || "").trim();
         n.notiz = (this.shadowRoot.getElementById("ws-notiz").value || "").trim();
+        n.projekt = (this.shadowRoot.getElementById("ws-projekt").value || "").trim();
+        if (!n.projekt) delete n.projekt;
         if (!n.name) { this._toast("Bitte einen Namen eingeben."); return; }
         n.dauer_min = n.dauer_min > 0 ? n.dauer_min : null;
-        if (n.id) { const i = q.findIndex((x) => x.id === n.id); if (i >= 0) q[i] = { ...q[i], ...n }; }
+        if (n.id) { const i = q.findIndex((x) => x.id === n.id); if (i >= 0) { q[i] = { ...q[i], ...n }; if (!n.projekt) delete q[i].projekt; } }
         else q.push({ ...n, id: `a-${Date.now().toString(36)}`, am: new Date().toISOString(), quelle: "hand" });
         w.neu = null; this._dialog = null; this._speichern();
         break;
