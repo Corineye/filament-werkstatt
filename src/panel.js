@@ -3,7 +3,7 @@
 // Daten liegen in Home Assistant (frontend/user_data), also in den HA-Backups.
 // ---------------------------------------------------------------------------
 
-const VERSION = "0.15.2";
+const VERSION = "0.16.0";
 const SPEICHER_KEY = "filament_werkstatt";
 const SICHERUNG_KEY = "filament_werkstatt_sicherung";
 // Drucker-Werte, die für Protokoll und Verbuchen gebraucht werden (Schlüssel wie in drucker.js)
@@ -196,7 +196,12 @@ class FilamentWerkstattPanel extends HTMLElement {
     this._ro.observe(this);
     this._zeichnen();
   }
-  disconnectedCallback() { this._ro && this._ro.disconnect(); }
+  disconnectedCallback() {
+    this._ro && this._ro.disconnect();
+    clearTimeout(this._fremdTimer);
+    if (this._aboEnde) { try { this._aboEnde(); } catch (e) { /* schon getrennt */ } this._aboEnde = null; }
+    this._abo = false;
+  }
 
   // Fehler in einem Klick soll nicht die ganze Seite lahmlegen
   _sicher(f) {
@@ -239,10 +244,21 @@ class FilamentWerkstattPanel extends HTMLElement {
         await this._speichernJetzt(true);
       }
       this._drVerlaufLaden();
+      this._aenderungenAbonnieren();
     } catch (e) {
       this._fehler = e.message || String(e);
     }
     this._zeichnen();
+  }
+
+  // Schreibt ein anderer Zugang (z. B. die Desktop-App über die Dienste) in die Daten,
+  // meldet Home Assistant das sofort; die Seite lädt dann den neuen Stand.
+  _aenderungenAbonnieren() {
+    if (this._abo || !this._hass.connection || !this._hass.connection.subscribeMessage) return;
+    this._abo = true;
+    this._hass.connection.subscribeMessage(() => this._fremdeAenderungPruefen(), { type: "frontend/subscribe_user_data", key: SPEICHER_KEY })
+      .then((u) => { this._aboEnde = u; })
+      .catch(() => { this._abo = false; });
   }
 
   // Drucker, Steckdose und Druckliste aus der Einrichtung der Integration
@@ -296,7 +312,12 @@ class FilamentWerkstattPanel extends HTMLElement {
   }
 
   async _fremdeAenderungPruefen() {
-    if (!this._hass || !this._daten || this._ungespeichert || this._modus || this._dialog || this._konflikt) return;
+    if (!this._hass || !this._daten || this._konflikt) return;
+    if (this._ungespeichert || this._modus || this._dialog) {   // gerade beschäftigt: gleich nochmal
+      clearTimeout(this._fremdTimer);
+      this._fremdTimer = setTimeout(() => this._fremdeAenderungPruefen(), 4000);
+      return;
+    }
     try {
       const r = await this._hass.callWS({ type: "frontend/get_user_data", key: SPEICHER_KEY });
       const v = r && r.value;

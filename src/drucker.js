@@ -477,8 +477,14 @@ const DruckerAnsicht = {
     else if (this._drVerlaufFehler) inhalt = `<div class="hinweis amber">Die Liste „3D-Drucke“ konnte nicht gelesen werden: ${esc(this._drVerlaufFehler)}</div>`;
     else if (!liste.length) inhalt = `<div class="leise klein">Noch keine Drucke aufgezeichnet. Die Automation trägt jeden Druck automatisch ein.</div>`;
     else {
-      const zeige = this._drAlle ? liste : liste.slice(0, 8);
-      inhalt = `<div class="dr-verlauf">${zeige.map((d) => {
+      const namen = this._projektNamen();
+      const filter = this._drPjFilter && namen.includes(this._drPjFilter) ? this._drPjFilter : "";
+      const gefiltert = filter ? liste.filter((d) => d.projekt === filter) : liste;
+      const zeige = this._drAlle || filter ? gefiltert : gefiltert.slice(0, 8);
+      inhalt = `${namen.length ? `<div class="chips dr-pj-filter" role="group" aria-label="Projekt">
+        <button class="chip ${filter ? "" : "an"}" data-aktion="dr-pj-filter" data-id="">Alle</button>
+        ${namen.map((n) => `<button class="chip ${filter === n ? "an" : ""}" data-aktion="dr-pj-filter" data-id="${esc(n)}">📁 ${esc(n)}</button>`).join("")}</div>` : ""}
+      <div class="dr-verlauf">${zeige.map((d) => {
         const f = fotoName(d);
         const foto = f && this._drFotos && this._drFotos[f];
         const extra = (this._daten.drucke || {})[d.uid] || {};
@@ -490,10 +496,10 @@ const DruckerAnsicht = {
           <span class="dr-druck-text"><strong>${esc(d.name)}</strong>
             <small>${esc(d.zeit)}${d.gewicht != null ? ` · ${zahl(d.gewicht, 1)} g` : ""}${d.duese_mm ? ` · ${zahl(d.duese_mm, 1)} mm Düse` : ""}${g ? ` · ${esc((this._daten.rollen.find((r) => r.id === g.rolle) || {}).name || "")}` : ""}${d.hand ? " · von Hand" : ""}</small>
             ${extra.kommentar ? `<small class="dr-kommentar">💬 ${esc(extra.kommentar)}</small>` : ""}</span>
-          <span class="pille ${farbe}">${st}</span>
+          <span class="pille ${farbe}">${st}</span>${d.projekt ? `<span class="pille leise">📁 ${esc(d.projekt)}</span>` : ""}
         </button>`;
       }).join("")}</div>
-      ${liste.length > 8 ? `<button class="mini mint-rand" data-aktion="dr-alle">${this._drAlle ? "Weniger zeigen" : `Alle ${liste.length} Drucke zeigen`}</button>` : ""}`;
+      ${!filter && liste.length > 8 ? `<button class="mini mint-rand" data-aktion="dr-alle">${this._drAlle ? "Weniger zeigen" : `Alle ${liste.length} Drucke zeigen`}</button>` : ""}`;
     }
     return `<div class="dr-karte"><div class="dr-kamera-kopf"><h3 class="dr-titel">🗂️ Druckverlauf</h3>
       <span class="chips"><button class="chip" data-aktion="bu-hand">＋ Nachtragen</button><button class="chip" data-aktion="dr-neu-laden">↻ Aktualisieren</button></span></div>${inhalt}</div>`;
@@ -519,6 +525,7 @@ const DruckerAnsicht = {
         ${zeile("Düse", d.duese_mm ? `${zahl(d.duese_mm, 1)} mm` : null)}
       </div>
       ${this._drBuchungHtml(d, extra)}
+      ${this._buProjektHtml(d)}
       <h3>Kommentar</h3>
       <textarea id="dr-kommentar" rows="4" placeholder="z. B. warum abgebrochen, was du gelernt hast …">${esc(extra.kommentar || "")}</textarea>
       <div class="knopf-reihe oben-abstand"><button class="knopf leise" data-aktion="dialog-zu">Schließen</button>
@@ -1246,6 +1253,7 @@ const DruckerAnsicht = {
         this._drSteuerArt = el.dataset.art; this._dialog = "dr-steuer";
         break;
       case "dr-steuer-ok": this._drSteuerSenden(this._drSteuerArt); return;
+      case "dr-pj-filter": this._drPjFilter = el.dataset.id || ""; break;
       case "dr-live": this._drLive = el.dataset.id === "an"; this._drLiveSrc = null; break;
       case "dr-licht": this._drLichtSchalten(); return;
       case "dr-tempo": this._drTempoSetzen(el.dataset.wert); return;
