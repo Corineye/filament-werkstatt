@@ -1,5 +1,7 @@
 # Schnittstelle für externe Programme (ab Version 0.16.0)
 
+Dienste: `lesen`, `warteschlange_hinzufuegen`, `warteschlange_aendern`, `warteschlange_entfernen`, `projekt_setzen`.
+
 ## 1. Wo liegen die Daten?
 Es gibt **keine Datei unter `/config/www`**. Die Seite speichert alles in den Frontend-Benutzerdaten von Home Assistant:
 
@@ -38,7 +40,7 @@ Optional: `art` (Basic, Matte, Silk …), `farbcode`, `hex`, `glanz`, `rest_g` (
 **spulen[]:** `id`, `name`, `hersteller`, `g` (Leergewicht der Spule).
 
 **warteschlange[]** – Pflicht: `id`, `name`.
-Optional: `gewicht` (g), `dauer_min` (Minuten) und `zeit` (Text aus dem Slicer, z. B. „1h 35m“), `rolleId`, `notiz`, `am` (angelegt), `quelle` (`hand`, `stl`, `gcode`, `werkstatt-app` …), **`projekt`** (Text, neu).
+Optional: `gewicht` (g), `dauer_min` (Minuten) und `zeit` (Text aus dem Slicer, z. B. „1h 35m“), `rolleId`, `notiz`, `am` (angelegt), `quelle` (`hand`, `stl`, `gcode`, `werkstatt-app` …), **`projekt`** (Text, neu), **`datei`** (Pfad der STL/3MF auf dem PC, Text, neu).
 
 **drucke{}** – Schlüssel = `uid` des Eintrags der To-do-Liste „3D-Drucke“; Werte alle optional:
 `kommentar`, `eigener_name` (neu), **`projekt`** (neu), `gebucht{am, rolle, g, druck_g, slicer_g, korr, fix_g, wechsel, ergebnis ("ok"|"fehl"|"anders"), fortschritt (%), kosten{filament, kwh, strom, voreingestellt}}`, `fehl{wann, ursachen[], geaendert[]}`, `ignoriert`, `hand{name, start, gewicht, status}` (von Hand nachgetragen).
@@ -66,9 +68,16 @@ Parameter: `benutzer` (optional). Antwort: `{ok, benutzer, version, geaendert, d
 | `notiz` | nein | max. 140 Zeichen |
 | `projekt` | nein | Text, max. 60 Zeichen |
 | `quelle` | nein | Standard `werkstatt-app` |
+| `datei` | nein | Pfad der STL/3MF auf dem PC (max. 260 Zeichen) |
 | `benutzer` | nein | siehe oben |
 
 Antwort: `{ok, id, platz, benutzer}`.
+
+### `filament_werkstatt.warteschlange_aendern`
+Parameter: `id` (Pflicht) und beliebig viele von `name`, `gewicht_g`, `zeit_min`, `rolle_id`, `notiz`, `projekt`, `datei` (nur genannte Felder ändern sich; leerer `projekt`/`datei` entfernt das Feld), `benutzer`. Antwort: `{ok, id, geaendert[], benutzer}`.
+
+### `filament_werkstatt.warteschlange_entfernen`
+Parameter: `id` (Pflicht), `benutzer`. Antwort: `{ok, id, uebrig, benutzer}`. Vorher entsteht eine Sicherung (`vor-dienst_…`).
 
 ### `filament_werkstatt.projekt_setzen`
 Parameter: `druck_uid` (Eintrag der To-do-Liste „3D-Drucke“) und/oder `warteschlange_id`, `projekt` (leer = Projekt entfernen), `benutzer`. Antwort: `{ok, gesetzt[], projekt, benutzer}`.
@@ -94,4 +103,4 @@ POST /api/services/filament_werkstatt/projekt_setzen?return_response
 Die `uid` der Drucke liefert `POST /api/services/todo/get_items?return_response` mit `{"entity_id": "todo.3d_drucke"}`.
 
 ## 6. Nach dem Update
-HACS-Update, **Home Assistant neu starten** (neue Dienste und neue Datei), Seite neu laden (Strg+F5). Danach unter Entwicklerwerkzeuge › Aktionen erscheinen die drei Dienste.
+HACS-Update, **Home Assistant neu starten** (neue Dienste und neue Datei), Seite neu laden (Strg+F5). Danach unter Entwicklerwerkzeuge › Aktionen erscheinen die fünf Dienste.

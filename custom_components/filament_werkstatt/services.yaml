@@ -46,6 +46,66 @@ warteschlange_hinzufuegen:
       example: werkstatt-app
       selector:
         text:
+    datei:
+      required: false
+      example: C:\\Druck\\kabelclip.3mf
+      selector:
+        text:
+    benutzer:
+      required: false
+      selector:
+        text:
+warteschlange_aendern:
+  fields:
+    id:
+      required: true
+      selector:
+        text:
+    name:
+      required: false
+      selector:
+        text:
+    gewicht_g:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 0.1
+          unit_of_measurement: g
+    zeit_min:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100000
+          unit_of_measurement: min
+    rolle_id:
+      required: false
+      selector:
+        text:
+    notiz:
+      required: false
+      selector:
+        text:
+    projekt:
+      required: false
+      selector:
+        text:
+    datei:
+      required: false
+      selector:
+        text:
+    benutzer:
+      required: false
+      selector:
+        text:
+warteschlange_entfernen:
+  fields:
+    id:
+      required: true
+      selector:
+        text:
     benutzer:
       required: false
       selector:

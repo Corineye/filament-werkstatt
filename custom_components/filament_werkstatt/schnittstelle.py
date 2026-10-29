@@ -8,6 +8,8 @@ und Home Assistant meldet die Änderung sofort an die geöffnete Seite.
 
   filament_werkstatt.lesen                    → komplette Daten (Antwort)
   filament_werkstatt.warteschlange_hinzufuegen → neuer Auftrag in der Warteschlange
+  filament_werkstatt.warteschlange_aendern    → Auftrag in der Warteschlange ändern
+  filament_werkstatt.warteschlange_entfernen  → Auftrag aus der Warteschlange nehmen
   filament_werkstatt.projekt_setzen           → Projekt eines Drucks / Auftrags setzen
 """
 
@@ -47,8 +49,21 @@ SCHEMA_HINZUFUEGEN = vol.Schema({
     vol.Optional("notiz", default=""): vol.All(cv.string, vol.Length(max=140)),
     vol.Optional("projekt", default=""): vol.All(cv.string, vol.Length(max=60)),
     vol.Optional("quelle", default="werkstatt-app"): vol.All(cv.string, vol.Length(max=40)),
+    vol.Optional("datei", default=""): vol.All(cv.string, vol.Length(max=260)),
     **BENUTZER,
 })
+SCHEMA_AENDERN = vol.Schema({
+    vol.Required("id"): cv.string,
+    vol.Optional("name"): vol.All(cv.string, vol.Length(min=1, max=80)),
+    vol.Optional("gewicht_g"): vol.All(vol.Coerce(float), vol.Range(min=0, max=5000)),
+    vol.Optional("zeit_min"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100000)),
+    vol.Optional("rolle_id"): cv.string,
+    vol.Optional("notiz"): vol.All(cv.string, vol.Length(max=140)),
+    vol.Optional("projekt"): vol.All(cv.string, vol.Length(max=60)),
+    vol.Optional("datei"): vol.All(cv.string, vol.Length(max=260)),
+    **BENUTZER,
+})
+SCHEMA_ENTFERNEN = vol.Schema({vol.Required("id"): cv.string, **BENUTZER})
 SCHEMA_PROJEKT = vol.Schema({
     vol.Optional("druck_uid"): cv.string,
     vol.Optional("warteschlange_id"): cv.string,
@@ -194,10 +209,66 @@ def registrieren(hass: HomeAssistant) -> None:
             }
             if d["projekt"].strip():
                 neu["projekt"] = d["projekt"].strip()
+            if d["datei"].strip():
+                neu["datei"] = d["datei"].strip()
             if any(x.get("id") == neu["id"] for x in schlange):   # gleiche Millisekunde: Zähler anhängen
                 neu["id"] += f"-{len(schlange)}"
             schlange.append(neu)
             return {"id": neu["id"], "platz": len(schlange)}
+
+        ergebnis, wer = await _aendern(hass, call, aender)
+        return {**ergebnis, "benutzer": wer}
+
+    async def aendern(call: ServiceCall) -> ServiceResponse:
+        d = call.data
+
+        def aender(daten: dict[str, Any]) -> dict[str, Any]:
+            treffer = [a for a in daten.setdefault("warteschlange", []) if a.get("id") == d["id"]]
+            if not treffer:
+                raise ServiceValidationError(f"Warteschlangen-Eintrag „{d['id']}“ gibt es nicht.")
+            a = treffer[0]
+            rolle = d.get("rolle_id")
+            if rolle and not any(r.get("id") == rolle for r in daten.get("rollen", [])):
+                raise ServiceValidationError(f"Rolle „{rolle}“ gibt es nicht.")
+            geaendert = []
+            if "name" in d:
+                a["name"] = d["name"].strip()
+                geaendert.append("name")
+            if "gewicht_g" in d:
+                a["gewicht"] = round(d["gewicht_g"], 1) if d["gewicht_g"] else None
+                geaendert.append("gewicht_g")
+            if "zeit_min" in d:
+                a["dauer_min"] = d["zeit_min"] or None
+                a["zeit"] = None
+                geaendert.append("zeit_min")
+            if rolle:
+                a["rolleId"] = rolle
+                geaendert.append("rolle_id")
+            if "notiz" in d:
+                a["notiz"] = d["notiz"].strip()
+                geaendert.append("notiz")
+            for schluessel in ("projekt", "datei"):
+                if schluessel in d:
+                    wert = d[schluessel].strip()
+                    if wert:
+                        a[schluessel] = wert
+                    else:
+                        a.pop(schluessel, None)
+                    geaendert.append(schluessel)
+            return {"id": a["id"], "geaendert": geaendert}
+
+        ergebnis, wer = await _aendern(hass, call, aender)
+        return {**ergebnis, "benutzer": wer}
+
+    async def entfernen(call: ServiceCall) -> ServiceResponse:
+        wid = call.data["id"]
+
+        def aender(daten: dict[str, Any]) -> dict[str, Any]:
+            schlange = daten.setdefault("warteschlange", [])
+            if not any(a.get("id") == wid for a in schlange):
+                raise ServiceValidationError(f"Warteschlangen-Eintrag „{wid}“ gibt es nicht.")
+            daten["warteschlange"] = [a for a in schlange if a.get("id") != wid]
+            return {"id": wid, "uebrig": len(daten["warteschlange"])}
 
         ergebnis, wer = await _aendern(hass, call, aender)
         return {**ergebnis, "benutzer": wer}
@@ -237,4 +308,6 @@ def registrieren(hass: HomeAssistant) -> None:
 
     hass.services.async_register(DOMAIN, "lesen", _mit_fehlerantwort(lesen), schema=SCHEMA_LESEN, supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "warteschlange_hinzufuegen", _mit_fehlerantwort(hinzufuegen), schema=SCHEMA_HINZUFUEGEN, supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "warteschlange_aendern", _mit_fehlerantwort(aendern), schema=SCHEMA_AENDERN, supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "warteschlange_entfernen", _mit_fehlerantwort(entfernen), schema=SCHEMA_ENTFERNEN, supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "projekt_setzen", _mit_fehlerantwort(projekt_setzen), schema=SCHEMA_PROJEKT, supports_response=SupportsResponse.OPTIONAL)
